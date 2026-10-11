@@ -50,8 +50,14 @@ class PolicyTests(unittest.TestCase):
     def test_versions_require_known_control_generation(self):
         verify_version('codex', 'codex-cli 0.162.1')
         verify_version('claude', '2.1.296 (Claude Code)')
+        verify_version('copilot', 'GitHub Copilot CLI 1.0.95.')
+        # Later releases in the same major version rely on the control probes.
+        verify_version('codex', 'codex-cli 0.170.0')
+        verify_version('claude', '2.2.0 (Claude Code)')
+        verify_version('copilot', 'GitHub Copilot CLI 1.1.0.')
         for agent, version in [('codex', '0.100.0'), ('claude', '2.0.0'),
-                               ('claude', 'unrecognized'), ('codex', '1.0.0')]:
+                               ('claude', 'unrecognized'), ('codex', '1.0.0'),
+                               ('claude', '3.0.0'), ('copilot', '1.0.94'), ('copilot', '2.0.0')]:
             with self.subTest(agent=agent, version=version), self.assertRaises(RunError):
                 verify_version(agent, version)
 

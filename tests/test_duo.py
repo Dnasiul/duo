@@ -349,6 +349,33 @@ print(json.dumps({'is_error':False,'subtype':'success','structured_output':{'dec
         self.assertNotIn("SECRET", str(caught.exception))
         self.assertFalse(caught.exception.retryable)
 
+    def test_failure_classification_uses_stderr_tail_not_model_output(self):
+        # Codex stdout is the model's message; an error after a long transcript is still found.
+        binary = self.executable("late-failure", "import sys\n"
+                                 "print('Plan: return 401 unauthorized when not logged in')\n"
+                                 "print('x' * 100000, file=sys.stderr)\n"
+                                 "print('Error: invalid api key', file=sys.stderr)\nsys.exit(1)\n")
+        adapter = CLIAdapter(replace(self.config, codex_bin=binary), self.store)
+        with self.assertRaises(AgentError) as caught:
+            adapter("codex", "Review", 5)
+        self.assertEqual(str(caught.exception), "Agent authentication is invalid")
+        binary = self.executable("model-text", "print('return 401 unauthorized when not logged in')\n"
+                                 "raise SystemExit(1)\n")
+        adapter = CLIAdapter(replace(self.config, codex_bin=binary), self.store)
+        with self.assertRaises(AgentError) as caught:
+            adapter("codex", "Review", 5)
+        self.assertTrue(caught.exception.retryable)
+
+    def test_claude_nonzero_exit_classified_from_error_metadata(self):
+        binary = self.executable("claude-auth", "import json\n"
+                                 "print(json.dumps({'is_error': True, 'subtype': 'success', "
+                                 "'result': 'Invalid API key · Please run /login'}))\n"
+                                 "raise SystemExit(1)\n")
+        adapter = CLIAdapter(replace(self.config, claude_bin=binary), self.store)
+        with self.assertRaises(AgentError) as caught:
+            adapter("claude", "Review", 5)
+        self.assertFalse(caught.exception.retryable)
+
     def test_timeout(self):
         binary = self.executable("slow", "import time\ntime.sleep(30)\n")
         adapter = CLIAdapter(replace(self.config, codex_bin=binary), self.store)

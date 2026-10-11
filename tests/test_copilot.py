@@ -52,9 +52,12 @@ if 'config' in sys.argv:
     def test_both_copilot_real_graph_and_audit_without_native_clis(self):
         binary = self.fake('''
 assert '--allow-all' not in sys.argv and '--allow-all-tools' not in sys.argv
-assert '--available-tools=view,glob,grep' in sys.argv
-assert '--allow-tool=read' in sys.argv
-assert '--deny-tool=write,shell,url' in sys.argv
+tools = sys.argv.index('--available-tools')
+assert sys.argv[tools + 1:tools + 4] == ['view', 'glob', 'grep']
+assert sys.argv[tools + 4].startswith('--')
+denied = sys.argv.index('--deny-tool')
+assert sys.argv[denied + 1:denied + 4] == ['write', 'shell', 'url']
+assert '--allow-tool' not in ' '.join(sys.argv)
 assert '--disable-builtin-mcps' in sys.argv
 assert '--resume' not in sys.argv and '--continue' not in sys.argv
 assert os.environ['COPILOT_GITHUB_TOKEN'] == 'duo-test-token'
@@ -123,6 +126,22 @@ else:
             with self.subTest(body=body), self.assertRaises(AgentError):
                 adapter('codex', 'Review', 5)
 
+    def test_copilot_response_in_one_json_fence_is_accepted(self):
+        reply = {'decision': 'approve', 'plan': '', 'reason': 'Ready'}
+        for text in (f'```json\n{json.dumps(reply)}\n```', f'\n```\n{json.dumps(reply)}\n```\n'):
+            binary = self.fake(f'print({text!r})')
+            adapter = CLIAdapter(self.copilot_config(binary), self.store)
+            with self.subTest(text=text):
+                self.assertEqual(adapter('codex', 'Review', 5)['reason'], 'Ready')
+
+    def test_model_text_on_stdout_never_marks_failure_permanent(self):
+        binary = self.fake("print('The plan handles unauthorized access with no authentication bypass')\n"
+                           "sys.exit(1)\n")
+        adapter = CLIAdapter(self.copilot_config(binary), self.store)
+        with self.assertRaises(AgentError) as caught:
+            adapter('codex', 'Review', 5)
+        self.assertTrue(caught.exception.retryable)
+
     def test_native_and_copilot_effort_validation(self):
         for agent in ('codex', 'claude'):
             for effort in copilot_efforts():
@@ -131,7 +150,7 @@ else:
                 Config(self.repo, 'c', 'a', **{f'{agent}_backend': 'copilot', f'{agent}_effort': 'ultra'})
             with self.assertRaises(ValueError):
                 Config(self.repo, 'c', 'a', **{f'{agent}_effort': 'minimal'})
-        for extra in ({'claude_max_budget_usd': 1}, {'claude_max_turns': 4}):
+        for extra in ({'claude_max_budget_usd': 1}, {'claude_max_turns': 4}, {'claude_max_turns': 20}):
             with self.assertRaises(ValueError):
                 Config(self.repo, 'c', 'a', claude_backend='copilot', **extra)
         with self.assertRaises(ValueError):
@@ -207,3 +226,26 @@ class CopilotSourceTests(unittest.TestCase):
             settings.write_text('{"disableAllHooks":true}')
             with patch('duo.copilot.sys.platform', 'linux'), patch.object(Path, 'lstat', side_effect=FileNotFoundError):
                 check_copilot_sources(repo)
+
+    def test_source_checks_stop_at_git_root(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            # User-level settings above the repository are not repository policy.
+            (home / '.claude').mkdir()
+            (home / '.claude/settings.json').write_text(json.dumps({'statusLine': {'type': 'command'}}))
+            (home / '.mcp.json').write_text('invalid')
+            repo = home / 'work/repo'
+            (repo / '.git').mkdir(parents=True)
+            sub = repo / 'pkg'
+            sub.mkdir()
+            self.assertEqual(copilot.workspace_roots(sub), [sub, repo])
+            self.assertEqual(copilot.workspace_roots(home / 'work'), [home / 'work'])
+            with patch('duo.copilot.sys.platform', 'linux'), patch.object(Path, 'lstat', side_effect=FileNotFoundError):
+                check_copilot_sources(sub)
+            self.assertEqual(copilot.mcp_names(sub), [])
+            (repo / '.claude').mkdir()
+            (repo / '.claude/settings.json').write_text(json.dumps({'statusLine': {'type': 'command'}}))
+            with patch('duo.copilot.sys.platform', 'linux'), patch.object(Path, 'lstat', side_effect=FileNotFoundError):
+                with self.assertRaisesRegex(RunError, 'conflict'):
+                    check_copilot_sources(sub)

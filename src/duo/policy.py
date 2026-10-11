@@ -44,15 +44,17 @@ def claude_options(settings: Path) -> list[str]:
 
 
 def verify_version(agent: str, version: str) -> None:
-    # These are the first versions exercised with this policy. Feature/help
-    # probes below remain mandatory; a version number alone proves nothing.
-    minimum = {"codex": (0, 162, 1), "claude": (2, 1, 296)}[agent]
+    # These are the first versions exercised with this policy. Later releases
+    # within the same major version are accepted because the feature/help
+    # probes verify each control on every run; a version number alone proves
+    # nothing. A new major version is refused until it has been exercised.
+    minimum = {"codex": (0, 162, 1), "claude": (2, 1, 296), "copilot": (1, 0, 95)}[agent]
     match = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", version)
     actual = tuple(map(int, match.groups())) if match else ()
-    if actual < minimum or actual[:2] != minimum[:2]:
+    if actual < minimum or actual[:1] != minimum[:1]:
         supported = ".".join(map(str, minimum))
         raise RunError(f"Unsupported {agent} inspection controls: require {supported} "
-                       "or a later patch in the same minor release")
+                       f"or a later {minimum[0]}.x release")
 
 
 def check_claude_managed_files() -> None:

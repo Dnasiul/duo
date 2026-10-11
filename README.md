@@ -10,9 +10,10 @@ Requires **Python 3.10 or newer**, macOS or Linux, and authentication for the
 selected reviewer backends. By default these are the `codex` and `claude` CLIs;
 either reviewer can instead use GitHub Copilot CLI. Inspection controls have
 been checked with Codex **0.162.1**, Claude Code **2.1.296**, and Copilot **1.0.95**.
-Duo accepts those versions and later patches within the
-same minor release, subject to configuration probes. Older or different minor
-releases stop with a setup error until their controls are verified. From this
+Duo accepts those versions and later releases within the same major version,
+because configuration probes verify every inspection control on each run. Older
+versions and new major versions stop with a setup error until their controls are
+verified. From this
 directory, use the existing Python 3.11 micromamba
 environment named `duo`:
 
@@ -136,11 +137,12 @@ Copilot accepts effort requests `none`, `minimal`, `low`, `medium`, `high`,
 The selected model and backend appear in accepted review history, and
 `--show-conversation` labels Copilot reviews explicitly.
 
-Copilot responses are requested as plain JSON and validated by Duo. Copilot
-does not expose the native CLIs' JSON-schema option; malformed output uses the
-same bounded retry path. Duo's turn, attempt, timeout, and run-time limits apply.
+Copilot responses are requested as plain JSON and validated by Duo; a reply
+wrapped in a single Markdown code fence is accepted. Copilot does not expose the
+native CLIs' JSON-schema option; malformed output uses the same bounded retry
+path. Duo's turn, attempt, timeout, and run-time limits apply.
 Claude's internal-turn and dollar-budget options apply only to native Claude;
-non-default values are rejected when its backend is Copilot. These limits do
+passing either is rejected when its backend is Copilot. These limits do
 not establish a Copilot credit cap.
 
 | Exit code | Outcome |

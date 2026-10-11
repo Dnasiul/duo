@@ -4,11 +4,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 
 from .models import Agent, Config, RunError
+from .policy import verify_version
 from .storage import atomic_write
 
 SETTINGS = {
@@ -18,9 +18,23 @@ SETTINGS = {
 }
 AUTH_VARIABLES = ('COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN')
 FLAGS = ('--no-auto-update', '--silent', '--stream', '--output-format', '--model',
-         '--available-tools', '--allow-tool', '--deny-tool', '--disable-builtin-mcps',
+         '--available-tools', '--deny-tool', '--disable-builtin-mcps',
          '--disable-mcp-server', '--no-ask-user', '--no-custom-instructions', '--no-remote',
          '--no-remote-export', '--disallow-temp-dir', '--no-experimental', '--mode', '--log-dir')
+
+
+def workspace_roots(repo: Path) -> list[Path]:
+    """The repository and its parents up to the Git root, or only the repository.
+
+    Stopping there keeps user-level files such as ~/.claude/settings.json out of
+    the repository policy check.
+    """
+    roots = []
+    for root in (repo, *repo.parents):
+        roots.append(root)
+        if (root / '.git').exists():
+            return roots
+    return [repo]
 
 
 def check_sources(repo: Path) -> None:
@@ -42,7 +56,7 @@ def check_sources(repo: Path) -> None:
             raise RunError('Copilot managed preferences detected or unreadable')
     # An isolated home is never trusted, and prompt-mode extensions are off.
     # Still reject configuration that could override our hook/plugin policy.
-    for root in (repo, *repo.parents):
+    for root in workspace_roots(repo):
         for name in ('.github/copilot/settings.json', '.github/copilot/settings.local.json',
                      '.claude/settings.json', '.claude/settings.local.json'):
             path = root / name
@@ -86,7 +100,7 @@ def require_auth(env: dict[str, str]) -> None:
 
 def mcp_names(repo: Path) -> list[str]:
     names = set()
-    for root in (repo, *repo.parents):
+    for root in workspace_roots(repo):
         for name in ('.mcp.json', '.github/mcp.json'):
             try:
                 data = (root / name).read_bytes()
@@ -106,8 +120,9 @@ def mcp_names(repo: Path) -> list[str]:
 def command(config: Config, agent: Agent, directory: Path) -> list[str]:
     argv = [config.copilot_bin, '--no-auto-update', '--silent', '--stream', 'off',
             '--output-format', 'text', '--model', getattr(config, f'{agent}_model'),
-            '--available-tools=view,glob,grep', '--allow-tool=read',
-            '--deny-tool=write,shell,url', '--disable-builtin-mcps', '--no-ask-user',
+            # List options take separate values; read-only access needs no allow rule.
+            '--available-tools', 'view', 'glob', 'grep',
+            '--deny-tool', 'write', 'shell', 'url', '--disable-builtin-mcps', '--no-ask-user',
             '--no-custom-instructions', '--no-remote', '--no-remote-export',
             '--disallow-temp-dir', '--no-experimental', '--mode', 'interactive',
             '--log-dir', str(directory / 'copilot-logs')]
@@ -135,10 +150,7 @@ def preflight(config: Config, directory: Path) -> tuple[str, dict]:
         return result.stdout
     version_lines = probe(['--version']).splitlines()
     version = version_lines[0] if version_lines else ''
-    match = re.search(r'\b(\d+)\.(\d+)\.(\d+)\b', version)
-    actual = tuple(map(int, match.groups())) if match else ()
-    if actual < (1, 0, 95) or actual[:2] != (1, 0):
-        raise RunError('Copilot inspection controls require CLI 1.0.95 or a later 1.0 patch')
+    verify_version('copilot', version)
     help_text = probe(['--help'])
     if any(flag not in help_text for flag in FLAGS):
         raise RunError('Installed Copilot lacks required inspection options')

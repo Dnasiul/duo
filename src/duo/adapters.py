@@ -10,7 +10,8 @@ import subprocess
 import tempfile
 
 from . import copilot
-from .models import Agent, AgentError, Config, RunError, SCHEMA, validate_payload
+from .models import (Agent, AgentError, Config, DEFAULT_CLAUDE_MAX_TURNS, RunError, SCHEMA,
+                     validate_payload)
 from .policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options,
                      codex_options, verify_controls, verify_version)
 from .storage import RunStore
@@ -36,13 +37,42 @@ def run_process(argv: list[str], prompt: str, repo: Path, timeout: float,
     return process.returncode
 
 
-def read_json(path: Path) -> object:
+FENCED_JSON = re.compile(r"\A```(?:json)?[ \t]*\n(.*)\n[ \t]*```\Z", re.DOTALL)
+DIAGNOSTIC_BYTES = 8192
+
+
+def read_json(path: Path, *, allow_fence: bool = False) -> object:
     try:
         if path.stat().st_size > 16 * 1024 * 1024:
             raise AgentError("Agent response exceeds the 16 MiB limit", retryable=False)
-        return json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        if allow_fence:
+            # Text-mode replies may wrap the object in one Markdown code fence.
+            text = text.strip()
+            match = FENCED_JSON.match(text)
+            if match:
+                text = match.group(1)
+        return json.loads(text)
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise AgentError("Agent returned missing or invalid JSON") from exc
+
+
+def read_tail(path: Path, size: int = DIAGNOSTIC_BYTES) -> str:
+    # CLIs report fatal errors last; earlier output may quote the repository.
+    with path.open("rb") as f:
+        f.seek(0, os.SEEK_END)
+        f.seek(max(f.tell() - size, 0))
+        return f.read().decode("utf-8", errors="replace")
+
+
+def claude_error_text(envelope: object) -> str:
+    """Claude's error metadata only; review text is never classified."""
+    if not isinstance(envelope, dict):
+        return ""
+    fields = [str(envelope.get("subtype", ""))]
+    if envelope.get("is_error") is True:
+        fields.append(str(envelope.get("result", ""))[:DIAGNOSTIC_BYTES])
+    return "\n".join(fields)
 
 
 def classify_failure(diagnostic: str) -> AgentError:
@@ -166,7 +196,8 @@ class CLIAdapter:
                 "--output-format", "json", "--json-schema", json.dumps(SCHEMA),
                 "--tools", "Read,Glob,Grep", "--allowedTools", "Read,Glob,Grep",
                 *claude_options(self.settings_path), "--disallowedTools", "mcp__*",
-                "--no-session-persistence", "--max-turns", str(config.claude_max_turns)]
+                "--no-session-persistence", "--max-turns",
+                str(config.claude_max_turns or DEFAULT_CLAUDE_MAX_TURNS)]
         if config.claude_effort is not None:
             argv += ["--effort", config.claude_effort]
         if config.claude_max_budget_usd is not None:
@@ -203,18 +234,22 @@ class CLIAdapter:
             raise AgentError("Cannot start or capture the agent CLI", retryable=False) from exc
         if code:
             # Bounded reads; diagnostic text is kept local, never put in a prompt.
-            with stderr.open("rb") as f:
-                diagnostic = f.read(65536).decode("utf-8", errors="replace")
-            with stdout.open("rb") as f:
-                diagnostic += f.read(65536).decode("utf-8", errors="replace")
+            # Codex and Copilot stdout carry model text, so only Claude's JSON
+            # error metadata is read from stdout.
+            diagnostic = read_tail(stderr)
+            if agent == "claude" and backend == "native":
+                try:
+                    diagnostic += "\n" + claude_error_text(read_json(stdout))
+                except AgentError:
+                    pass
             raise classify_failure(diagnostic)
         if backend == "copilot":
-            return validate_payload(read_json(stdout))
+            return validate_payload(read_json(stdout, allow_fence=True))
         if agent == "codex":
             return validate_payload(read_json(directory / "response.json"))
         envelope = read_json(stdout)
         if not isinstance(envelope, dict):
             raise AgentError("Claude returned an invalid result envelope")
         if envelope.get("is_error") is not False or envelope.get("subtype") != "success":
-            raise classify_failure(json.dumps(envelope))
+            raise classify_failure(claude_error_text(envelope))
         return validate_payload(envelope.get("structured_output"))

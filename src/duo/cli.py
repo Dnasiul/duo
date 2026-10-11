@@ -8,7 +8,8 @@ from pathlib import Path
 import sys
 
 from .adapters import CLIAdapter
-from .models import CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, Config, RunError, State, Turn
+from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLAUDE_MAX_TURNS,
+                     Config, RunError, State, Turn)
 from .prompts import plan_diff
 from .storage import PlanFile, RunStore, run_lock, timestamp
 from .workflow import Reviewer, build_graph, initial_state
@@ -41,7 +42,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--max-attempts", type=int, default=3, help="CLI attempts per turn (default: 3)")
     result.add_argument("--timeout", type=float, default=600, help="Seconds per CLI call (default: 600)")
     result.add_argument("--max-seconds", type=float, default=7200, help="Run deadline (default: 7200 seconds)")
-    result.add_argument("--claude-max-turns", type=int, default=20, help="Internal Claude turns per call")
+    result.add_argument("--claude-max-turns", type=int,
+                        help=f"Internal Claude turns per call (default: {DEFAULT_CLAUDE_MAX_TURNS}; "
+                             "native Claude only)")
     result.add_argument("--claude-max-budget-usd", type=float, help="Claude per-call API budget")
     result.add_argument("--skip-git-repo-check", action="store_true")
     result.add_argument("--codex-bin", default="codex", help="Codex executable path")

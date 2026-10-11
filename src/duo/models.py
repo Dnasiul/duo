@@ -9,6 +9,7 @@ Agent = Literal["codex", "claude"]
 AGENTS = {"codex", "claude"}
 CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+DEFAULT_CLAUDE_MAX_TURNS = 20
 COPILOT_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 SCHEMA = {
     "type": "object",
@@ -71,7 +72,7 @@ class Config:
     timeout: float = 600
     max_seconds: float = 7200
     history_limit: int = 6
-    claude_max_turns: int = 20
+    claude_max_turns: int | None = None  # None: DEFAULT_CLAUDE_MAX_TURNS
     claude_max_budget_usd: float | None = None
     skip_git_repo_check: bool = False
     codex_bin: str = "codex"
@@ -100,10 +101,12 @@ class Config:
             if value is not None and value not in choices:
                 raise ValueError(f"{name} must be one of: {', '.join(choices)}")
         if self.claude_backend == "copilot" and (
-                self.claude_max_budget_usd is not None or self.claude_max_turns != 20):
+                self.claude_max_budget_usd is not None or self.claude_max_turns is not None):
             raise ValueError("Claude internal-turn and dollar limits require --claude-backend native")
         for name in ("max_turns", "max_attempts", "history_limit", "claude_max_turns"):
             value = getattr(self, name)
+            if name == "claude_max_turns" and value is None:
+                continue
             if type(value) is not int or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
         for name in ("timeout", "max_seconds", "claude_max_budget_usd"):
