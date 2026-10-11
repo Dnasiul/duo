@@ -108,7 +108,9 @@ class Reviewer:
         state["turns"] += 1
         state["next_agent"] = "claude" if agent == "codex" else "codex"
         turn = {"agent": agent, "decision": result["decision"], "reason": result["reason"],
-                "plan_hash": content_hash(state["plan"]), "timestamp": timestamp()}
+                "plan_hash": content_hash(state["plan"]), "timestamp": timestamp(),
+                "backend": getattr(self.config, f"{agent}_backend"),
+                "model": getattr(self.config, f"{agent}_model")}
         state["history"] = state["history"] + [turn]
         if state["status"] == "running":
             if approved == {"codex", "claude"}:

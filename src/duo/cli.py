@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 
 from .adapters import CLIAdapter
-from .models import CLAUDE_EFFORTS, CODEX_EFFORTS, Config, RunError, State, Turn
+from .models import CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, Config, RunError, State, Turn
 from .prompts import plan_diff
 from .storage import PlanFile, RunStore, run_lock, timestamp
 from .workflow import Reviewer, build_graph, initial_state
@@ -27,9 +27,14 @@ def parser() -> argparse.ArgumentParser:
     criteria.add_argument("--criteria-file", type=Path, help="UTF-8 acceptance criteria file")
     result.add_argument("--codex-model", required=True, help="Explicit Codex model identifier")
     result.add_argument("--claude-model", required=True, help="Explicit Claude model identifier")
-    result.add_argument("--codex-effort", choices=CODEX_EFFORTS,
+    result.add_argument("--codex-backend", choices=["native", "copilot"], default="native",
+                        help="Run the Codex reviewer through Codex CLI or GitHub Copilot")
+    result.add_argument("--claude-backend", choices=["native", "copilot"], default="native",
+                        help="Run the Claude reviewer through Claude Code or GitHub Copilot")
+    result.add_argument("--copilot-bin", default="copilot", help="GitHub Copilot CLI executable path")
+    result.add_argument("--codex-effort", choices=tuple(dict.fromkeys(CODEX_EFFORTS + COPILOT_EFFORTS)),
                         help="Requested Codex reasoning effort; omit to use CLI defaults")
-    result.add_argument("--claude-effort", choices=CLAUDE_EFFORTS,
+    result.add_argument("--claude-effort", choices=tuple(dict.fromkeys(CLAUDE_EFFORTS + COPILOT_EFFORTS)),
                         help="Requested Claude effort; omit to use CLI defaults")
     result.add_argument("--start", choices=["codex", "claude"], default="codex")
     result.add_argument("--max-turns", type=int, default=12, help="Accepted review turns (default: 12)")
@@ -55,7 +60,8 @@ def emit(summary: dict, as_json: bool) -> None:
         print(f"{summary['status']}: {summary['message']}")
         if summary.get("latest_review"):
             review = summary["latest_review"]
-            print(f"Latest review: {review['agent']} [{review['decision']}]: {review['reason']}")
+            label = review['agent'] + (" via Copilot" if review.get("backend") == "copilot" else "")
+            print(f"Latest review: {label} [{review['decision']}]: {review['reason']}")
         if "turns" in summary:
             print(f"{summary['turns']} review turns, {summary['attempts']} CLI attempts")
         if summary.get("run_dir"):
@@ -69,8 +75,9 @@ def show_review(number: int, review: Turn, before: str, after: str) -> None:
             details = "\n\nPlan diff:\n" + plan_diff(before, after)
         else:
             details = "\n\nInitial plan:\n" + after
+    label = review['agent'] + (" via Copilot" if review.get("backend") == "copilot" else "")
     print(
-        f"\n--- Turn {number}: {review['agent']} [{review['decision']}] ---\n"
+        f"\n--- Turn {number}: {label} [{review['decision']}] ---\n"
         f"{review['reason']}{details}\n",
         file=sys.stderr, flush=True,
     )
@@ -112,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
         config = Config(
             repo=repo, codex_model=args.codex_model, claude_model=args.claude_model,
             codex_effort=args.codex_effort, claude_effort=args.claude_effort,
+            codex_backend=args.codex_backend, claude_backend=args.claude_backend,
+            copilot_bin=args.copilot_bin,
             start=args.start, max_turns=args.max_turns, max_attempts=args.max_attempts,
             timeout=args.timeout, max_seconds=args.max_seconds,
             claude_max_turns=args.claude_max_turns,

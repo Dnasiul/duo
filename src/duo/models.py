@@ -9,6 +9,7 @@ Agent = Literal["codex", "claude"]
 AGENTS = {"codex", "claude"}
 CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+COPILOT_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 SCHEMA = {
     "type": "object",
     "properties": {
@@ -41,6 +42,8 @@ class Turn(TypedDict):
     reason: str
     plan_hash: str
     timestamp: str
+    backend: str
+    model: str
 
 
 class State(TypedDict):
@@ -75,6 +78,9 @@ class Config:
     claude_bin: str = "claude"
     codex_effort: str | None = None
     claude_effort: str | None = None
+    codex_backend: str = "native"
+    claude_backend: str = "native"
+    copilot_bin: str = "copilot"
 
     def __post_init__(self):
         if self.start not in AGENTS:
@@ -82,9 +88,20 @@ class Config:
         if not self.codex_model.strip() or not self.claude_model.strip():
             raise ValueError("Both model identifiers must be nonempty")
         for name, choices in (("codex_effort", CODEX_EFFORTS), ("claude_effort", CLAUDE_EFFORTS)):
+            agent = name.split("_")[0]
+            backend = getattr(self, f"{agent}_backend")
+            if backend not in ("native", "copilot"):
+                raise ValueError(f"{agent}_backend must be native or copilot")
+            if backend == "copilot":
+                choices = COPILOT_EFFORTS
+                if getattr(self, f"{agent}_model").lower() == "auto":
+                    raise ValueError("Copilot reviewers require an explicit model, not auto")
             value = getattr(self, name)
             if value is not None and value not in choices:
                 raise ValueError(f"{name} must be one of: {', '.join(choices)}")
+        if self.claude_backend == "copilot" and (
+                self.claude_max_budget_usd is not None or self.claude_max_turns != 20):
+            raise ValueError("Claude internal-turn and dollar limits require --claude-backend native")
         for name in ("max_turns", "max_attempts", "history_limit", "claude_max_turns"):
             value = getattr(self, name)
             if type(value) is not int or value < 1:

@@ -122,46 +122,52 @@ def verify_claude_remote(report: str) -> str:
 
 
 def verify_controls(codex: str, claude: str, settings: Path,
-                    probe: Callable[[list[str]], str]) -> dict:
-    codex_help = probe([codex, "exec", "--help"])
-    claude_help = probe([claude, "--help"])
-    required = {
-        "codex": (codex_help, ("--sandbox", "--ephemeral", "--output-schema", "--ignore-rules",
-                               "--ignore-user-config", "--strict-config")),
-        "claude": (claude_help, ("--safe-mode", "--restricted", "--setting-sources",
-                                "--settings", "--strict-mcp-config", "--no-chrome",
-                                "--disable-slash-commands", "--tools", "--allowedTools")),
-    }
-    for agent, (help_text, flags) in required.items():
-        if any(flag not in help_text for flag in flags):
-            raise RunError(f"Installed {agent} lacks required inspection options")
-    effective = probe([codex, *codex_options(), "features", "list"])
-    features = {parts[0]: parts[-1] for line in effective.splitlines()
-                if len(parts := line.split()) >= 3}
-    if any(features.get(name) != "false" for name in CODEX_DISABLED):
-        raise RunError("Codex inspection feature restrictions did not take effect; "
-                       "check managed settings and CLI compatibility")
-    try:
-        servers = json.loads(probe([codex, *codex_options(), "mcp", "list", "--json"]))
-    except ValueError as exc:
-        raise RunError("Cannot verify Codex MCP configuration") from exc
-    if servers != []:
-        raise RunError("Codex MCP restriction did not take effect")
-    check_claude_managed_files()
-    remote = verify_claude_remote(probe([claude, *claude_options(settings), "doctor"]))
-    check_claude_managed_files()
-    return {
+                    probe: Callable[[list[str]], str], agents: set[str] | None = None) -> dict:
+    agents = {"codex", "claude"} if agents is None else agents
+    policy = {
         "id": POLICY_ID,
-        "codex": {"overrides": list(CODEX_OVERRIDES),
-                  "verified_disabled_features": list(CODEX_DISABLED),
-                  "verified_mcp_servers": [],
-                  "settings_sources": "CLI overrides; user config and exec rules ignored during review",
-                  "probe_settings_sources": "CLI overrides over normal configuration",
-                  "authentication": "existing CLI authentication"},
-        "claude": {"settings": CLAUDE_SETTINGS, "settings_sources": [],
-                   "safe_mode": True, "restricted": True,
-                   "tools": ["Read", "Glob", "Grep"], "mcp": "disabled",
-                   "managed_settings": remote,
-                   "authentication": "existing CLI authentication"},
         "model_and_effort": "Requested values are in manifest.json; effective values are not exposed",
     }
+    if "codex" in agents:
+        help_text = probe([codex, "exec", "--help"])
+        flags = ("--sandbox", "--ephemeral", "--output-schema", "--ignore-rules",
+                 "--ignore-user-config", "--strict-config")
+        if any(flag not in help_text for flag in flags):
+            raise RunError("Installed codex lacks required inspection options")
+        effective = probe([codex, *codex_options(), "features", "list"])
+        features = {parts[0]: parts[-1] for line in effective.splitlines()
+                    if len(parts := line.split()) >= 3}
+        if any(features.get(name) != "false" for name in CODEX_DISABLED):
+            raise RunError("Codex inspection feature restrictions did not take effect; "
+                           "check managed settings and CLI compatibility")
+        try:
+            servers = json.loads(probe([codex, *codex_options(), "mcp", "list", "--json"]))
+        except ValueError as exc:
+            raise RunError("Cannot verify Codex MCP configuration") from exc
+        if servers != []:
+            raise RunError("Codex MCP restriction did not take effect")
+        policy["codex"] = {
+            "overrides": list(CODEX_OVERRIDES),
+            "verified_disabled_features": list(CODEX_DISABLED),
+            "verified_mcp_servers": [],
+            "settings_sources": "CLI overrides; user config and exec rules ignored during review",
+            "probe_settings_sources": "CLI overrides over normal configuration",
+            "authentication": "existing CLI authentication",
+        }
+    if "claude" in agents:
+        help_text = probe([claude, "--help"])
+        flags = ("--safe-mode", "--restricted", "--setting-sources", "--settings",
+                 "--strict-mcp-config", "--no-chrome", "--disable-slash-commands",
+                 "--tools", "--allowedTools")
+        if any(flag not in help_text for flag in flags):
+            raise RunError("Installed claude lacks required inspection options")
+        check_claude_managed_files()
+        remote = verify_claude_remote(probe([claude, *claude_options(settings), "doctor"]))
+        check_claude_managed_files()
+        policy["claude"] = {
+            "settings": CLAUDE_SETTINGS, "settings_sources": [],
+            "safe_mode": True, "restricted": True, "tools": ["Read", "Glob", "Grep"],
+            "mcp": "disabled", "managed_settings": remote,
+            "authentication": "existing CLI authentication",
+        }
+    return policy

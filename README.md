@@ -6,9 +6,11 @@ explicitly approve the same unchanged version. Every revision clears approvals.
 
 ## Install
 
-Requires **Python 3.10 or newer**, macOS or Linux, and authenticated `codex` and
-`claude` CLIs. Inspection controls have been checked with Codex **0.162.1** and
-Claude Code **2.1.296**. Duo accepts those versions and later patches within the
+Requires **Python 3.10 or newer**, macOS or Linux, and authentication for the
+selected reviewer backends. By default these are the `codex` and `claude` CLIs;
+either reviewer can instead use GitHub Copilot CLI. Inspection controls have
+been checked with Codex **0.162.1**, Claude Code **2.1.296**, and Copilot **1.0.95**.
+Duo accepts those versions and later patches within the
 same minor release, subject to configuration probes. Older or different minor
 releases stop with a setup error until their controls are verified. From this
 directory, use the existing Python 3.11 micromamba
@@ -83,6 +85,64 @@ Conversation output goes to stderr, so it works with `--json`. To save the
 conversation and progress output, append `2>conversation.log` to the command.
 This option does not change the prompts, approval rules, or audit files.
 
+### Use models through GitHub Copilot
+
+Select the transport independently for each reviewer with `--codex-backend` and
+`--claude-backend`. Both default to `native`. Selecting `copilot` runs that
+reviewer's model through GitHub Copilot CLI. There are still two alternating
+reviewers, with independent approvals. Only the selected CLIs are required.
+
+Copilot review invocations use a fresh configuration and cache so existing
+plugins, hooks, saved permissions, and provider overrides are not inherited.
+Supply authentication using `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`
+(in that order), with a token authorized for Copilot. Saved interactive login is
+not copied into the isolated configuration. Duo never puts token values in its
+command arguments or audit metadata. See GitHub's
+[supported authentication methods](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#using-copilot-login).
+
+For two models accessed through Copilot:
+
+```sh
+duo \
+  --repo /absolute/path/to/project \
+  --task "Plan and validate a molecular dynamics simulation" \
+  --codex-backend copilot --codex-model gpt-5.3-codex \
+  --claude-backend copilot --claude-model claude-opus-5.5 \
+  --codex-effort high --claude-effort high \
+  --show-conversation
+```
+
+For native Codex paired with Claude through Copilot:
+
+```sh
+duo \
+  --repo /absolute/path/to/project \
+  --task-file task.txt --criteria-file criteria.txt \
+  --codex-model gpt-6-astra \
+  --claude-backend copilot --claude-model claude-opus-5.5 \
+  --show-conversation
+```
+
+The reverse combination works too: `--codex-backend copilot` with the default
+native Claude backend. Use `--copilot-bin` to select a specific Copilot executable.
+Model IDs and availability come from the chosen backend and your account; use
+Copilot's interactive `/model` command to inspect its catalog. Its IDs can differ
+from native CLI IDs (for example, `claude-opus-5.5` versus `claude-opus-5-5`).
+GitHub documents explicit model selection in the
+[programmatic CLI reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference#choosing-a-model).
+
+Copilot accepts effort requests `none`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, and `max`, subject to model support. `ultra` is rejected for Copilot.
+The selected model and backend appear in accepted review history, and
+`--show-conversation` labels Copilot reviews explicitly.
+
+Copilot responses are requested as plain JSON and validated by Duo. Copilot
+does not expose the native CLIs' JSON-schema option; malformed output uses the
+same bounded retry path. Duo's turn, attempt, timeout, and run-time limits apply.
+Claude's internal-turn and dollar-budget options apply only to native Claude;
+non-default values are rejected when its backend is Copilot. These limits do
+not establish a Copilot credit cap.
+
 | Exit code | Outcome |
 | --- | --- |
 | 0 | Both agents agreed |
@@ -114,6 +174,9 @@ the latest successfully published plan; they never imply agreement.
 | `--start` | `codex` | First reviewer |
 | `--codex-effort` | Unset | Requested Codex reasoning effort |
 | `--claude-effort` | Unset | Requested Claude reasoning effort |
+| `--codex-backend` | `native` | Codex CLI or GitHub Copilot (`copilot`) |
+| `--claude-backend` | `native` | Claude Code or GitHub Copilot (`copilot`) |
+| `--copilot-bin` | `copilot` | Copilot executable for either reviewer |
 
 Set effort independently for each reviewer, for example:
 
@@ -161,8 +224,18 @@ Duo applies and audits inspection restrictions before starting reviews:
   and only `Read`, `Glob`, and `Grep` tools. MCP, Chrome integration, and skills
   are disabled. Safe mode also turns off automatic `CLAUDE.md` loading; reviewers
   can still read repository instruction files as context.
+- **Copilot:** a fresh home/cache per invocation, hooks and connectors disabled,
+  no inherited plugins or trusted folders, and only `view`, `glob`, and `grep`
+  exposed. Only read permission is granted; shell, writes, and URL tools are
+  denied. Built-in MCP servers and discovered repository MCP servers are
+  explicitly disabled. Project extension opt-ins, custom provider environment
+  overrides, auto-update, remote control, and remote export are disabled.
+  Conflicting repository settings and local managed policy cause a setup error;
+  repository settings that require inspection must be plain JSON. Configurations
+  and organization policy must remain stable during the run.
 
-Existing CLI authentication is retained. Duo does not copy credentials, edit
+Native CLI authentication is retained; Copilot uses an environment token.
+Duo does not copy credentials, edit
 global settings, or pass permission-bypass flags. Custom provider configuration
 and authentication helpers in ignored settings files are not inherited; this
 release expects authentication usable without executing such helpers.
@@ -199,6 +272,7 @@ Each run has a private directory containing:
 - `events.jsonl`: attempts, errors, and accepted reviews with plan hashes.
 - `plan-000.md` and later snapshots: the initial plan and validated proposals.
 - `attempt-*/`: schema, command arguments, response, and raw CLI diagnostics.
+  Copilot attempts also contain an isolated `copilot-home/`, cache, and CLI logs.
 - `state.json`: the last audited review state.
 - `result.json` or `error.json`: final outcome.
 
@@ -240,6 +314,8 @@ This separate test requires authentication and makes two model calls, which may
 incur charges. It does not alter your global settings. Fake-CLI argv tests alone
 do not establish real-CLI enforcement; this smoke test exercises startup and
 repository inspection, but is not an exhaustive security assessment.
+The script also accepts `--codex-backend copilot`, `--claude-backend copilot`,
+and `--copilot-bin`; Copilot smoke runs require the same environment token as Duo.
 
 ## Implementation
 

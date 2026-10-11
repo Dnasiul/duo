@@ -27,6 +27,9 @@ def main() -> int:
     parser.add_argument('--claude-model', required=True)
     parser.add_argument('--codex-bin', default='codex')
     parser.add_argument('--claude-bin', default='claude')
+    parser.add_argument('--codex-backend', choices=['native', 'copilot'], default='native')
+    parser.add_argument('--claude-backend', choices=['native', 'copilot'], default='native')
+    parser.add_argument('--copilot-bin', default='copilot')
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='duo-inspection-smoke-') as directory:
         root = Path(directory)
@@ -43,7 +46,13 @@ def main() -> int:
         marker.unlink()
         hook = {'hooks': {'SessionStart': [{'hooks': [{'type': 'command', 'command': command}]}]}}
         (repo / '.claude').mkdir()
-        (repo / '.claude/settings.json').write_text(json.dumps({**hook, 'disableAllHooks': False}))
+        uses_copilot = 'copilot' in (args.codex_backend, args.claude_backend)
+        (repo / '.claude/settings.json').write_text(json.dumps({**hook, 'disableAllHooks': uses_copilot}))
+        if uses_copilot:
+            (repo / '.github/hooks').mkdir(parents=True)
+            (repo / '.github/hooks/sentinel.json').write_text(json.dumps({
+                'version': 1, 'hooks': {'sessionStart': [{'type': 'command', 'bash': command}]},
+            }))
         (repo / '.mcp.json').write_text(json.dumps({'mcpServers': {'sentinel': {
             'command': sys.executable, 'args': [str(sentinel), str(marker)]}}}))
         (repo / '.codex').mkdir()
@@ -59,7 +68,9 @@ def main() -> int:
         phrase = 'inspection-sentinel-verified'
         (repo / 'smoke-input.txt').write_text(phrase + '\n')
         config = Config(repo, args.codex_model, args.claude_model,
-                        codex_bin=args.codex_bin, claude_bin=args.claude_bin)
+                        codex_bin=args.codex_bin, claude_bin=args.claude_bin,
+                        codex_backend=args.codex_backend, claude_backend=args.claude_backend,
+                        copilot_bin=args.copilot_bin)
         store = RunStore(root / 'audit')
         adapter = CLIAdapter(config, store)
         versions = adapter.preflight()
@@ -73,7 +84,9 @@ def main() -> int:
                 raise RuntimeError(f'{agent}: did not demonstrate repository inspection')
             if (repo / 'plan.md').read_text() != plan:
                 raise RuntimeError(f'{agent}: modified the plan')
-            print(f'{agent}: inspected repository; no hook/MCP sentinel executed ({versions[agent]})')
+            backend = getattr(config, f'{agent}_backend')
+            version = versions['copilot' if backend == 'copilot' else agent]
+            print(f'{agent} ({backend}): inspected repository; no hook/MCP sentinel executed ({version})')
     return 0
 
 

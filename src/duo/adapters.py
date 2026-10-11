@@ -7,7 +7,9 @@ import re
 import shutil
 import signal
 import subprocess
+import tempfile
 
+from . import copilot
 from .models import Agent, AgentError, Config, RunError, SCHEMA, validate_payload
 from .policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options,
                      codex_options, verify_controls, verify_version)
@@ -15,12 +17,12 @@ from .storage import RunStore
 
 
 def run_process(argv: list[str], prompt: str, repo: Path, timeout: float,
-                stdout: Path, stderr: Path) -> int:
+                stdout: Path, stderr: Path, *, env: dict[str, str] | None = None) -> int:
     """Keep diagnostics on disk and terminate the entire CLI process group."""
     with stdout.open("wb") as out, stderr.open("wb") as err:
         process = subprocess.Popen(
             argv, stdin=subprocess.PIPE, stdout=out, stderr=err,
-            cwd=repo, start_new_session=True,
+            cwd=repo, start_new_session=True, env=env,
         )
         try:
             process.communicate(input=prompt.encode("utf-8"), timeout=timeout)
@@ -51,6 +53,10 @@ def classify_failure(diagnostic: str) -> AgentError:
         "not logged in": "Agent CLI is not logged in",
         "invalid api key": "Agent authentication is invalid",
         "unauthorized": "Agent authentication is unauthorized",
+        "authentication required": "Agent CLI authentication is required",
+        "no authentication": "Agent CLI authentication is required",
+        "unknown model": "Requested model is unavailable in the selected CLI",
+        "model is not supported": "Requested model is unavailable in the selected CLI",
         "unknown option": "Installed CLI does not support a requested option",
         "unexpected argument": "Installed CLI does not support a requested argument",
         "error loading config": "Agent configuration is incompatible with inspection policy",
@@ -87,10 +93,17 @@ class CLIAdapter:
 
     def preflight(self) -> dict[str, str]:
         self.policy_verified = False
-        check_claude_managed_files()
+        native = {agent for agent in ("codex", "claude")
+                  if getattr(self.config, f"{agent}_backend") == "native"}
+        if len(native) < 2:
+            copilot.require_auth(os.environ)
+        if "claude" in native:
+            check_claude_managed_files()
         versions = {}
         for agent, binary in (("codex", self.config.codex_bin),
                               ("claude", self.config.claude_bin)):
+            if agent not in native:
+                continue
             if shutil.which(binary) is None:
                 raise RunError(f"{agent} executable not found: {binary}")
             try:
@@ -112,9 +125,18 @@ class CLIAdapter:
                 raise RunError("Cannot check whether the target is a Git repository") from exc
             if proc.returncode or proc.stdout.strip() != "true":
                 raise RunError("Target must be a Git repository; use --skip-git-repo-check otherwise")
-        self.store.json("claude-settings.json", CLAUDE_SETTINGS)
+        if "claude" in native:
+            self.store.json("claude-settings.json", CLAUDE_SETTINGS)
         policy = verify_controls(self.config.codex_bin, self.config.claude_bin,
-                                 self.settings_path, self.probe)
+                                 self.settings_path, self.probe, agents=native)
+        if len(native) < 2:
+            directory = Path(tempfile.mkdtemp(prefix="copilot-preflight-", dir=self.store.path))
+            versions["copilot"], policy["copilot"] = copilot.preflight(self.config, directory)
+        policy["reviewers"] = {
+            agent: {"backend": getattr(self.config, f"{agent}_backend"),
+                    "model": getattr(self.config, f"{agent}_model")}
+            for agent in ("codex", "claude")
+        }
         policy["versions"] = versions
         self.store.json("reviewer-policy.json", policy)
         self.policy_verified = True
@@ -122,6 +144,10 @@ class CLIAdapter:
 
     def command(self, agent: Agent, directory: Path) -> list[str]:
         config = self.config
+        if agent not in ("codex", "claude"):
+            raise ValueError("Unknown agent")
+        if getattr(config, f"{agent}_backend") == "copilot":
+            return copilot.command(config, agent, directory)
         if agent == "codex":
             argv = [config.codex_bin, "--no-daemon", "exec", "--sandbox", "read-only",
                     "--ignore-user-config", "--ignore-rules", "--strict-config",
@@ -150,17 +176,27 @@ class CLIAdapter:
     def __call__(self, agent: Agent, prompt: str, timeout: float) -> dict[str, str]:
         if not self.policy_verified:
             self.preflight()
-        if agent == "claude":
+        backend = getattr(self.config, f"{agent}_backend")
+        if agent == "claude" and backend == "native":
             check_claude_managed_files()
         directory = self.store.attempt_dir()
+        env = None
+        if backend == "copilot":
+            copilot.check_sources(self.config.repo)
+            env = copilot.environment(directory)
+            copilot.require_auth(env)
+            prompt = ("Return only one JSON object, without Markdown fences or narration, "
+                      "matching this schema: " + json.dumps(SCHEMA) + "\n\n" + prompt)
         schema = directory / "review.schema.json"
         schema.write_text(json.dumps(SCHEMA), encoding="utf-8")
         argv = self.command(agent, directory)
         (directory / "command.json").write_text(json.dumps(argv), encoding="utf-8")
         stdout, stderr = directory / "stdout.log", directory / "stderr.log"
-        self.store.event({"event": "cli_start", "agent": agent, "attempt_dir": directory.name})
+        self.store.event({"event": "cli_start", "agent": agent, "backend": backend,
+                          "model": getattr(self.config, f"{agent}_model"),
+                          "attempt_dir": directory.name})
         try:
-            code = run_process(argv, prompt, self.config.repo, timeout, stdout, stderr)
+            code = run_process(argv, prompt, self.config.repo, timeout, stdout, stderr, env=env)
         except subprocess.TimeoutExpired as exc:
             raise AgentError("Agent CLI timed out") from exc
         except OSError as exc:
@@ -172,6 +208,8 @@ class CLIAdapter:
             with stdout.open("rb") as f:
                 diagnostic += f.read(65536).decode("utf-8", errors="replace")
             raise classify_failure(diagnostic)
+        if backend == "copilot":
+            return validate_payload(read_json(stdout))
         if agent == "codex":
             return validate_payload(read_json(directory / "response.json"))
         envelope = read_json(stdout)
