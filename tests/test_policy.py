@@ -15,7 +15,7 @@ from duo.policy import (CLAUDE_SETTINGS, CODEX_DISABLED, check_claude_managed_fi
                         verify_controls, verify_version)
 from duo.storage import RunStore
 
-HELP = ('--sandbox --ephemeral --output-schema --ignore-rules --ignore-user-config --strict-config '
+HELP = ('--sandbox --ephemeral --json --output-schema --ignore-rules --ignore-user-config --strict-config '
         '--safe-mode --restricted --setting-sources --settings --strict-mcp-config '
         '--no-chrome --disable-slash-commands --tools --allowedTools')
 

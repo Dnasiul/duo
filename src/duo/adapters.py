@@ -75,6 +75,27 @@ def claude_error_text(envelope: object) -> str:
     return "\n".join(fields)
 
 
+def codex_error_text(events: Path) -> str:
+    """Error messages from Codex's JSONL events; agent messages are never read."""
+    messages = []
+    # Failures are the last events; the first tail line may be partial.
+    for line in read_tail(events, 8 * DIAGNOSTIC_BYTES).splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "turn.failed" and isinstance(event.get("error"), dict):
+            messages.append(str(event["error"].get("message", "")))
+        elif event.get("type") == "error":
+            message = str(event.get("message", ""))
+            # Reconnection notices are transient; the final error follows them.
+            if not message.startswith("Reconnecting"):
+                messages.append(message)
+    return "\n".join(message[:DIAGNOSTIC_BYTES] for message in messages[-4:])
+
+
 def classify_failure(diagnostic: str) -> AgentError:
     """Use diagnostic text for classification only; never echo it into prompts."""
     text = diagnostic.lower()
@@ -181,7 +202,9 @@ class CLIAdapter:
         if agent == "codex":
             argv = [config.codex_bin, "--no-daemon", "exec", "--sandbox", "read-only",
                     "--ignore-user-config", "--ignore-rules", "--strict-config",
-                    "--ephemeral", "-m", config.codex_model,
+                    # JSONL events on stdout keep the transcript out of stderr
+                    # and report failures as structured error events.
+                    "--ephemeral", "--json", "-m", config.codex_model,
                     "--output-schema", str(directory / "review.schema.json"),
                     "-o", str(directory / "response.json")]
             if config.codex_effort is not None:
@@ -234,10 +257,12 @@ class CLIAdapter:
             raise AgentError("Cannot start or capture the agent CLI", retryable=False) from exc
         if code:
             # Bounded reads; diagnostic text is kept local, never put in a prompt.
-            # Codex and Copilot stdout carry model text, so only Claude's JSON
-            # error metadata is read from stdout.
+            # Only structured error fields are read from stdout, which otherwise
+            # carries model text (Copilot's stdout is never read).
             diagnostic = read_tail(stderr)
-            if agent == "claude" and backend == "native":
+            if backend == "native" and agent == "codex":
+                diagnostic += "\n" + codex_error_text(stdout)
+            elif backend == "native":
                 try:
                     diagnostic += "\n" + claude_error_text(read_json(stdout))
                 except AgentError:

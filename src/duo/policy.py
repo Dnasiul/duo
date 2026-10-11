@@ -132,7 +132,7 @@ def verify_controls(codex: str, claude: str, settings: Path,
     }
     if "codex" in agents:
         help_text = probe([codex, "exec", "--help"])
-        flags = ("--sandbox", "--ephemeral", "--output-schema", "--ignore-rules",
+        flags = ("--sandbox", "--ephemeral", "--json", "--output-schema", "--ignore-rules",
                  "--ignore-user-config", "--strict-config")
         if any(flag not in help_text for flag in flags):
             raise RunError("Installed codex lacks required inspection options")

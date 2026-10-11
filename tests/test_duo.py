@@ -65,7 +65,7 @@ class Fixture(unittest.TestCase):
 if '--version' in sys.argv:
     print('test CLI 1.0'); sys.exit(0)
 if '--help' in sys.argv:
-    print('--sandbox --ephemeral --output-schema --ignore-rules --ignore-user-config --strict-config --safe-mode --restricted --setting-sources --settings --strict-mcp-config --no-chrome --disable-slash-commands --tools --allowedTools'); sys.exit(0)
+    print('--sandbox --ephemeral --json --output-schema --ignore-rules --ignore-user-config --strict-config --safe-mode --restricted --setting-sources --settings --strict-mcp-config --no-chrome --disable-slash-commands --tools --allowedTools'); sys.exit(0)
 if 'features' in sys.argv:
     print({chr(10).join(name + ' stable false' for name in CODEX_DISABLED)!r}); sys.exit(0)
 if 'mcp' in sys.argv:
@@ -228,6 +228,28 @@ class ContractTests(Fixture):
             with self.subTest(item=item), self.assertRaises(AgentError):
                 validate_review(item, "Old")
 
+    def test_new_credentials_are_rejected_without_echoing_them(self):
+        secrets = ["AKIA" + "ABCDEFGHIJKLMNOP", "ghp_" + "a1" * 18, "sk-ant-api03-" + "x" * 30,
+                   "sk-proj-abc" + "T3BlbkFJ" + "def123", "-----BEGIN OPENSSH PRIVATE KEY-----",
+                   "xoxb-" + "1234567890-abc", "AIza" + "B" * 35, "sk_live_" + "c" * 24,
+                   "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.c2lnbmF0dXJlMTIzNDU2"]
+        for secret in secrets:
+            for item in (response("revise", f"Plan\nUse {secret}\n"),
+                         response("approve", reason=f"Found {secret} in ~/.aws")):
+                with self.subTest(secret=secret, decision=item["decision"]):
+                    with self.assertRaises(AgentError) as caught:
+                        validate_review(item, "Old")
+                    self.assertTrue(caught.exception.retryable)
+                    self.assertNotIn(secret, str(caught.exception))
+
+    def test_credentials_already_in_plan_and_ordinary_text_are_allowed(self):
+        example = "AKIA" + "IOSFODNN7EXAMPLE"
+        plan = f"Document the sample key {example}.\n"
+        validate_review(response("revise", plan + "Add rotation.\n"), plan)
+        validate_review(response("approve", reason=f"Keeps {example} as a sample"), plan)
+        ordinary = "Use sk-learn-compatible-pipeline-steps and task-runner-config-v2.\n"
+        validate_review(response("revise", ordinary), "Old")
+
     def test_whitespace_is_preserved(self):
         text = "  code  \r\nValue\u00a0"
         self.assertEqual(validate_review(response("revise", text), "Old")["plan"],
@@ -365,6 +387,25 @@ print(json.dumps({'is_error':False,'subtype':'success','structured_output':{'dec
         with self.assertRaises(AgentError) as caught:
             adapter("codex", "Review", 5)
         self.assertTrue(caught.exception.retryable)
+
+    def test_codex_failures_classified_from_json_error_events(self):
+        events = [{"type": "item.completed", "item": {"type": "agent_message",
+                   "text": "Return 401 unauthorized when not logged in"}},
+                  {"type": "error", "message": "Reconnecting... 1/5 (stream disconnected)"},
+                  {"type": "turn.failed", "error": {"message": "stream disconnected"}}]
+        cases = [(events, True),
+                 (events[:2] + [{"type": "turn.failed", "error": {
+                     "message": "unexpected status 401 Unauthorized: Missing bearer"}}], False)]
+        for stream, retryable in cases:
+            body = ("import json, sys\n"
+                    f"assert '--json' in sys.argv\n"
+                    f"for event in {stream!r}:\n    print(json.dumps(event))\n"
+                    "raise SystemExit(1)\n")
+            binary = self.executable("codex-events", body)
+            adapter = CLIAdapter(replace(self.config, codex_bin=binary), self.store)
+            with self.subTest(retryable=retryable), self.assertRaises(AgentError) as caught:
+                adapter("codex", "Review", 5)
+            self.assertEqual(caught.exception.retryable, retryable)
 
     def test_claude_nonzero_exit_classified_from_error_metadata(self):
         binary = self.executable("claude-auth", "import json\n"

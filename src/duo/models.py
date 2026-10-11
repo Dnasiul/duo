@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import re
 from pathlib import Path
 from typing import Literal, TypedDict
 
@@ -130,10 +131,38 @@ def validate_payload(value: object) -> dict[str, str]:
     return value
 
 
+# Credential formats specific enough to avoid matching ordinary plan text.
+SECRET_PATTERNS = {
+    "private key": re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
+    "AWS access key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    "GitHub token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"),
+    "Anthropic API key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
+    "OpenAI API key": re.compile(r"\bsk-[A-Za-z0-9_-]*T3BlbkFJ[A-Za-z0-9_-]+"),
+    "Slack token": re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}"),
+    "Google API key": re.compile(r"\bAIza[0-9A-Za-z_-]{35}"),
+    "Stripe live key": re.compile(r"\b[rs]k_live_[0-9A-Za-z]{20,}"),
+    "JSON Web Token": re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+}
+
+
+def new_secret(text: str, known: str) -> str | None:
+    """Name a credential in text that the known text does not already contain."""
+    for kind, pattern in SECRET_PATTERNS.items():
+        if any(match.group(0) not in known for match in pattern.finditer(text)):
+            return kind
+    return None
+
+
 def validate_review(value: object, plan: str) -> dict[str, str]:
     result = dict(validate_payload(value))
     if not result["reason"].strip():
         raise AgentError("Response must explain its decision")
+    # Reviewers can read outside the repository (Codex's sandbox allows it), so
+    # never publish credentials they introduce. The message never echoes them.
+    kind = new_secret(result["plan"] + "\n" + result["reason"], plan)
+    if kind:
+        raise AgentError(f"Response appears to contain a credential ({kind}); "
+                         "remove it and never copy secrets into the plan or reason")
     if result["decision"] == "revise":
         updated = normalize(result["plan"])
         if not updated.strip():

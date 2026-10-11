@@ -218,7 +218,10 @@ Duo applies and audits inspection restrictions before starting reviews:
   `never`; user configuration and executable rules are ignored during review.
   Explicit overrides disable MCP servers, apps, plugins, hooks, notification
   commands, browser use, web search, multi-agent tools, and shell snapshots.
-  Codex can use sandboxed commands to inspect repository files. Preflight checks
+  Codex can use sandboxed commands to inspect repository files; its read-only
+  sandbox does not limit reads to the repository. Codex runs with `--json`, so
+  its transcript stays out of stderr and failures are classified from
+  structured error events, never from model text. Preflight checks
   the effective feature flags and empty MCP list, including inherited and managed
   configuration; unsupported or conflicting controls stop the run.
 - **Claude:** safe and restricted modes, an empty list of user/project/local
@@ -228,13 +231,20 @@ Duo applies and audits inspection restrictions before starting reviews:
   can still read repository instruction files as context.
 - **Copilot:** a fresh home/cache per invocation, hooks and connectors disabled,
   no inherited plugins or trusted folders, and only `view`, `glob`, and `grep`
-  exposed. Only read permission is granted; shell, writes, and URL tools are
+  exposed, confined to the repository. Shell, write, and URL permissions are
   denied. Built-in MCP servers and discovered repository MCP servers are
   explicitly disabled. Project extension opt-ins, custom provider environment
   overrides, auto-update, remote control, and remote export are disabled.
   Conflicting repository settings and local managed policy cause a setup error;
   repository settings that require inspection must be plain JSON. Configurations
   and organization policy must remain stable during the run.
+
+Because a reviewer may read files outside the repository, Duo rejects any
+response whose plan or reason contains a credential it introduced (private keys
+and common API-token formats such as AWS, GitHub, Anthropic, OpenAI, Slack,
+Google, and Stripe keys, and JSON Web Tokens). The rejection is retried without
+echoing the value; matches already present in the current plan are allowed.
+The rejected raw response remains in the private audit directory.
 
 Native CLI authentication is retained; Copilot uses an environment token.
 Duo does not copy credentials, edit
