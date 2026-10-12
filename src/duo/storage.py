@@ -34,6 +34,13 @@ def atomic_write(path: Path, data: bytes, mode: int = 0o600) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def new_file_mode() -> int:
+    """The mode a new file would get from the user's umask (0644 for umask 022)."""
+    mask = os.umask(0)
+    os.umask(mask)
+    return 0o666 & ~mask
+
+
 class PlanFile:
     """Keep the bytes last observed, including the distinction absent vs empty."""
 
@@ -56,7 +63,8 @@ class PlanFile:
 
     def write(self, text: str) -> None:
         self.check()
-        mode = (self.path.stat().st_mode & 0o777) if self.expected is not None else 0o600
+        # plan.md belongs to the repository; audit files stay private (0600).
+        mode = (self.path.stat().st_mode & 0o777) if self.expected is not None else new_file_mode()
         data = text.encode("utf-8")
         atomic_write(self.path, data, mode)
         self.expected = data

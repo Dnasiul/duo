@@ -129,7 +129,10 @@ The reverse combination works too: `--codex-backend copilot` with the default
 native Claude backend. Use `--copilot-bin` to select a specific Copilot executable.
 Model IDs and availability come from the chosen backend and your account; use
 Copilot's interactive `/model` command to inspect its catalog. Its IDs can differ
-from native CLI IDs (for example, `claude-opus-5.5` versus `claude-opus-5-5`).
+from native CLI IDs (for example, `claude-opus-5.5` versus `claude-opus-5-5`);
+`gpt-5.4` and `claude-sonnet-5.5` have been verified through Copilot. When
+Copilot reports a model as unavailable, Duo stops after the first attempt and
+names the model instead of retrying.
 GitHub documents explicit model selection in the
 [programmatic CLI reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference#choosing-a-model).
 
@@ -272,7 +275,8 @@ See [Codex configuration](https://developers.openai.com/codex/config-reference),
 ## Files and concurrent work
 
 Duo atomically replaces `<repo>/plan.md` after validating a full response. It
-preserves existing permission bits; a new plan is created with mode `0600`.
+preserves existing permission bits; a new plan gets the mode your umask gives
+new files (usually `0644`).
 Symlinked plans are rejected. Literal Markdown, including significant whitespace,
 is preserved apart from line-ending normalization.
 

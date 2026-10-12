@@ -402,6 +402,18 @@ class StorageTests(Fixture):
         self.assertEqual(path.read_text(), "New  \n")
         self.assertEqual(list(self.repo.iterdir()), [path])
 
+    def test_new_plan_follows_umask(self):
+        for mask, expected in ((0o022, 0o644), (0o077, 0o600)):
+            path = self.repo / "plan.md"
+            path.unlink(missing_ok=True)
+            previous = os.umask(mask)
+            try:
+                PlanFile(self.repo).write("New\n")
+            finally:
+                os.umask(previous)
+            with self.subTest(mask=oct(mask)):
+                self.assertEqual(path.stat().st_mode & 0o777, expected)
+
     def test_failed_replace_preserves_original(self):
         path = self.repo / "plan.md"
         path.write_text("Old")
