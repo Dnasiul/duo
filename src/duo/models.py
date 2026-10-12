@@ -83,6 +83,7 @@ class Config:
     codex_backend: str = "native"
     claude_backend: str = "native"
     copilot_bin: str = "copilot"
+    allow_untested_cli: bool = False
 
     def __post_init__(self):
         if self.start not in AGENTS:

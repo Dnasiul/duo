@@ -43,18 +43,37 @@ def claude_options(settings: Path) -> list[str]:
             "--disable-slash-commands"]
 
 
-def verify_version(agent: str, version: str) -> None:
-    # These are the first versions exercised with this policy. Later releases
-    # within the same major version are accepted because the feature/help
-    # probes verify each control on every run; a version number alone proves
-    # nothing. A new major version is refused until it has been exercised.
-    minimum = {"codex": (0, 162, 1), "claude": (2, 1, 296), "copilot": (1, 0, 95)}[agent]
+# Versions whose inspection controls and output formats were exercised with real
+# runs: [first tested, first untested). Later patch releases within a tested minor
+# version are accepted; the help and feature probes still verify every control on
+# each run. Codex is 0.x, where a minor bump may break compatibility, so no range
+# spans minor versions. Widen a range only with probe and live-run evidence.
+TESTED_VERSIONS = {
+    "codex": ((0, 162, 1), (0, 163, 0)),
+    "claude": ((2, 1, 296), (2, 2, 0)),
+    "copilot": ((1, 0, 95), (1, 1, 0)),
+}
+
+
+def tested_range(agent: str) -> str:
+    low, high = TESTED_VERSIONS[agent]
+    return f"{'.'.join(map(str, low))} to before {'.'.join(map(str, high))}"
+
+
+def verify_version(agent: str, version: str, allow_untested: bool = False) -> str:
+    """Return "tested", or "untested" when explicitly allowed; otherwise refuse."""
     match = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", version)
-    actual = tuple(map(int, match.groups())) if match else ()
-    if actual < minimum or actual[:1] != minimum[:1]:
-        supported = ".".join(map(str, minimum))
-        raise RunError(f"Unsupported {agent} inspection controls: require {supported} "
-                       f"or a later {minimum[0]}.x release")
+    if not match:
+        raise RunError(f"Cannot parse the {agent} version; tested: {tested_range(agent)}")
+    actual = tuple(map(int, match.groups()))
+    low, high = TESTED_VERSIONS[agent]
+    if low <= actual < high:
+        return "tested"
+    if allow_untested:
+        return "untested"
+    raise RunError(f"{agent} {'.'.join(map(str, actual))} is outside the tested range "
+                   f"({tested_range(agent)}); install a tested version or pass "
+                   "--allow-untested-cli to run it as experimental")
 
 
 def check_claude_managed_files() -> None:

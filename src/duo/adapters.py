@@ -182,6 +182,7 @@ class CLIAdapter:
         self.config = config
         self.store = store
         self.policy_verified = False
+        self.untested: dict[str, str] = {}
         self.settings_path = self.store.path / "claude-settings.json"
 
     def probe(self, argv: list[str]) -> str:
@@ -203,6 +204,7 @@ class CLIAdapter:
         if "claude" in native:
             check_claude_managed_files()
         versions = {}
+        untested = []
         for agent, binary in (("codex", self.config.codex_bin),
                               ("claude", self.config.claude_bin)):
             if agent not in native:
@@ -217,7 +219,8 @@ class CLIAdapter:
             if proc.returncode:
                 raise RunError(f"{agent} --version failed")
             versions[agent] = proc.stdout.strip()[:200]
-            verify_version(agent, versions[agent])
+            if verify_version(agent, versions[agent], self.config.allow_untested_cli) == "untested":
+                untested.append(agent)
         if not self.config.skip_git_repo_check:
             try:
                 proc = subprocess.run(
@@ -235,12 +238,17 @@ class CLIAdapter:
         if len(native) < 2:
             directory = Path(tempfile.mkdtemp(prefix="copilot-preflight-", dir=self.store.path))
             versions["copilot"], policy["copilot"] = copilot.preflight(self.config, directory)
+            if policy["copilot"].get("version_status") == "untested":
+                untested.append("copilot")
         policy["reviewers"] = {
             agent: {"backend": getattr(self.config, f"{agent}_backend"),
                     "model": getattr(self.config, f"{agent}_model")}
             for agent in ("codex", "claude")
         }
         policy["versions"] = versions
+        # Probes still ran; the versions are simply not part of the supported set.
+        self.untested = {name: versions[name] for name in untested}
+        policy["untested_cli"] = self.untested
         self.store.json("reviewer-policy.json", policy)
         self.policy_verified = True
         return versions

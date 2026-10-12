@@ -10,10 +10,13 @@ Requires **Python 3.10 or newer**, macOS or Linux, and authentication for the
 selected reviewer backends. By default these are the `codex` and `claude` CLIs;
 either reviewer can instead use GitHub Copilot CLI. Inspection controls have
 been checked with Codex **0.162.1**, Claude Code **2.1.296**, and Copilot **1.0.95**.
-Duo accepts those versions and later releases within the same major version,
-because configuration probes verify every inspection control on each run. Older
-versions and new major versions stop with a setup error until their controls are
-verified. From this
+Duo accepts only those tested ranges: later patch releases of Codex 0.162,
+Claude Code 2.1, and Copilot 1.0. Codex is still 0.x, where a minor release may
+break compatibility, so 0.163 is untested until verified. Any other version stops
+with a setup error. `--allow-untested-cli` runs it anyway as experimental: every
+inspection-control probe still applies, a warning is printed, and the untested
+versions are recorded in `versions.json`, `result.json`, and the summary
+(`untested_cli` in `--json` output). From this
 directory, use the existing Python 3.11 micromamba
 environment named `duo`:
 
@@ -318,6 +321,10 @@ acceptance suite requires real LangGraph integration tests to execute.
 The suite covers approval invalidation, retries, deadlines, malformed responses,
 verbatim inputs, reviewer policy, CLI response formats, process cleanup, file
 conflicts, write/flush/fsync/chmod/replace failures, and exits.
+
+CI (`.github/workflows/ci.yml`) runs the suite on Ubuntu and macOS with Python
+3.10 and 3.13. It builds and installs the wheel, then tests the installed
+package rather than the source tree. CI uses no reviewer credentials.
 
 The optional real-CLI smoke test creates a disposable Git repository containing
 harmless hook and MCP sentinels. It asks both reviewers to read a verification

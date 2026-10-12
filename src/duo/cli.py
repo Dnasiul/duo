@@ -47,6 +47,9 @@ def parser() -> argparse.ArgumentParser:
                              "native Claude only)")
     result.add_argument("--claude-max-budget-usd", type=float, help="Claude per-call API budget")
     result.add_argument("--skip-git-repo-check", action="store_true")
+    result.add_argument("--allow-untested-cli", action="store_true",
+                        help="Run CLI versions outside the tested ranges as experimental; "
+                             "inspection-control probes still apply")
     result.add_argument("--codex-bin", default="codex", help="Codex executable path")
     result.add_argument("--claude-bin", default="claude", help="Claude executable path")
     result.add_argument("--state-dir", type=Path, help="Audit/lock directory outside target repository")
@@ -67,6 +70,9 @@ def emit(summary: dict, as_json: bool) -> None:
             print(f"Latest review: {label} [{review['decision']}]: {review['reason']}")
         if "turns" in summary:
             print(f"{summary['turns']} review turns, {summary['attempts']} CLI attempts")
+        if summary.get("untested_cli"):
+            names = ", ".join(f"{agent} ({version})" for agent, version in summary["untested_cli"].items())
+            print(f"Experimental: untested CLI versions: {names}")
         if summary.get("run_dir"):
             print(f"Audit: {summary['run_dir']}")
 
@@ -143,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             claude_max_turns=args.claude_max_turns,
             claude_max_budget_usd=args.claude_max_budget_usd,
             skip_git_repo_check=args.skip_git_repo_check,
+            allow_untested_cli=args.allow_untested_cli,
             codex_bin=args.codex_bin, claude_bin=args.claude_bin,
         )
         default_state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "duo"
@@ -163,11 +170,17 @@ def main(argv: list[str] | None = None) -> int:
                                 progress=lambda message: print(message, file=sys.stderr, flush=True),
                                 on_review=completed)
             graph = build_graph(reviewer)
-            store.json("versions.json", adapter.preflight())
+            versions = adapter.preflight()
+            if adapter.untested:
+                versions = {**versions, "untested": sorted(adapter.untested)}
+                names = ", ".join(f"{agent} ({version})" for agent, version in adapter.untested.items())
+                print(f"Warning: running untested CLI versions as experimental: {names}",
+                      file=sys.stderr, flush=True)
+            store.json("versions.json", versions)
             result = graph.invoke(state, config={"recursion_limit": config.max_turns + 5})
             plan.check()
-            store.json("result.json", result)
-        emit({**outcome(result),
+            store.json("result.json", {**result, "untested_cli": adapter.untested})
+        emit({**outcome(result), "untested_cli": adapter.untested,
               "plan_path": str(plan.path), "run_dir": str(store.path)}, args.json)
         return EXIT_CODES[result["status"]]
     except KeyboardInterrupt:

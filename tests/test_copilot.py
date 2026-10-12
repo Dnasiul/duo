@@ -218,6 +218,30 @@ else:
         with self.assertRaises(RunError):
             copilot.command(self.copilot_config('copilot'), 'codex', self.store.attempt_dir())
 
+    def test_untested_copilot_version_is_opt_in_and_reported(self):
+        binary = self.fake("sys.stdin.read()\nreply({'decision':'approve','plan':'','reason':'Ready'})\n")
+        path = Path(binary)
+        path.write_text(path.read_text().replace("GitHub Copilot CLI 1.0.95.", "GitHub Copilot CLI 1.2.0."))
+        (self.repo / 'plan.md').write_text('# Plan\n')
+        args = ['--repo', str(self.repo), '--state-dir', str(self.audit), '--task', 'Task',
+                '--codex-model', 'gpt-5.4', '--claude-model', 'claude-sonnet-5.5',
+                '--codex-backend', 'copilot', '--claude-backend', 'copilot',
+                '--copilot-bin', binary, '--skip-git-repo-check', '--json']
+        output = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(io.StringIO()):
+            self.assertEqual(main(args), 1)
+        self.assertIn('--allow-untested-cli', json.loads(output.getvalue())['message'])
+        output, warnings = io.StringIO(), io.StringIO()
+        with redirect_stdout(output), redirect_stderr(warnings):
+            self.assertEqual(main(args + ['--allow-untested-cli']), 0, output.getvalue())
+        summary = json.loads(output.getvalue())
+        self.assertEqual(summary['untested_cli'], {'copilot': 'GitHub Copilot CLI 1.2.0.'})
+        self.assertIn('untested CLI versions as experimental: copilot', warnings.getvalue())
+        run = Path(summary['run_dir'])
+        self.assertEqual(json.loads((run / 'versions.json').read_text())['untested'], ['copilot'])
+        self.assertEqual(json.loads((run / 'result.json').read_text())['untested_cli'],
+                         {'copilot': 'GitHub Copilot CLI 1.2.0.'})
+
     def test_preflight_rejects_missing_controls(self):
         binary = self.fake('')
         # Remove a required flag from only the advertised help.

@@ -47,19 +47,42 @@ class PolicyTests(unittest.TestCase):
             return 'Managed settings (remote): none configured for this organization\n'
         self.fail(f'Unexpected probe {argv}')
 
-    def test_versions_require_known_control_generation(self):
-        verify_version('codex', 'codex-cli 0.162.1')
-        verify_version('claude', '2.1.296 (Claude Code)')
-        verify_version('copilot', 'GitHub Copilot CLI 1.0.95.')
-        # Later releases in the same major version rely on the control probes.
-        verify_version('codex', 'codex-cli 0.170.0')
-        verify_version('claude', '2.2.0 (Claude Code)')
-        verify_version('copilot', 'GitHub Copilot CLI 1.1.0.')
-        for agent, version in [('codex', '0.100.0'), ('claude', '2.0.0'),
-                               ('claude', 'unrecognized'), ('codex', '1.0.0'),
-                               ('claude', '3.0.0'), ('copilot', '1.0.94'), ('copilot', '2.0.0')]:
-            with self.subTest(agent=agent, version=version), self.assertRaises(RunError):
-                verify_version(agent, version)
+    def test_versions_must_be_in_tested_ranges(self):
+        for agent, version in [('codex', 'codex-cli 0.162.1'), ('codex', 'codex-cli 0.162.9'),
+                               ('claude', '2.1.296 (Claude Code)'), ('claude', '2.1.400 (Claude Code)'),
+                               ('copilot', 'GitHub Copilot CLI 1.0.95.'), ('copilot', 'GitHub Copilot CLI 1.0.120.')]:
+            with self.subTest(agent=agent, version=version):
+                self.assertEqual(verify_version(agent, version), 'tested')
+        # Codex 0.x minor releases may break compatibility; each needs evidence.
+        for agent, version in [('codex', '0.163.0'), ('codex', '0.162.0'), ('codex', '1.0.0'),
+                               ('claude', '2.2.0'), ('claude', '2.1.295'), ('claude', '3.0.0'),
+                               ('copilot', '1.1.0'), ('copilot', '1.0.94'), ('copilot', '2.0.0')]:
+            with self.subTest(agent=agent, version=version):
+                with self.assertRaisesRegex(RunError, 'outside the tested range.*--allow-untested-cli'):
+                    verify_version(agent, version)
+                self.assertEqual(verify_version(agent, version, allow_untested=True), 'untested')
+        # An unparseable version cannot be recorded, so the opt-in does not cover it.
+        for allow in (False, True):
+            with self.subTest(allow=allow), self.assertRaisesRegex(RunError, 'Cannot parse'):
+                verify_version('claude', 'unrecognized', allow)
+
+    def test_untested_versions_are_recorded_when_allowed(self):
+        def run(argv, **kwargs):
+            if '--version' in argv:
+                version = 'codex-cli 0.170.0' if argv[0] == 'codex' else '2.1.296 (Claude Code)'
+                return subprocess.CompletedProcess(argv, 0, version, '')
+            return subprocess.CompletedProcess(argv, 0, self.probe(argv), '')
+        with patch('duo.adapters.shutil.which', side_effect=lambda name: name), patch('duo.adapters.subprocess.run', side_effect=run), patch('duo.adapters.check_claude_managed_files'), patch('duo.policy.check_claude_managed_files'):
+            with self.assertRaisesRegex(RunError, 'codex 0.170.0 is outside'):
+                CLIAdapter(self.config, self.store).preflight()
+            adapter = CLIAdapter(replace(self.config, allow_untested_cli=True), self.store)
+            adapter.preflight()
+        self.assertEqual(adapter.untested, {'codex': 'codex-cli 0.170.0'})
+        audit = json.loads((self.store.path / 'reviewer-policy.json').read_text())
+        self.assertEqual(audit['untested_cli'], {'codex': 'codex-cli 0.170.0'})
+        # Every control probe still ran and passed.
+        self.assertTrue(adapter.policy_verified)
+        self.assertEqual(audit['codex']['verified_mcp_servers'], [])
 
     def test_policy_audit_has_verified_controls_without_secrets(self):
         with patch('duo.policy.check_claude_managed_files'):

@@ -150,7 +150,7 @@ def preflight(config: Config, directory: Path) -> tuple[str, dict]:
         return result.stdout
     version_lines = probe(['--version']).splitlines()
     version = version_lines[0] if version_lines else ''
-    verify_version('copilot', version)
+    status = verify_version('copilot', version, config.allow_untested_cli)
     help_text = probe(['--help'])
     if any(flag not in help_text for flag in FLAGS):
         raise RunError('Installed Copilot lacks required inspection options')
@@ -165,6 +165,7 @@ def preflight(config: Config, directory: Path) -> tuple[str, dict]:
     if not isinstance(settings, dict) or any(settings.get(k) != v for k, v in SETTINGS.items()):
         raise RunError('Copilot inspection settings did not take effect')
     return version, {
+        'version_status': status,
         'settings': SETTINGS, 'tools': ['view', 'glob', 'grep'],
         'configuration': 'fresh isolated home and cache per invocation',
         'authentication': 'environment token; values never included in audit metadata',
