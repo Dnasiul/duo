@@ -338,6 +338,27 @@ class ContractTests(Fixture):
             with self.subTest(after=after):
                 validate_review(response("revise", after), before)
 
+    def test_complete_private_keys_with_short_body_lines_are_rejected(self):
+        body = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo="
+        for kind in ("PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY",
+                     "OPENSSH PRIVATE KEY", "ENCRYPTED PRIVATE KEY"):
+            header, footer = f"-----BEGIN {kind}-----", f"-----END {kind}-----"
+            known = f"Recognize keys by `{header}`.\n"
+            for parts in ([body[:2], body[2:]],
+                          [body[i:i + 4] for i in range(0, len(body), 4)]):
+                for separator in ("\n", "\r\n", "\\n", "\\\\n", "\\r\\n", " "):
+                    key = separator.join([header, *parts, footer])
+                    for item in (response("revise", key), response("approve", reason=key)):
+                        with self.subTest(kind=kind, parts=parts, separator=separator,
+                                          decision=item["decision"]):
+                            with self.assertRaises(AgentError) as caught:
+                                validate_review(item, known)
+                            self.assertTrue(caught.exception.retryable)
+                            self.assertNotIn(key, str(caught.exception))
+                    # The same complete key already in the plan may be retained.
+                    validate_review(response("revise", "Add rotation.\n" + key), key)
+                    validate_review(response("approve", reason=key), key)
+
     def test_private_key_scan_is_fast_on_long_whitespace(self):
         import time
         text = "-----BEGIN PRIVATE KEY-----" + " \n" * 50000 + "!" + " " * 50000 + "!"

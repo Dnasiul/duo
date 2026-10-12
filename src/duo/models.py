@@ -133,11 +133,12 @@ def validate_payload(value: object) -> dict[str, str]:
 
 # PEM body parts after a private-key header. Separators are line breaks (blank
 # lines allowed), escaped line breaks as in JSON or YAML strings, or spaces when
-# a key is flattened onto one line. Body lines are long base64 or base64 with a
-# digit, "+", "/" or padding; short plain words stay prose, so editing text near
-# a documented header is not mistaken for new key material. Legacy encrypted
-# PEM files also contain metadata lines.
+# a key is flattened onto one line. Complete blocks accept any base64 line
+# length. Without a closing footer, require long base64 or a digit, "+", "/"
+# or padding; short plain words stay prose near a documented header. Legacy
+# encrypted PEM files also contain metadata lines.
 _PEM_SEP = r"(?:(?:[ \t]*(?:\n|\\+r\\+n|\\+n))+[ \t]*|[ \t]+)"
+_PEM_BASE64 = r"[A-Za-z0-9+/]+={0,2}(?![A-Za-z0-9+/=])"
 _PEM_LINE = (r"(?:[A-Za-z0-9+/]{16,}={0,2}|[A-Za-z0-9+/]*[0-9+/][A-Za-z0-9+/]*={0,2}"
              r"|[A-Za-z0-9+/]+={1,2})(?![A-Za-z0-9+/=])")
 _PEM_META = r"(?:Proc-Type|DEK-Info):[^\n\\]*"
@@ -148,8 +149,10 @@ SECRET_PATTERNS = {
     # body material through.
     "private key": re.compile(
         r"-----BEGIN (?P<key_type>[A-Z0-9 ]*PRIVATE KEY)-----"
-        rf"(?:{_PEM_SEP}(?:{_PEM_LINE}|{_PEM_META}))*"
-        rf"(?:{_PEM_SEP}-----END (?P=key_type)-----)?"
+        # Try a complete block before the incomplete-body/prose heuristic.
+        rf"(?:(?:{_PEM_SEP}(?:{_PEM_BASE64}|{_PEM_META}))*"
+        rf"{_PEM_SEP}-----END (?P=key_type)-----"
+        rf"|(?:{_PEM_SEP}(?:{_PEM_LINE}|{_PEM_META}))*)"
     ),
     "AWS access key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     "GitHub token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"),
