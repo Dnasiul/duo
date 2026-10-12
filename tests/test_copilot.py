@@ -164,6 +164,16 @@ else:
             adapter('codex', 'Review', 5)
         self.assertTrue(caught.exception.retryable)
 
+    def test_unavailable_model_is_not_retried(self):
+        # Copilot model names differ from native ones, e.g. claude-sonnet-5.5.
+        binary = self.fake("print('Error: Model \"claude-sonnet-5-5\" from --model flag is not available.', "
+                           "file=sys.stderr)\nsys.exit(1)\n")
+        config = replace(self.copilot_config(binary), claude_model='claude-sonnet-5-5')
+        with self.assertRaises(AgentError) as caught:
+            CLIAdapter(config, self.store)('claude', 'Review', 5)
+        self.assertFalse(caught.exception.retryable)
+        self.assertIn('claude-sonnet-5-5', str(caught.exception))
+
     def test_native_and_copilot_effort_validation(self):
         for agent in ('codex', 'claude'):
             for effort in copilot_efforts():

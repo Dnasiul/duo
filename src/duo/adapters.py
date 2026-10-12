@@ -156,6 +156,8 @@ def classify_failure(diagnostic: str, model: str | None = None) -> AgentError:
         # Claude Code reports an unknown or inaccessible model this way.
         "unrecognized_model": MODEL_UNAVAILABLE,
         "issue with the selected model": MODEL_UNAVAILABLE,
+        # Copilot CLI: 'Model "<name>" from --model flag is not available.'
+        "from --model flag is not available": MODEL_UNAVAILABLE,
         "unknown option": "Installed CLI does not support a requested option",
         "unexpected argument": "Installed CLI does not support a requested argument",
         "error loading config": "Agent configuration is incompatible with inspection policy",
