@@ -98,6 +98,15 @@ def outcome(state: State) -> dict:
             "latest_review": latest, "turns": state["turns"], "attempts": state["attempts"]}
 
 
+def is_plan_file(path: Path, repo: Path) -> bool:
+    plan = repo / "plan.md"
+    try:
+        return path.expanduser().samefile(plan)
+    except OSError:
+        # A missing file cannot be the same file; compare paths for clarity.
+        return path.expanduser().resolve() == plan.resolve()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     store = None
@@ -115,6 +124,11 @@ def main(argv: list[str] | None = None) -> int:
         repo = args.repo.expanduser().resolve()
         if not repo.is_dir():
             raise RunError("Target repository directory does not exist")
+        for option, path in (("--task-file", args.task_file), ("--criteria-file", args.criteria_file)):
+            if path is not None and is_plan_file(path, repo):
+                # The review would then check the plan against itself.
+                raise RunError(f"{option} must not be the plan under review ({repo / 'plan.md'}); "
+                               "describe the task separately")
         task = args.task_file.read_bytes().decode("utf-8") if args.task_file else args.task
         criteria = args.criteria_file.read_bytes().decode("utf-8") if args.criteria_file else args.criteria
         if not task.strip():

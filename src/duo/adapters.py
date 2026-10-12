@@ -96,8 +96,14 @@ def codex_error_text(events: Path) -> str:
     return "\n".join(message[:DIAGNOSTIC_BYTES] for message in messages[-4:])
 
 
-def classify_failure(diagnostic: str) -> AgentError:
-    """Use diagnostic text for classification only; never echo it into prompts."""
+MODEL_UNAVAILABLE = "Requested model is unavailable in the selected CLI"
+
+
+def classify_failure(diagnostic: str, model: str | None = None) -> AgentError:
+    """Use diagnostic text for classification only; never echo it into prompts.
+
+    The configured model name, not CLI output, may appear in the message.
+    """
     text = diagnostic.lower()
     permanent = {
         "authentication failed": "Authentication failed; sign in to the agent CLI",
@@ -106,8 +112,11 @@ def classify_failure(diagnostic: str) -> AgentError:
         "unauthorized": "Agent authentication is unauthorized",
         "authentication required": "Agent CLI authentication is required",
         "no authentication": "Agent CLI authentication is required",
-        "unknown model": "Requested model is unavailable in the selected CLI",
-        "model is not supported": "Requested model is unavailable in the selected CLI",
+        "unknown model": MODEL_UNAVAILABLE,
+        "model is not supported": MODEL_UNAVAILABLE,
+        # Claude Code reports an unknown or inaccessible model this way.
+        "unrecognized_model": MODEL_UNAVAILABLE,
+        "issue with the selected model": MODEL_UNAVAILABLE,
         "unknown option": "Installed CLI does not support a requested option",
         "unexpected argument": "Installed CLI does not support a requested argument",
         "error loading config": "Agent configuration is incompatible with inspection policy",
@@ -119,6 +128,8 @@ def classify_failure(diagnostic: str) -> AgentError:
     }
     for fragment, message in permanent.items():
         if fragment in text:
+            if message == MODEL_UNAVAILABLE and model:
+                message = f"{message}: {model}"
             return AgentError(message, retryable=False)
     delay = re.search(r"(?:retry-after\s*[:=]\s*|retry (?:in|after)\s+)(\d+(?:\.\d+)?)", text)
     return AgentError("Agent CLI failed; see the attempt diagnostics",
@@ -267,7 +278,7 @@ class CLIAdapter:
                     diagnostic += "\n" + claude_error_text(read_json(stdout))
                 except AgentError:
                     pass
-            raise classify_failure(diagnostic)
+            raise classify_failure(diagnostic, getattr(self.config, f"{agent}_model"))
         if backend == "copilot":
             return validate_payload(read_json(stdout, allow_fence=True))
         if agent == "codex":
@@ -276,5 +287,6 @@ class CLIAdapter:
         if not isinstance(envelope, dict):
             raise AgentError("Claude returned an invalid result envelope")
         if envelope.get("is_error") is not False or envelope.get("subtype") != "success":
-            raise classify_failure(claude_error_text(envelope))
+            raise classify_failure(claude_error_text(envelope),
+                                   getattr(self.config, f"{agent}_model"))
         return validate_payload(envelope.get("structured_output"))

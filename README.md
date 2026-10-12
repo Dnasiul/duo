@@ -45,7 +45,8 @@ duo \
 
 The existing `plan.md`, if present, becomes the starting plan. The original task
 and criteria remain fixed during the run. You can use UTF-8 files for longer
-inputs:
+inputs; they must not be `plan.md` itself, since the plan would then be reviewed
+against itself:
 
 ```sh
 duo \

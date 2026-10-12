@@ -523,6 +523,21 @@ print(json.dumps({'is_error':False,'subtype':'success','structured_output':{'dec
                 adapter("codex", "Review", 5)
             self.assertEqual(caught.exception.retryable, retryable)
 
+    def test_unrecognized_claude_model_is_permanent_and_named(self):
+        # Shape of Claude Code 2.1.296 output for --model opus-5-5.
+        binary = self.executable("claude-model", "import json, sys\n"
+                                 "print('[claude-code:unrecognized_model] {\"model\":\"opus-5-5\"}', file=sys.stderr)\n"
+                                 "print(json.dumps({'is_error': True, 'subtype': 'success', "
+                                 "'api_error_status': 404, 'result': \"There's an issue with the "
+                                 "selected model (opus-5-5). It may not exist or you may not have access to it.\"}))\n"
+                                 "raise SystemExit(1)\n")
+        adapter = CLIAdapter(replace(self.config, claude_bin=binary, claude_model="opus-5-5"), self.store)
+        with self.assertRaises(AgentError) as caught:
+            adapter("claude", "Review", 5)
+        self.assertFalse(caught.exception.retryable)
+        self.assertEqual(str(caught.exception),
+                         "Requested model is unavailable in the selected CLI: opus-5-5")
+
     def test_claude_nonzero_exit_classified_from_error_metadata(self):
         binary = self.executable("claude-auth", "import json\n"
                                  "print(json.dumps({'is_error': True, 'subtype': 'success', "
@@ -575,6 +590,27 @@ class CLITests(Fixture):
         with redirect_stdout(out):
             self.assertEqual(main(args), 1)
         self.assertEqual(json.loads(out.getvalue())["status"], "error")
+
+    def test_plan_file_cannot_be_the_task_or_criteria(self):
+        plan = self.repo / "plan.md"
+        plan.write_text("# Plan\n")
+        (self.root / "link.md").symlink_to(plan)
+        runs = set((self.audit / "runs").iterdir())
+        for option in ("--task-file", "--criteria-file"):
+            for path in (plan, self.root / "link.md", Path(os.path.relpath(plan))):
+                args = self.arguments()
+                if option == "--task-file":
+                    index = args.index("--task")
+                    args[index:index + 2] = [option, str(path)]
+                else:
+                    args += [option, str(path)]
+                out = io.StringIO()
+                with self.subTest(option=option, path=path), redirect_stdout(out):
+                    self.assertEqual(main(args), 1)
+                    summary = json.loads(out.getvalue())
+                    self.assertIn(f"{option} must not be the plan under review", summary["message"])
+        # Rejected before any audit run is created.
+        self.assertEqual(set((self.audit / "runs").iterdir()), runs)
 
     def test_state_directory_inside_repo_rejected(self):
         args = self.arguments()
