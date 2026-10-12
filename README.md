@@ -336,7 +336,7 @@ and `--copilot-bin`; Copilot smoke runs require the same environment token as Du
 `models.py` validates the shared response contract, `prompts.py` builds review
 context, and `storage.py` manages plan publication and audit files.
 
-The design is in [duo_plan.md](duo_plan.md). Persistent graph checkpoint recovery,
+Persistent graph checkpoint recovery,
 repository snapshot tracking, cycle detection, and structured issue tracking are
 future improvements. Agreement means both reviewers accept the plan; it does not
 prove that the proposed implementation is correct.
