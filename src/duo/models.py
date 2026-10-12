@@ -131,14 +131,25 @@ def validate_payload(value: object) -> dict[str, str]:
     return value
 
 
+# PEM body parts after a private-key header. Separators are line breaks (blank
+# lines allowed), escaped line breaks as in JSON or YAML strings, or spaces when
+# a key is flattened onto one line. Body lines are long base64 or base64 with a
+# digit, "+", "/" or padding; short plain words stay prose, so editing text near
+# a documented header is not mistaken for new key material. Legacy encrypted
+# PEM files also contain metadata lines.
+_PEM_SEP = r"(?:(?:[ \t]*(?:\n|\\+r\\+n|\\+n))+[ \t]*|[ \t]+)"
+_PEM_LINE = (r"(?:[A-Za-z0-9+/]{16,}={0,2}|[A-Za-z0-9+/]*[0-9+/][A-Za-z0-9+/]*={0,2}"
+             r"|[A-Za-z0-9+/]+={1,2})(?![A-Za-z0-9+/=])")
+_PEM_META = r"(?:Proc-Type|DEK-Info):[^\n\\]*"
+
 # Credential formats specific enough to avoid matching ordinary plan text.
 SECRET_PATTERNS = {
-    # Compare the whole key, not its reusable header. Include incomplete blocks
-    # up to the next header or end of text so truncation cannot bypass the check.
+    # Include the body even without a footer; a header alone must not allow new
+    # body material through.
     "private key": re.compile(
         r"-----BEGIN (?P<key_type>[A-Z0-9 ]*PRIVATE KEY)-----"
-        r".*?(?:-----END (?P=key_type)-----|(?=-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----)|\Z)",
-        re.DOTALL,
+        rf"(?:{_PEM_SEP}(?:{_PEM_LINE}|{_PEM_META}))*"
+        rf"(?:{_PEM_SEP}-----END (?P=key_type)-----)?"
     ),
     "AWS access key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     "GitHub token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"),
@@ -165,7 +176,12 @@ def validate_review(value: object, plan: str) -> dict[str, str]:
         raise AgentError("Response must explain its decision")
     # Reviewers can read outside the repository (Codex's sandbox allows it), so
     # never publish credentials they introduce. The message never echoes them.
-    kind = new_secret(result["plan"] + "\n" + result["reason"], plan)
+    # Fields are separate documents: a header at the end of the plan must not
+    # turn the reason into an apparent continuation of the key.
+    # Compare normalized text, as stored, so line endings alone never differ.
+    known = normalize(plan)
+    kind = (new_secret(normalize(result["plan"]), known) or
+            new_secret(normalize(result["reason"]), known))
     if kind:
         raise AgentError(f"Response appears to contain a credential ({kind}); "
                          "remove it and never copy secrets into the plan or reason")

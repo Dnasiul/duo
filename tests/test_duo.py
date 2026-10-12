@@ -276,6 +276,75 @@ class ContractTests(Fixture):
         validate_review(response("revise", plan + "Add rotation.\n"), plan)
         validate_review(response("approve", reason=f"Keeps the existing example:\n{key}"), plan)
 
+    def test_existing_header_examples_allow_unrelated_prose_changes(self):
+        header = "-----BEGIN OPENSSH PRIVATE KEY-----"
+        for example in (f"Recognize PEM files by `{header}`.\n",
+                        f"```\n{header}\n```\n",
+                        f"Recognize PEM files by:\n{header}"):
+            plan = example + "\nCheck file permissions.\n"
+            with self.subTest(example=example):
+                validate_review(response("revise", plan + "Add a rotation checklist.\n"), plan)
+                validate_review(response("approve", reason=example + "\nThe plan is ready."), plan)
+
+    def test_private_key_matches_do_not_cross_response_fields(self):
+        header = "-----BEGIN OPENSSH PRIVATE KEY-----"
+        # Each reason would look like an extra base64 line if joined to plan.
+        for example in (header, header + "\nU1lOVEhFVElDX09MRF9LRVk="):
+            for reason in ("Ready", "U1lOVEhFVElDX05FV19LRVk="):
+                with self.subTest(example=example, reason=reason):
+                    validate_review(response("revise", "Add a checklist.\n" + example,
+                                             reason=reason), example)
+
+    def test_encrypted_pem_metadata_does_not_hide_new_body_material(self):
+        prefix = ("-----BEGIN RSA PRIVATE KEY-----\n"
+                  "Proc-Type: 4,ENCRYPTED\n"
+                  "DEK-Info: AES-256-CBC,0123456789ABCDEF\n\n")
+        old = prefix + "U1lOVEhFVElDX09MRF9LRVk=\n-----END RSA PRIVATE KEY-----"
+        new = prefix + "U1lOVEhFVElDX05FV19LRVk="
+        for newline in ("\n", "\r\n"):
+            known = old.replace("\n", newline)
+            for candidate in (new, new + "\n-----END RSA PRIVATE KEY-----"):
+                candidate = candidate.replace("\n", newline)
+                for item in (response("revise", candidate), response("approve", reason=candidate)):
+                    with self.subTest(newline=newline, decision=item["decision"], candidate=candidate):
+                        with self.assertRaises(AgentError):
+                            validate_review(item, known)
+            validate_review(response("revise", "Add a checklist.\n" + known), known)
+
+    def test_flattened_or_escaped_key_after_known_header_is_rejected(self):
+        header, footer = "-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----"
+        body = "U1lOVEhFVElDX05FV19LRVlfTUFURVJJQUw="
+        known = f"Detect keys by the line {header} in files.\n"
+        for candidate in (f'"{header}\\n{body}\\n{footer}"', f'"{header}\\\\n{body}"',
+                          f'"{header}\\r\\n{body}\\r\\n{footer}"', f"{header} {body} {footer}",
+                          f"{header} {body}"):
+            for item in (response("revise", known + candidate + "\n"),
+                         response("approve", reason=candidate)):
+                with self.subTest(candidate=candidate, decision=item["decision"]):
+                    with self.assertRaises(AgentError) as caught:
+                        validate_review(item, known)
+                    self.assertNotIn(body, str(caught.exception))
+
+    def test_unchanged_key_with_different_line_endings_is_allowed(self):
+        key = "-----BEGIN PRIVATE KEY-----\nU1lOVEhFVElDX09MRF9LRVk=\n-----END PRIVATE KEY-----"
+        plan = f"Example:\n{key}\n"
+        validate_review(response("revise", (plan + "Add a step.\n").replace("\n", "\r\n")), plan)
+        validate_review(response("approve", reason=f"Keeps\r\n{key}".replace("\n", "\r\n")), plan)
+
+    def test_prose_words_after_known_header_are_not_key_material(self):
+        header = "-----BEGIN PRIVATE KEY-----"
+        for before, after in ((f"{header}\n\nDONE\n", f"{header}\n\nTODO\n"),
+                              (f"Find {header} in files.\n", f"Find {header} in configs.\n")):
+            with self.subTest(after=after):
+                validate_review(response("revise", after), before)
+
+    def test_private_key_scan_is_fast_on_long_whitespace(self):
+        import time
+        text = "-----BEGIN PRIVATE KEY-----" + " \n" * 50000 + "!" + " " * 50000 + "!"
+        started = time.monotonic()
+        validate_review(response("revise", text + "x"), text)
+        self.assertLess(time.monotonic() - started, 2)
+
     def test_whitespace_is_preserved(self):
         text = "  code  \r\nValue\u00a0"
         self.assertEqual(validate_review(response("revise", text), "Old")["plan"],
