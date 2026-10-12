@@ -250,6 +250,32 @@ class ContractTests(Fixture):
         ordinary = "Use sk-learn-compatible-pipeline-steps and task-runner-config-v2.\n"
         validate_review(response("revise", ordinary), "Old")
 
+    def test_existing_private_key_header_does_not_allow_new_key_material(self):
+        for kind in ("PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY",
+                     "OPENSSH PRIVATE KEY", "ENCRYPTED PRIVATE KEY"):
+            header, footer = f"-----BEGIN {kind}-----", f"-----END {kind}-----"
+            old_key = f"{header}\nU1lOVEhFVElDX09MRF9LRVk=\n{footer}"
+            new_key = f"{header}\nU1lOVEhFVElDX05FV19LRVk=\n{footer}"
+            for known in (f"Recognize keys by {header}", old_key):
+                for candidate in (new_key, new_key.removesuffix(footer),
+                                  old_key + "\n" + new_key,
+                                  header + "\n" + new_key):
+                    for item in (response("revise", candidate),
+                                 response("approve", reason=candidate)):
+                        with self.subTest(kind=kind, known=known, candidate=candidate,
+                                          decision=item["decision"]):
+                            with self.assertRaises(AgentError) as caught:
+                                validate_review(item, known)
+                            self.assertTrue(caught.exception.retryable)
+                            self.assertNotIn("U1lOVEhFVElDX05FV19LRVk=", str(caught.exception))
+
+    def test_unchanged_complete_private_key_is_allowed(self):
+        key = ("-----BEGIN OPENSSH PRIVATE KEY-----\n"
+               "U1lOVEhFVElDX09MRF9LRVk=\n-----END OPENSSH PRIVATE KEY-----")
+        plan = f"Existing example:\n{key}\n"
+        validate_review(response("revise", plan + "Add rotation.\n"), plan)
+        validate_review(response("approve", reason=f"Keeps the existing example:\n{key}"), plan)
+
     def test_whitespace_is_preserved(self):
         text = "  code  \r\nValue\u00a0"
         self.assertEqual(validate_review(response("revise", text), "Old")["plan"],

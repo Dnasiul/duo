@@ -133,7 +133,13 @@ def validate_payload(value: object) -> dict[str, str]:
 
 # Credential formats specific enough to avoid matching ordinary plan text.
 SECRET_PATTERNS = {
-    "private key": re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
+    # Compare the whole key, not its reusable header. Include incomplete blocks
+    # up to the next header or end of text so truncation cannot bypass the check.
+    "private key": re.compile(
+        r"-----BEGIN (?P<key_type>[A-Z0-9 ]*PRIVATE KEY)-----"
+        r".*?(?:-----END (?P=key_type)-----|(?=-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----)|\Z)",
+        re.DOTALL,
+    ),
     "AWS access key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     "GitHub token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"),
     "Anthropic API key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
