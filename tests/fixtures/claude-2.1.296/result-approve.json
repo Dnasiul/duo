@@ -1,0 +1,104 @@
+{
+  "duration_api_ms": 17698,
+  "stop_reason": "tool_use",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "total_cost_usd": 0.2531334,
+  "usage": {
+    "input_tokens": 6,
+    "cache_creation_input_tokens": 25826,
+    "cache_read_input_tokens": 56507,
+    "output_tokens": 1760,
+    "output_tokens_details": {
+      "thinking_tokens": 549
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 25826,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 1287,
+        "cache_read_input_tokens": 28237,
+        "cache_creation_input_tokens": 1791,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 1791
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+  },
+  "modelUsage": {
+    "claude-opus-5-5": {
+      "inputTokens": 6,
+      "outputTokens": 1760,
+      "cacheReadInputTokens": 56507,
+      "cacheCreationInputTokens": 25826,
+      "webSearchRequests": 0,
+      "costUSD": 0.2531334,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinkingTokens": 549,
+      "canonicalModel": "claude-opus-5-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "subagent_stats": {
+    "spawned": 0,
+    "requested": {
+      "background": 0,
+      "foreground": 0,
+      "unset": 0
+    },
+    "started_in_background": 0,
+    "max_depth": 0,
+    "spawned_by_subagents": 0,
+    "completed": 0,
+    "failed": 0,
+    "killed": {
+      "parent": 0,
+      "user": 0,
+      "system": 0
+    },
+    "refused": {
+      "depth_limit": 0,
+      "concurrency_limit": 0,
+      "budget": 0
+    },
+    "by_type": {}
+  },
+  "safety_stops": 0,
+  "is_error": false,
+  "num_turns": 6,
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "{\"decision\":\"approve\",\"plan\":\"\",\"reason\":\"The plan meets every acceptance criterion, and its claims about the repository match the code.\\n\\nHow it covers the criteria:\\n- **End-to-end validation:** section 4 runs an authenticated four-way backend matrix and a bounded `duo` run, while offline state-m…[trimmed]",
+  "structured_output": {
+    "decision": "approve",
+    "plan": "",
+    "reason": "The plan meets every acceptance criterion, and its claims about the repository match the code.\n\nHow it covers the criteria:\n- **End-to-end validation:** section 4 runs an authenticated four-way backend matrix and a bounded `duo` run, while offline state-machine checks stay in the regular suite.\n- **CI on macOS and Linux:** section 5 adds offline CI on both platforms for each supported Python version, plus wheel and sdist install tests.\n- **CLI-compatibility drift:** section 3 sets a tested-range version policy with an explicit experimental opt-in, treats Codex 0.x separately, keeps probes that fail closed, checks recorded real-CLI fixtures against the fake CLIs, and runs a scheduled drift job with triage rules.\n- **Security limits:** section 2 covers the isolation profile, canary and sentinel enforcement tests, and best-effort credential matching. Section 6 covers resource and audit limits.\n- **Release steps:** section 5 lists the artifacts, checksums, constraints, rollback, and the license and distribution-channel decisions. Section 7 adds the runbook and release report, and the plan ends with an explicit release gate.\n\nRepository checks:\n- `src/duo/policy.py:46-57` accepts any later release in the same major version. For Codex, whose minimum is 0.162.1, that means every future 0.x release.\n- There is no SIGTERM handler. The only signal use is `SIGKILL` in `adapters.py`.\n- The lock lives under `state_dir/locks` (`storage.py:66-82`), so two runs using different `--state-dir` values can work on the same repository at once. Section 7 already plans for this gap.\n- There is no `.github` CI directory, no license file, and no AGENTS.md or CLAUDE.md.\n\nThe execution order respects the dependencies: CI first, then the version policy, isolation and resource controls, unattended-operation checks, and finally the live run on the release candidate before the approval gate.\n\nOne small dependency is not a blocker. Recording real response-envelope fixtures in step 2 may need authenticated calls, and the plan already makes those subject to explicit approval. That can be settled during implementation.\n\nI found no substantive gaps, so I'm approving rather than reopening decisions from the earlier review."
+  },
+  "ttft_ms": 1465,
+  "type": "result",
+  "duration_ms": 17766,
+  "uuid": "00000000-0000-0000-0000-000000000000",
+  "ttft_stream_ms": 971,
+  "time_to_request_ms": 39,
+  "first_content_frame_ms": 971,
+  "queued_turn_count": 0,
+  "result_index": 0
+}

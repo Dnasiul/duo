@@ -1,0 +1,13 @@
+{
+  "disableAllHooks": true,
+  "connectors": false,
+  "memory": false,
+  "autoUpdate": false,
+  "continueOnAutoMode": false,
+  "customAgents": {
+    "defaultLocalOnly": true
+  },
+  "ide": {
+    "autoConnect": false
+  }
+}

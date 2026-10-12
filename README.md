@@ -322,6 +322,11 @@ The suite covers approval invalidation, retries, deadlines, malformed responses,
 verbatim inputs, reviewer policy, CLI response formats, process cleanup, file
 conflicts, write/flush/fsync/chmod/replace failures, and exits.
 
+Recorded, sanitized output from the tested CLI versions lives in
+`tests/fixtures`; the suite replays it through the same parsers and control
+checks, so the fake CLIs cannot drift from real formats unnoticed. See
+`tests/fixtures/README.md` for refreshing it with `scripts/record_fixtures.py`.
+
 CI (`.github/workflows/ci.yml`) runs the suite on Ubuntu and macOS with Python
 3.10 and 3.13. It builds and installs the wheel, then tests the installed
 package rather than the source tree. CI uses no reviewer credentials.

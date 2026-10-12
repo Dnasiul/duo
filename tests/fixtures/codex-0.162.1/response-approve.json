@@ -1,0 +1,5 @@
+{
+  "decision": "approve",
+  "plan": "",
+  "reason": "The plan covers all acceptance criteria and matches the repository’s substantive gaps: absent CI and release constraints, permissive same-major CLI compatibility, unbounded output capture, missing SIGTERM cleanup, and state-directory-dependent locking. It provides feasible sequencing, offline and live validation, explicit security limits, and concrete release gates. Remaining implementation choices can be resolved within the plan; none requires user input."
+}
