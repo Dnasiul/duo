@@ -138,8 +138,9 @@ Copilot accepts effort requests `none`, `minimal`, `low`, `medium`, `high`,
 The selected model and backend appear in accepted review history, and
 `--show-conversation` labels Copilot reviews explicitly.
 
-Copilot responses are requested as plain JSON and validated by Duo; a reply
-wrapped in a single Markdown code fence is accepted. Copilot does not expose the
+Copilot runs with `--output-format json`; Duo takes the final answer from that
+event stream, ignoring progress narration and tool output, and validates it. A
+reply wrapped in a single Markdown code fence is accepted. Copilot does not expose the
 native CLIs' JSON-schema option; malformed output uses the same bounded retry
 path. Duo's turn, attempt, timeout, and run-time limits apply.
 Claude's internal-turn and dollar-budget options apply only to native Claude;

@@ -41,20 +41,59 @@ FENCED_JSON = re.compile(r"\A```(?:json)?[ \t]*\n(.*)\n[ \t]*```\Z", re.DOTALL)
 DIAGNOSTIC_BYTES = 8192
 
 
+def parse_json(text: str, *, allow_fence: bool = False) -> object:
+    if allow_fence:
+        # Model replies may wrap the object in one Markdown code fence.
+        text = text.strip()
+        match = FENCED_JSON.match(text)
+        if match:
+            text = match.group(1)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise AgentError("Agent returned missing or invalid JSON") from exc
+
+
 def read_json(path: Path, *, allow_fence: bool = False) -> object:
     try:
         if path.stat().st_size > 16 * 1024 * 1024:
             raise AgentError("Agent response exceeds the 16 MiB limit", retryable=False)
         text = path.read_text(encoding="utf-8")
-        if allow_fence:
-            # Text-mode replies may wrap the object in one Markdown code fence.
-            text = text.strip()
-            match = FENCED_JSON.match(text)
-            if match:
-                text = match.group(1)
-        return json.loads(text)
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError) as exc:
         raise AgentError("Agent returned missing or invalid JSON") from exc
+    return parse_json(text, allow_fence=allow_fence)
+
+
+def copilot_reply(path: Path) -> object:
+    """The final assistant message from Copilot's JSONL event stream.
+
+    Text output is wrapped for a terminal, which breaks JSON strings, and mixes
+    progress narration with the answer. Events carry each message unchanged;
+    commentary and tool-calling messages are skipped, as is tool output.
+    """
+    reply = None
+    try:
+        # Events include tool results, so allow more than a single response.
+        if path.stat().st_size > 64 * 1024 * 1024:
+            raise AgentError("Copilot output exceeds the 64 MiB limit", retryable=False)
+        with path.open(encoding="utf-8") as lines:
+            for line in lines:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(event, dict) or event.get("type") != "assistant.message":
+                    continue
+                data = event.get("data")
+                if (isinstance(data, dict) and isinstance(data.get("content"), str)
+                        and data["content"].strip() and not data.get("toolRequests")
+                        and data.get("phase") in (None, "final_answer")):
+                    reply = data["content"]
+    except (OSError, UnicodeError) as exc:
+        raise AgentError("Agent returned missing or invalid JSON") from exc
+    if reply is None:
+        raise AgentError("Copilot returned no final answer")
+    return parse_json(reply, allow_fence=True)
 
 
 def read_tail(path: Path, size: int = DIAGNOSTIC_BYTES) -> str:
@@ -280,7 +319,7 @@ class CLIAdapter:
                     pass
             raise classify_failure(diagnostic, getattr(self.config, f"{agent}_model"))
         if backend == "copilot":
-            return validate_payload(read_json(stdout, allow_fence=True))
+            return validate_payload(copilot_reply(stdout))
         if agent == "codex":
             return validate_payload(read_json(directory / "response.json"))
         envelope = read_json(stdout)

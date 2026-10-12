@@ -119,7 +119,7 @@ def mcp_names(repo: Path) -> list[str]:
 
 def command(config: Config, agent: Agent, directory: Path) -> list[str]:
     argv = [config.copilot_bin, '--no-auto-update', '--silent', '--stream', 'off',
-            '--output-format', 'text', '--model', getattr(config, f'{agent}_model'),
+            '--output-format', 'json', '--model', getattr(config, f'{agent}_model'),
             # List options take separate values; read-only access needs no allow rule.
             '--available-tools', 'view', 'glob', 'grep',
             '--deny-tool', 'write', 'shell', 'url', '--disable-builtin-mcps', '--no-ask-user',
@@ -170,5 +170,5 @@ def preflight(config: Config, directory: Path) -> tuple[str, dict]:
         'authentication': 'environment token; values never included in audit metadata',
         'extensions': 'disabled; no inherited plugins, MCP servers or trusted folders',
         'disabled_workspace_mcp_servers': disabled_servers,
-        'response': 'JSON text validated locally; no native schema-enforcement flag',
+        'response': 'final answer from the JSONL event stream, validated locally; no native schema-enforcement flag',
     }

@@ -39,6 +39,19 @@ if '--help' in sys.argv:
     print({' '.join(copilot.FLAGS) + ' --reasoning-effort'!r}); sys.exit(0)
 if 'config' in sys.argv:
     print((pathlib.Path(os.environ['COPILOT_HOME']) / 'settings.json').read_text()); sys.exit(0)
+assert sys.argv[sys.argv.index('--output-format') + 1] == 'json'
+def reply(value):
+    # Event shape recorded from Copilot CLI 1.0.95; only the final answer counts.
+    text = value if isinstance(value, str) else json.dumps(value)
+    review = json.dumps({{'decision': 'approve', 'plan': '', 'reason': 'Tool output'}})
+    for event in ({{'type': 'session.start', 'data': {{}}}},
+                  {{'type': 'assistant.message', 'data': {{'content': 'Checking files.',
+                    'phase': 'commentary', 'toolRequests': [{{'name': 'view'}}]}}}},
+                  {{'type': 'tool.execution_complete', 'data': {{'result': {{'content': review}}}}}},
+                  {{'type': 'assistant.message', 'data': {{'content': text,
+                    'phase': 'final_answer', 'toolRequests': []}}}},
+                  {{'type': 'session.shutdown', 'data': {{}}}}):
+        print(json.dumps(event))
 '''
         path.write_text(f'#!{sys.executable}\n' + prefix + body)
         path.chmod(0o755)
@@ -68,7 +81,7 @@ if '(No plan exists yet.' in prompt:
     result = {'decision':'revise','plan':'# Draft\\n','reason':'Draft from Copilot'}
 else:
     result = {'decision':'approve','plan':'','reason':'Ready from Copilot'}
-print(json.dumps(result))
+reply(result)
 ''')
         args = ['--repo', str(self.repo), '--state-dir', str(self.audit), '--task', 'Task',
                 '--codex-model', 'gpt-6-astra', '--claude-model', 'claude-opus-5.5',
@@ -106,7 +119,7 @@ if 'exec' in sys.argv:
 else:
     print(json.dumps({'is_error':False,'subtype':'success','structured_output':result}))
 ''')
-        copilot_binary = self.fake("sys.stdin.read()\nprint(json.dumps({'decision':'approve','plan':'','reason':'Copilot'}))\n")
+        copilot_binary = self.fake("sys.stdin.read()\nreply({'decision':'approve','plan':'','reason':'Copilot'})\n")
         for native_agent in ('codex', 'claude'):
             config = self.copilot_config(copilot_binary, **{f'{native_agent}_backend': 'native'})
             # Give the unused native slot a definitely absent executable.
@@ -119,20 +132,29 @@ else:
             self.assertEqual(adapter(unused, 'Review', 5)['reason'], 'Copilot')
 
     def test_copilot_response_failures(self):
-        for body in ("print('```json\\n{}\\n```')", "print('{}')", "print('not JSON')",
-                     "print(json.dumps({'decision':'approve','plan':'','reason':'Ready'})); sys.exit(1)"):
+        ready = {'decision': 'approve', 'plan': '', 'reason': 'Ready'}
+        for body in (f"print({json.dumps(ready)!r})",  # bare text, not an event stream
+                     "reply('```json\\n{}\\n```')", "reply('{}')", "reply('not JSON')",
+                     # Narration before the object is not a valid answer.
+                     f"reply({('Checking files. ' + json.dumps(ready))!r})",
+                     "print(json.dumps({'type':'assistant.message','data':{'content':'Done',"
+                     "'phase':'commentary','toolRequests':[]}}))",
+                     f"reply({ready!r}); sys.exit(1)"):
             binary = self.fake(body)
             adapter = CLIAdapter(self.copilot_config(binary), self.store)
             with self.subTest(body=body), self.assertRaises(AgentError):
                 adapter('codex', 'Review', 5)
 
-    def test_copilot_response_in_one_json_fence_is_accepted(self):
-        reply = {'decision': 'approve', 'plan': '', 'reason': 'Ready'}
-        for text in (f'```json\n{json.dumps(reply)}\n```', f'\n```\n{json.dumps(reply)}\n```\n'):
-            binary = self.fake(f'print({text!r})')
+    def test_copilot_final_answer_is_read_from_events(self):
+        # Multi-line plans and progress lines broke the terminal text format.
+        plan = '1. Add subtract(a, b) to calc.py, next to add(a, b), in the same style.\n' * 3
+        reply = {'decision': 'revise', 'plan': plan, 'reason': 'No plan existed'}
+        for text in (json.dumps(reply), f'```json\n{json.dumps(reply)}\n```',
+                     f'\n```\n{json.dumps(reply)}\n```\n'):
+            binary = self.fake(f"print('progress, not JSON')\nreply({text!r})")
             adapter = CLIAdapter(self.copilot_config(binary), self.store)
             with self.subTest(text=text):
-                self.assertEqual(adapter('codex', 'Review', 5)['reason'], 'Ready')
+                self.assertEqual(adapter('codex', 'Review', 5)['plan'], plan)
 
     def test_model_text_on_stdout_never_marks_failure_permanent(self):
         binary = self.fake("print('The plan handles unauthorized access with no authentication bypass')\n"
