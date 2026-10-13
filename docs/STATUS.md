@@ -51,6 +51,10 @@ Backend matrix, synthetic `calc.py` task, `--max-turns 4 --max-attempts 2`:
 | native | native | 0 | agreed | 3 | 0 |
 | Copilot | Copilot | 0 | agreed | 3 | 0 |
 
+Repeated on the release candidate (`3e7828c`) with the user's Codex MCP server
+enabled: same results for all four combinations (agreed in 3 turns, exit 0, no
+token in any file, same read-only tools).
+
 Tools seen in the attempts:
 
 - Copilot: only `glob`, `view`, and `rg` (its name for `grep`); all built-in MCP
