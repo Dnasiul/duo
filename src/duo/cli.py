@@ -140,8 +140,12 @@ def output_path(output: Path | None, mode: str, repo: Path) -> Path:
     if not parent.is_dir():
         raise RunError(f"--output directory does not exist: {path.parent}")
     document = parent / path.name
-    if ".git" in document.relative_to(repo).parts:
+    # Compare names case-insensitively: macOS file systems usually ignore case,
+    # so .GIT is the same directory as .git.
+    if any(part.lower() == ".git" for part in document.relative_to(repo).parts):
         raise RunError("--output must not be inside .git")
+    if document.is_dir():
+        raise RunError(f"--output is a directory; name a file inside it: {output}")
     return document
 
 

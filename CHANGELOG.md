@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `--output` rejected `.git` only by its exact name, so on macOS, whose file
+  systems usually ignore case, `--output .GIT/report.md` could write inside the
+  repository's Git directory. Names are now compared case-insensitively.
+- `--output` naming a directory now fails with a clear message instead of
+  `[Errno 21] Is a directory`.
+
 ## 0.2.0 (2026-10-13)
 
 ### Added
