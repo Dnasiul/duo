@@ -29,8 +29,8 @@ progress against it.
 
 1. **Mixed pairs on macOS**: verified live on Linux only.
 2. **Document modes** (released in 0.2.0 as experimental): every mode ran live on
-   Linux (below); not yet live on macOS, with mixed backend pairs, or, for
-   description and report modes, through Copilot.
+   Linux, natively and through Copilot (below); not yet live on macOS or with
+   mixed backend pairs.
 
 ## Document modes live verification
 
@@ -45,6 +45,8 @@ Every number the reviewers wrote was recomputed independently from the data.
 | `report` | native, same models | agreed, 3 turns | every statistic matches (means, SDs, slopes, endpoint changes, matched-window comparison) |
 | `review` | native, same models | agreed, 3 turns | all 5 planted errors found (major), 2 correct claims confirmed; all cited values and lines correct |
 | `review` | Copilot `gpt-5.4`, `claude-sonnet-5.5` | agreed, 5 turns | same 5 errors and 2 correct claims; all cited values correct; tools `view`, `glob`, `rg` only; no token in audit files |
+| `report` | Copilot, same models (0.2.0, `a207d21`) | agreed, 5 turns | every number matches, including intermediate sums; its matched window (0–600 fs) keeps T500's failure-step row without flagging it, where the native report excluded it |
+| `description` | Copilot, same models (0.2.0, `a207d21`) | agreed, 3 turns | accurate, cites files, finds the T500 abort; does not describe itself |
 
 The first description run hit its turn limit: the document is saved inside the
 folder it describes, so a reviewer revised it to describe itself, resetting
