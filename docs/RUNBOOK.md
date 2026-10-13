@@ -13,7 +13,7 @@ code first:
 
 | Exit | Meaning | What to do |
 | --- | --- | --- |
-| 0 | Both reviewers approved the current plan | Review `plan.md` |
+| 0 | Both reviewers approved the current plan | Review `plan.md` (or the `--mode` document, shown as `plan_path`) |
 | 1 | Setup, reviewer, storage, or limit failure | Read `message`; see the sections below |
 | 2 | Invalid command-line arguments | Fix the command |
 | 3 | A reviewer needs a decision (`blocked`) | Add the answer to the criteria and rerun |
@@ -38,7 +38,8 @@ exists. Runs that reach the review loop also report `turns`, `attempts`,
 
 ## Interrupted or failed runs
 
-`plan.md` always holds the last accepted plan. Duo writes it only after a
+`plan.md` always holds the last accepted plan (with `--mode`, the mode's document
+does; everything below applies to it the same way). Duo writes it only after a
 revision is validated, replacing it atomically, so an interrupted, failed, or
 killed run never leaves a partial plan. Stopping Duo with Ctrl-C, SIGTERM, or
 SIGHUP also stops the reviewer CLI and everything it started.
