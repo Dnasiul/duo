@@ -68,7 +68,8 @@ class ModeTests(Fixture):
         self.assertEqual((self.repo / 'report.md').read_text(), '# Draft\n')
         self.assertFalse((self.repo / 'plan.md').exists())
         self.assertEqual(summary['message'], 'Both reviewers approved the current report')
-        self.assertEqual(summary['plan_path'], str(self.repo / 'report.md'))
+        # Duo reports resolved paths; macOS temporary directories sit behind a symlink.
+        self.assertEqual(summary['plan_path'], str(self.repo.resolve() / 'report.md'))
         self.assertTrue(all('Check the error bars.' in prompt for prompt in prompts))
         self.assertIn('(No report exists yet.', prompts[0])
         self.assertIn('Duo saves it as report.md in the repository; that file is not material',
@@ -76,14 +77,14 @@ class ModeTests(Fixture):
         manifest = json.loads((Path(summary['run_dir']) / 'manifest.json').read_text())
         self.assertEqual(manifest['config']['mode'], 'report')
         self.assertEqual(manifest['config']['guidance'], 'Check the error bars.\n')
-        self.assertEqual(manifest['document'], str(self.repo / 'report.md'))
+        self.assertEqual(manifest['document'], str(self.repo.resolve() / 'report.md'))
 
     def test_output_path_inside_the_repository(self):
         (self.repo / 'analysis').mkdir()
         code, summary, prompts = self.run_main('--mode', 'description', '--output', 'analysis/folder.md')
         self.assertEqual(code, 0)
         self.assertEqual((self.repo / 'analysis/folder.md').read_text(), '# Draft\n')
-        self.assertEqual(summary['plan_path'], str(self.repo / 'analysis/folder.md'))
+        self.assertEqual(summary['plan_path'], str(self.repo.resolve() / 'analysis/folder.md'))
         self.assertTrue(all('Duo saves it as analysis/folder.md' in ' '.join(prompt.split())
                             for prompt in prompts))
 
