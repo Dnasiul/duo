@@ -34,6 +34,22 @@ class AgentError(Exception):
         self.retry_after = retry_after
 
 
+class AgentTimeout(AgentError):
+    """The CLI exceeded its time allowance (the per-call timeout or the run's remainder)."""
+
+
+# Longest server-requested retry delay Duo waits for; longer requests end the run.
+MAX_RETRY_AFTER = 300.0
+
+
+class Terminated(KeyboardInterrupt):
+    """SIGTERM or SIGHUP. Handled like Ctrl-C, so the CLI's process group is stopped."""
+
+    def __init__(self, signum: int):
+        super().__init__(signum)
+        self.signum = signum
+
+
 class RunError(Exception):
     """A local setup, storage, or conflicting-edit failure."""
 

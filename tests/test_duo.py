@@ -202,6 +202,50 @@ class WorkflowTests(Fixture):
         self.assertEqual(node(state)["turns"], 1)
         node.sleep.assert_called_once_with(12)
 
+    def test_failure_without_time_to_retry_is_an_error(self):
+        # A failing CLI must not be reported as a budget limit.
+        node, state, adapter = self.node([])
+        def fail(*args):
+            node.deadline = 0
+            raise AgentError("Agent CLI failed; see the attempt diagnostics")
+        adapter.side_effect = fail
+        result = node(state)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("no time left to retry", result["error"])
+
+    def test_timeout_cut_short_by_deadline_is_limit_reached(self):
+        from duo.models import AgentTimeout
+        node, state, adapter = self.node([])
+        node.clock = Mock(side_effect=[0, 100])  # before the call, then after it
+        node.sleep = Mock()
+        node.deadline = 30  # less than the per-call timeout, so the call is capped
+        adapter.side_effect = AgentTimeout("Agent CLI timed out")
+        self.assertEqual(node(state)["status"], "limit_reached")
+        self.assertEqual(adapter.call_args.args[2], 30)
+        node.sleep.assert_not_called()
+
+    def test_own_timeout_with_deadline_passed_is_an_error(self):
+        from duo.models import AgentTimeout
+        node, state, adapter = self.node([])
+        node.config = replace(node.config, timeout=10)
+        node.clock = Mock(side_effect=[0, 100])
+        node.sleep = Mock()
+        node.deadline = 50  # the call had its full timeout, then the deadline passed
+        adapter.side_effect = AgentTimeout("Agent CLI timed out")
+        result = node(state)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("timed out (no time left to retry)", result["error"])
+        node.sleep.assert_not_called()
+
+    def test_excessive_retry_after_ends_run_without_waiting(self):
+        node, state, adapter = self.node([AgentError("Rate limited", retry_after=3600)])
+        node.sleep = Mock()
+        result = node(state)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("asked to retry after 3600 s", result["error"])
+        node.sleep.assert_not_called()
+        self.assertEqual(adapter.call_count, 1)
+
     def test_terminal_state_never_calls_agent(self):
         node, state, adapter = self.node([])
         state["status"] = "blocked"
@@ -439,12 +483,25 @@ class StorageTests(Fixture):
             PlanFile(self.repo)
 
     def test_lock_excludes_other_run_and_releases(self):
-        with run_lock(self.audit, self.repo):
+        with run_lock(self.repo):
             with self.assertRaises(RunError):
-                with run_lock(self.audit, self.repo):
+                with run_lock(self.repo):
                     self.fail("Acquired a lock twice")
-        with run_lock(self.audit, self.repo):
+        with run_lock(self.repo):
             pass
+        # The lock creates nothing in the repository.
+        self.assertEqual(list(self.repo.iterdir()), [])
+
+    def test_lock_holds_across_state_directories_and_paths(self):
+        alias = self.root / "alias"
+        alias.symlink_to(self.repo)
+        out = io.StringIO()
+        with run_lock(self.repo), redirect_stdout(out):
+            # A second run with another state directory, naming the repo via a symlink.
+            code = main(["--repo", str(alias), "--state-dir", str(self.root / "other-state"),
+                         "--task", "Task", "--codex-model", "c", "--claude-model", "a", "--json"])
+        self.assertEqual(code, 1)
+        self.assertIn("holds the lock", json.loads(out.getvalue())["message"])
 
 
 class AdapterTests(Fixture):
@@ -568,6 +625,12 @@ print(json.dumps({'is_error':False,'subtype':'success','structured_output':{'dec
 
     def test_rate_limit_delay(self):
         self.assertEqual(classify_failure("Rate limited. Retry-after: 20").retry_after, 20)
+        for text, seconds in (("retry in 500ms", 0.5), ("Please try again in 20s.", 20),
+                              ("retry after 2 minutes", 120), ("retry in 1.5 min", 90),
+                              ("try again in 1h", 3600), ("retry after 250 milliseconds", 0.25)):
+            with self.subTest(text=text):
+                self.assertAlmostEqual(classify_failure(text).retry_after, seconds)
+        self.assertIsNone(classify_failure("Server error").retry_after)
 
     def test_adapter_and_reviewer_full_cycle(self):
         binary = self.executable("agent", '''import json, pathlib, sys
@@ -649,6 +712,50 @@ class CLITests(Fixture):
         with patch("duo.cli.build_graph", side_effect=KeyboardInterrupt), redirect_stdout(out):
             self.assertEqual(main(self.arguments()), 130)
         self.assertIn("Interrupted", json.loads(out.getvalue())["message"])
+
+    @unittest.skipUnless(importlib.util.find_spec("langgraph"), "LangGraph dependency not installed")
+    def test_sigterm_stops_reviewer_and_returns_143(self):
+        import signal, time
+        marker = self.root / "reviewer.pid"
+        binary = self.executable("slow-agent", f"""import os, pathlib, sys, time
+sys.stdin.read()
+pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))
+time.sleep(60)
+""")
+        # Same isolation from host policy as the in-process fixture.
+        driver = ("import sys\nfrom unittest.mock import patch\nfrom duo.cli import main\n"
+                  "with patch('duo.adapters.verify_version'), patch('duo.adapters.check_claude_managed_files'), "
+                  "patch('duo.policy.check_claude_managed_files'):\n    sys.exit(main(sys.argv[1:]))\n")
+        process = subprocess.Popen(
+            [sys.executable, "-c", driver, *self.arguments(), "--skip-git-repo-check",
+             "--codex-bin", binary, "--claude-bin", binary],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            for _ in range(200):
+                if marker.exists() and marker.read_text():
+                    break
+                if process.poll() is not None:
+                    self.fail(f"Duo exited early: {process.communicate()}")
+                time.sleep(0.05)
+            else:
+                self.fail("Reviewer CLI never started")
+            reviewer = int(marker.read_text())
+            process.send_signal(signal.SIGTERM)
+            stdout, _ = process.communicate(timeout=20)
+        finally:
+            if process.poll() is None:
+                process.kill()
+        self.assertEqual(process.returncode, 143)
+        self.assertIn("Terminated by SIGTERM", json.loads(stdout)["message"])
+        with self.assertRaises(ProcessLookupError):
+            os.kill(reviewer, 0)
+
+    def test_signal_handlers_are_restored(self):
+        import signal
+        before = signal.getsignal(signal.SIGTERM)
+        with patch("duo.cli.build_graph", side_effect=KeyboardInterrupt), redirect_stdout(io.StringIO()):
+            main(self.arguments())
+        self.assertIs(signal.getsignal(signal.SIGTERM), before)
 
     @unittest.skipUnless(importlib.util.find_spec("langgraph"), "LangGraph dependency not installed")
     def test_effort_options_reach_agents_and_audit(self):

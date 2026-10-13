@@ -123,7 +123,9 @@ class AcceptanceTests(Fixture):
         node.deadline = 12
         node.sleep = Mock()
         result = node(state)
-        self.assertEqual(result['status'], 'limit_reached')
+        # The CLI failed; the deadline only prevented a retry.
+        self.assertEqual(result['status'], 'error')
+        self.assertIn('retry would exceed the run time limit', result['error'])
         self.assertEqual(adapter.call_count, 1)
         node.sleep.assert_not_called()
 

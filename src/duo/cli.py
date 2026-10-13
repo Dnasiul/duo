@@ -5,11 +5,13 @@ from dataclasses import asdict
 import json
 import os
 from pathlib import Path
+import signal
 import sys
+import threading
 
 from .adapters import CLIAdapter
 from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLAUDE_MAX_TURNS,
-                     Config, RunError, State, Turn)
+                     Config, RunError, State, Terminated, Turn)
 from .prompts import plan_diff
 from .storage import PlanFile, RunStore, run_lock, timestamp
 from .workflow import Reviewer, build_graph, initial_state
@@ -113,7 +115,24 @@ def is_plan_file(path: Path, repo: Path) -> bool:
         return path.expanduser().resolve() == plan.resolve()
 
 
+def terminate(signum, frame) -> None:
+    raise Terminated(signum)
+
+
 def main(argv: list[str] | None = None) -> int:
+    """Run Duo; SIGTERM and SIGHUP stop it like Ctrl-C, including the reviewer CLI."""
+    previous = {}
+    if threading.current_thread() is threading.main_thread():
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            previous[signum] = signal.signal(signum, terminate)
+    try:
+        return run(argv)
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def run(argv: list[str] | None) -> int:
     args = parser().parse_args(argv)
     store = None
     latest_review = None
@@ -156,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
         state_dir = (args.state_dir or default_state).expanduser().resolve()
         if state_dir == repo or repo in state_dir.parents:
             raise RunError("--state-dir must be outside the target repository")
-        with run_lock(state_dir, repo):
+        with run_lock(repo):
             plan = PlanFile(repo)
             store = RunStore(state_dir)
             adapter = CLIAdapter(config, store)
@@ -183,9 +202,13 @@ def main(argv: list[str] | None = None) -> int:
         emit({**outcome(result), "untested_cli": adapter.untested,
               "plan_path": str(plan.path), "run_dir": str(store.path)}, args.json)
         return EXIT_CODES[result["status"]]
-    except KeyboardInterrupt:
-        summary = {"status": "error", "message": "Interrupted; rerun to review the latest saved plan"}
-        code = 130
+    except KeyboardInterrupt as exc:
+        # Shell convention: 128 + signal number (130 for Ctrl-C, 143 for SIGTERM).
+        signum = exc.signum if isinstance(exc, Terminated) else signal.SIGINT
+        name = signal.Signals(signum).name
+        reason = "Interrupted" if signum == signal.SIGINT else f"Terminated by {name}"
+        summary = {"status": "error", "message": f"{reason}; rerun to review the latest saved plan"}
+        code = 128 + signum
     except Exception as exc:
         # Includes setup, LangGraph, and storage failures; never signal success.
         summary = {"status": "error", "message": str(exc)}

@@ -10,8 +10,8 @@ import subprocess
 import tempfile
 
 from . import copilot
-from .models import (Agent, AgentError, Config, DEFAULT_CLAUDE_MAX_TURNS, RunError, SCHEMA,
-                     validate_payload)
+from .models import (Agent, AgentError, AgentTimeout, Config, DEFAULT_CLAUDE_MAX_TURNS, RunError,
+                     SCHEMA, validate_payload)
 from .policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options,
                      codex_options, verify_controls, verify_version)
 from .storage import RunStore
@@ -172,9 +172,27 @@ def classify_failure(diagnostic: str, model: str | None = None) -> AgentError:
             if message == MODEL_UNAVAILABLE and model:
                 message = f"{message}: {model}"
             return AgentError(message, retryable=False)
-    delay = re.search(r"(?:retry-after\s*[:=]\s*|retry (?:in|after)\s+)(\d+(?:\.\d+)?)", text)
-    return AgentError("Agent CLI failed; see the attempt diagnostics",
-                      retry_after=float(delay.group(1)) if delay else None)
+    return AgentError("Agent CLI failed; see the attempt diagnostics", retry_after=retry_delay(text))
+
+
+RETRY_AFTER = re.compile(
+    r"(?:retry-after\s*[:=]\s*|(?:retry|try again) (?:in|after)\s+)(\d+(?:\.\d+)?)\s*"
+    r"(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hours?)?\b")
+def retry_delay(text: str) -> float | None:
+    """A requested delay in seconds. A bare number is seconds, as in Retry-After."""
+    match = RETRY_AFTER.search(text)
+    if not match:
+        return None
+    unit = (match.group(2) or "s").lower()
+    if unit == "ms" or unit.startswith("milli"):
+        scale = 0.001
+    elif unit.startswith("h"):
+        scale = 3600
+    elif unit.startswith("m"):
+        scale = 60
+    else:
+        scale = 1
+    return float(match.group(1)) * scale
 
 
 class CLIAdapter:
@@ -312,7 +330,7 @@ class CLIAdapter:
         try:
             code = run_process(argv, prompt, self.config.repo, timeout, stdout, stderr, env=env)
         except subprocess.TimeoutExpired as exc:
-            raise AgentError("Agent CLI timed out") from exc
+            raise AgentTimeout("Agent CLI timed out") from exc
         except OSError as exc:
             raise AgentError("Cannot start or capture the agent CLI", retryable=False) from exc
         if code:

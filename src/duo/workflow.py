@@ -3,7 +3,8 @@ from __future__ import annotations
 import time
 from typing import Callable
 
-from .models import AgentError, Config, RunError, State, Turn, validate_review
+from .models import (MAX_RETRY_AFTER, AgentError, AgentTimeout, Config, RunError, State, Turn,
+                     validate_review)
 from .prompts import build_prompt, revision_diff
 from .storage import PlanFile, RunStore, content_hash, timestamp
 
@@ -59,6 +60,8 @@ class Reviewer:
                               "turn": state["turns"] + 1, "attempt": attempt})
             if self.progress:
                 self.progress(f"Turn {state['turns'] + 1}: {agent}, attempt {attempt}")
+            # A timeout shortened by the deadline means the run ran out, not the CLI.
+            capped = remaining < self.config.timeout
             try:
                 payload = self.adapter(
                     agent, build_prompt(state, self.config.history_limit, feedback),
@@ -75,15 +78,25 @@ class Reviewer:
                 self.store.event({"event": "attempt_failed", "agent": agent,
                                   "attempt": attempt, "error": str(exc)})
                 remaining = self.deadline - self.clock()
-                if remaining <= 0:
+                if remaining <= 0 and capped and isinstance(exc, AgentTimeout):
                     state.update(status="limit_reached", error="Run time limit reached")
                     return
+                # Otherwise the attempt failed on its own; report that failure,
+                # not the budget, even when no time is left to retry.
                 if not exc.retryable or attempt == self.config.max_attempts:
                     state.update(status="error", error=f"{agent}: {exc}")
                     return
+                if remaining <= 0:
+                    state.update(status="error", error=f"{agent}: {exc} (no time left to retry)")
+                    return
+                if exc.retry_after is not None and exc.retry_after > MAX_RETRY_AFTER:
+                    state.update(status="error", error=(
+                        f"{agent}: {exc} (asked to retry after {exc.retry_after:.0f} s; "
+                        f"Duo waits at most {MAX_RETRY_AFTER:.0f} s)"))
+                    return
                 delay = max(min(2 ** (attempt - 1), 8), exc.retry_after or 0)
                 if delay >= remaining:
-                    state.update(status="limit_reached", error="Retry would exceed run time limit")
+                    state.update(status="error", error=f"{agent}: {exc} (retry would exceed the run time limit)")
                     return
                 self.sleep(delay)
                 feedback = f"Previous attempt failed: {exc}. Correct the response if necessary."

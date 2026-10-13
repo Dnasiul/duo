@@ -160,7 +160,14 @@ not establish a Copilot credit cap.
 | 2 | Invalid command-line arguments |
 | 3 | An agent needs a user decision (`blocked`) |
 | 4 | Review turn or run time limit reached |
-| 130 | Interrupted |
+| 130 | Interrupted (Ctrl-C) |
+| 143 | Terminated by SIGTERM (129 for SIGHUP) |
+
+A reviewer failure stays a failure (exit 1) even when the deadline then leaves
+no time to retry; exit 4 means the budget itself ran out, including a CLI call
+cut short by the deadline. Duo waits for a CLI's requested retry delay
+(`Retry-After`, "try again in 20s", "500ms", "2 minutes") up to 300 seconds; a
+longer request ends the run with an error instead of stalling it.
 
 The summary reports the stopping condition and the latest accepted review
 separately. JSON includes `message` and `latest_review` (reviewer, decision,
@@ -211,8 +218,9 @@ At the default review and retry limits there are at most 36 review CLI invocatio
 each can make multiple model requests. These limits do not establish a combined
 dollar cap. Version and configuration probes are separate setup commands and
 make no model requests. The run deadline limits calls and retry waits; setup, local file I/O,
-and final reporting may take additional time. Timeouts and Ctrl-C terminate the
-launched CLI process group before returning.
+and final reporting may take additional time. Timeouts, Ctrl-C, SIGTERM, and
+SIGHUP terminate the launched CLI process group before returning, so a scheduler
+stopping Duo leaves no reviewer running.
 
 Use `--codex-bin` or `--claude-bin` to select an executable (prefer an absolute
 path). Duo records requested models and CLI versions in each audit directory.
@@ -301,7 +309,9 @@ A proposal snapshot may exist even when publishing it to `plan.md` failed.
 Audit files contain task and repository-derived content. They are local records,
 not resumable LangGraph checkpoints; no automatic cleanup is performed.
 
-A per-repository OS lock excludes other Duo runs using the same state directory.
+An OS lock on the repository directory excludes other Duo runs on the same
+repository, whatever their `--state-dir` or the path used to name it. It creates
+no file and is released when the process exits, even after a crash.
 Duo also checks `plan.md` before and after agent calls and before saving it. An
 external edit stops the run rather than knowingly overwriting it. Checks cannot
 eliminate races with an uncooperative writer. Keep repository files stable during

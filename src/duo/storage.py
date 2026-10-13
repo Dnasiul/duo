@@ -71,31 +71,35 @@ class PlanFile:
 
 
 @contextmanager
-def run_lock(state_dir: Path, repo: Path):
-    # macOS/Linux: the OS releases flock when a process exits, including crashes.
+def run_lock(repo: Path):
+    """Exclude other Duo runs on this repository, whatever their state directory.
+
+    The lock is taken on the repository directory itself, so no file is created
+    there. macOS/Linux release flock when a process exits, including crashes.
+    """
     import fcntl
 
-    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    locks = state_dir / "locks"
-    locks.mkdir(exist_ok=True, mode=0o700)
-    lock_path = locks / (content_hash(str(repo)) + ".lock")
-    with lock_path.open("a") as handle:
+    descriptor = os.open(repo, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise RunError("Another Duo run holds the lock for this repository") from exc
         try:
             yield
         finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 class RunStore:
     """Audit artifacts; these are deliberately not resumable graph checkpoints."""
 
     def __init__(self, state_dir: Path):
+        state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         runs = state_dir / "runs"
-        runs.mkdir(parents=True, exist_ok=True, mode=0o700)
+        runs.mkdir(exist_ok=True, mode=0o700)
         self.path = Path(tempfile.mkdtemp(prefix="run-", dir=runs))
 
     def json(self, name: str, value: object) -> None:
