@@ -100,6 +100,7 @@ class ModeTests(Fixture):
                                 ('sub/../.git/x.md', 'not be inside .git'),
                                 ('.GIT/x.md', 'not be inside .git'),
                                 ('.Git', 'not be inside .git'),
+                                ('missing/.git/x.md', 'not be inside .git'),
                                 ('docs', 'is a directory'),
                                 ('docs/', 'is a directory'),
                                 ('missing/x.md', 'does not exist')):
