@@ -71,8 +71,8 @@ def check(agent: str, binary: str, scratch: Path) -> dict:
     result = {"cli": agent, "version": None, "status": "probe-failure", "changes": {}}
     outputs: dict[str, str] = {}
 
-    def probe(argv: list[str]) -> str:
-        text = run(argv)
+    def probe(argv: list[str], env: dict[str, str] | None = None) -> str:
+        text = run(argv, env)
         outputs[" ".join(argv[1:])] = text
         return text
 

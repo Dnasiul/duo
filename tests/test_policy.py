@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -33,7 +34,7 @@ class PolicyTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def probe(self, argv):
+    def probe(self, argv, env=None):
         if '--help' in argv:
             return HELP
         if 'features' in argv:
@@ -93,9 +94,30 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(policy['claude']['settings']['disableAllHooks'], True)
         self.assertIn('effective values are not exposed', policy['model_and_effort'])
 
+    def test_mcp_probe_excludes_user_configuration_like_reviews(self):
+        # -c mcp_servers={} leaves configured servers listed, so the MCP probe
+        # runs against an empty CODEX_HOME, as --ignore-user-config does for reviews.
+        homes = []
+
+        def probe(argv, env=None):
+            if 'mcp' in argv:
+                home = Path(env['CODEX_HOME'])
+                self.assertNotEqual(str(home), os.environ.get('CODEX_HOME'))
+                self.assertEqual(list(home.iterdir()), [])
+                self.assertEqual(env['PATH'], os.environ['PATH'])
+                homes.append(home)
+            else:
+                self.assertIsNone(env)
+            return self.probe(argv)
+        with patch('duo.policy.check_claude_managed_files'):
+            policy = verify_controls('codex', 'claude', self.root / 'settings.json', probe)
+        self.assertEqual(len(homes), 1)
+        self.assertFalse(homes[0].exists())
+        self.assertIn('without user configuration', policy['codex']['probe_settings_sources'])
+
     def test_rejects_missing_or_ineffective_controls(self):
         for failure in ('help', 'feature_true', 'feature_missing', 'mcp', 'mcp_invalid', 'doctor'):
-            def probe(argv):
+            def probe(argv, env=None):
                 if '--help' in argv and failure == 'help':
                     return ''
                 if 'features' in argv and failure.startswith('feature_'):
@@ -189,3 +211,8 @@ class PolicyTests(unittest.TestCase):
                 adapter.probe(['agent'])
             self.assertNotIn('SECRET', str(caught.exception))
         self.assertFalse(classify_failure('Error loading config: requirements.toml SECRET').retryable)
+        env = {'CODEX_HOME': str(self.root)}
+        with patch('duo.adapters.subprocess.run',
+                   return_value=subprocess.CompletedProcess(['agent'], 0, 'out', '')) as run:
+            self.assertEqual(adapter.probe(['agent'], env=env), 'out')
+        self.assertIs(run.call_args.kwargs['env'], env)

@@ -43,7 +43,7 @@ class RecordedProbeTests(unittest.TestCase):
                     "mcp": text("codex", "mcp-list.json"),
                     "doctor": text("claude", "doctor.txt")}
 
-        def probe(argv):
+        def probe(argv, env=None):
             if argv[0] == "codex":
                 return recorded[next(key for key in ("exec", "features", "mcp") if key in argv)]
             return recorded["doctor"] if "doctor" in argv else text("claude", "help.txt")

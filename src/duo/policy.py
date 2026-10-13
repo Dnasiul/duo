@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 from typing import Callable
 
 from .models import RunError
@@ -143,7 +144,8 @@ def verify_claude_remote(report: str) -> str:
 
 
 def verify_controls(codex: str, claude: str, settings: Path,
-                    probe: Callable[[list[str]], str], agents: set[str] | None = None) -> dict:
+                    probe: Callable[..., str], agents: set[str] | None = None) -> dict:
+    """Verify the inspection controls; probe(argv, env=None) returns a CLI's stdout."""
     agents = {"codex", "claude"} if agents is None else agents
     policy = {
         "id": POLICY_ID,
@@ -161,18 +163,28 @@ def verify_controls(codex: str, claude: str, settings: Path,
         if any(features.get(name) != "false" for name in CODEX_DISABLED):
             raise RunError("Codex inspection feature restrictions did not take effect; "
                            "check managed settings and CLI compatibility")
+        # Reviews skip $CODEX_HOME/config.toml (--ignore-user-config), which
+        # `mcp list` cannot do, and -c mcp_servers={} does not remove servers a
+        # configuration layer defines. An empty CODEX_HOME loads what a review
+        # loads: managed and system configuration, no user configuration, and no
+        # projects it trusts.
+        with tempfile.TemporaryDirectory(prefix="duo-codex-home-") as home:
+            listing = probe([codex, *codex_options(), "mcp", "list", "--json"],
+                            env={**os.environ, "CODEX_HOME": home})
         try:
-            servers = json.loads(probe([codex, *codex_options(), "mcp", "list", "--json"]))
+            servers = json.loads(listing)
         except ValueError as exc:
             raise RunError("Cannot verify Codex MCP configuration") from exc
         if servers != []:
-            raise RunError("Codex MCP restriction did not take effect")
+            raise RunError("Codex MCP servers are configured outside user configuration "
+                           "(for example, managed configuration); Duo cannot disable them")
         policy["codex"] = {
             "overrides": list(CODEX_OVERRIDES),
             "verified_disabled_features": list(CODEX_DISABLED),
             "verified_mcp_servers": [],
             "settings_sources": "CLI overrides; user config and exec rules ignored during review",
-            "probe_settings_sources": "CLI overrides over normal configuration",
+            "probe_settings_sources": "CLI overrides over normal configuration; "
+                                      "MCP servers listed without user configuration, as in reviews",
             "authentication": "existing CLI authentication",
         }
     if "claude" in agents:

@@ -245,10 +245,10 @@ class CLIAdapter:
         self.untested: dict[str, str] = {}
         self.settings_path = self.store.path / "claude-settings.json"
 
-    def probe(self, argv: list[str]) -> str:
+    def probe(self, argv: list[str], env: dict[str, str] | None = None) -> str:
         try:
             proc = subprocess.run(argv, capture_output=True, text=True, timeout=30,
-                                  cwd=self.config.repo, stdin=subprocess.DEVNULL)
+                                  cwd=self.config.repo, env=env, stdin=subprocess.DEVNULL)
         except (OSError, UnicodeError, subprocess.TimeoutExpired) as exc:
             raise RunError("Cannot verify reviewer configuration; CLI probe failed") from exc
         if proc.returncode:

@@ -281,9 +281,9 @@ Duo applies and audits inspection restrictions before starting reviews:
   its transcript stays out of stderr and failures are classified from
   structured error events, never from model text. Preflight checks
   the effective feature flags and empty MCP list, including inherited and managed
-  configuration; unsupported or conflicting controls stop the run. The
-  `mcp_servers={}` override does not remove servers defined in
-  `~/.codex/config.toml`, so preflight refuses to run while any are configured.
+  configuration; unsupported or conflicting controls stop the run. MCP servers
+  in your own Codex configuration are allowed: reviews ignore it, and preflight
+  lists servers the same way. Servers from managed configuration stop the run.
 - **Claude:** safe and restricted modes, an empty list of user/project/local
   setting sources, explicit settings disabling hooks and connector/plugin sync,
   and only `Read`, `Glob`, and `Grep` tools. MCP, Chrome integration, and skills

@@ -18,31 +18,28 @@ Written 2026-10-13 at commit `c5886a7`; Linux live results added the same day.
 | Deployment contract, compatibility matrix, restart behavior | README "Supported deployment" |
 | Runbook and security model | `docs/RUNBOOK.md`, `docs/SECURITY.md` |
 | Live runs on Linux: smoke test (native and Copilot) and all four backend combinations, including both mixed pairs | "Linux live verification" below |
+| Codex MCP check matches the configuration reviews load, so user-configured MCP servers no longer block native Codex | `src/duo/policy.py` (`verify_controls`) |
 
 ## Open
 
-1. **Codex MCP preflight with user-configured servers**: `-c 'mcp_servers={}'`
-   does not remove servers defined in `~/.codex/config.toml`, so preflight
-   refuses native Codex for anyone with a Codex MCP server. Reviews pass
-   `--ignore-user-config`, but `codex mcp list` does not accept it, so the probe
-   checks a different configuration from the one reviews load. Fix: make the
-   probe match the review (for example, override each listed server as disabled
-   and require all to be disabled), add tests, correct the docs.
-2. **Mixed pairs on macOS**: verified live on Linux only.
-3. **Confinement evidence**: show with a file outside the repository what each
+1. **Mixed pairs on macOS**: verified live on Linux only.
+2. **Confinement evidence**: show with a file outside the repository what each
    reviewer can read. Codex is known to read outside; Claude Code and Copilot are
    untested (see `docs/SECURITY.md`). This can extend `scripts/smoke_inspection.py`.
-4. **Decisions for the owner**: isolation profile now or documented as a
+3. **Decisions for the owner**: isolation profile now or documented as a
    limitation (recommended: documented); license (none yet); where to publish.
-5. **Release**: changelog, tag `v0.1.0`, checksums, release report (plan section 7).
+4. **Release**: changelog, tag `v0.1.0`, checksums, release report (plan section 7).
 
 ## Linux live verification
 
 2026-10-13, Ubuntu 22.04.5 LTS, kernel 5.15.0-198-generic, x86-64, Python 3.11.17.
 CLIs: codex-cli 0.162.1, Claude Code 2.1.296, Copilot CLI 1.0.96 (within the
-tested 1.0.x range). Offline suite: 137 tests, OK. `check_drift.py`: all compatible
-once the one Codex MCP server in the user configuration was commented out (see
-open item 1).
+tested 1.0.x range). Offline suite: 137 tests, OK. `check_drift.py`: all compatible.
+The first preflight refused native Codex because the user configuration defines
+an MCP server: `-c mcp_servers={}` does not remove configured servers. The MCP
+check now lists servers against an empty `CODEX_HOME`, which loads what a review
+loads (reviews pass `--ignore-user-config`); the live runs below were made with
+that server commented out, and the smoke test was repeated with it enabled.
 
 Smoke test: Codex and Claude, natively (`gpt-6-astra`, `claude-sonnet-5-5`) and
 through Copilot (`gpt-5.4`, `claude-sonnet-5.5`), each inspected the repository
