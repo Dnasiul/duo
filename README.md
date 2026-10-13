@@ -57,13 +57,13 @@ inherit your environment, and the credential check is best-effort.
 
 | Area | Tested | Experimental or unsupported |
 | --- | --- | --- |
-| Operating system | macOS on Apple silicon (live runs and CI); Ubuntu (CI with fake CLIs) | Live runs on Linux are not yet verified; Windows is unsupported |
+| Operating system | macOS on Apple silicon (live runs and CI); Ubuntu 22.04 on x86-64 (live runs); Ubuntu (CI) | Other Linux distributions: CI only; Windows is unsupported |
 | Python | 3.10, 3.11, 3.12, 3.13, 3.14 (CI on both systems) | Older versions are unsupported |
 | Dependencies | `constraints.txt` | Newest versions within `pyproject.toml` ranges (CI checks them, untested for release) |
 | Codex CLI | 0.162.x from 0.162.1 | Other versions, only with `--allow-untested-cli` |
 | Claude Code | 2.1.x from 2.1.296 | Other versions, only with `--allow-untested-cli` |
 | Copilot CLI | 1.0.x from 1.0.95 | Other versions, only with `--allow-untested-cli` |
-| Backends | Native Codex with native Claude; both reviewers through Copilot (live runs) | Mixed native/Copilot pairs: fake-CLI tests only until verified live |
+| Backends | All four native/Copilot combinations (live runs on Linux); native/native and Copilot/Copilot (live runs on macOS) | Mixed pairs on macOS: fake-CLI tests only |
 | Models used in live runs | Native: `gpt-6-astra`, `claude-opus-5-5`, `claude-sonnet-5-5`; Copilot: `gpt-5.4`, `claude-sonnet-5.5` | Any other model your account offers; unknown names stop the run without retrying |
 | Authentication | Codex and Claude Code: their own CLI login. Copilot: a token in `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`; a fine-grained token needs the "Copilot Requests" permission | Copilot's saved interactive login is not used |
 
@@ -281,7 +281,9 @@ Duo applies and audits inspection restrictions before starting reviews:
   its transcript stays out of stderr and failures are classified from
   structured error events, never from model text. Preflight checks
   the effective feature flags and empty MCP list, including inherited and managed
-  configuration; unsupported or conflicting controls stop the run.
+  configuration; unsupported or conflicting controls stop the run. The
+  `mcp_servers={}` override does not remove servers defined in
+  `~/.codex/config.toml`, so preflight refuses to run while any are configured.
 - **Claude:** safe and restricted modes, an empty list of user/project/local
   setting sources, explicit settings disabling hooks and connector/plugin sync,
   and only `Read`, `Glob`, and `Grep` tools. MCP, Chrome integration, and skills

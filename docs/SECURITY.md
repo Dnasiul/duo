@@ -36,9 +36,9 @@ Review each provider's data-handling settings before use.
 
 | Access | Behavior | Evidence |
 | --- | --- | --- |
-| Reading files | Sandboxed shell commands can read any file your user can read. Reads are **not** confined to the repository. | Tested: a recorded real run (`tests/fixtures/codex-0.162.1/events-approve.jsonl`) shows Codex checking for files in every directory above the repository |
+| Reading files | Sandboxed shell commands can read any file your user can read. Reads are **not** confined to the repository. | Tested: a recorded real run (`tests/fixtures/codex-0.162.1/events-approve.jsonl`) shows Codex checking for files in every directory above the repository; live runs on Linux also read `/tmp` and `/` |
 | Writing files | Read-only sandbox, approvals `never` | Verified each run (overrides applied); Tested: plan unchanged in the smoke test. Not verified: a deliberate write attempt |
-| Tools | Read-only sandboxed commands. MCP servers, apps, plugins, hooks, notify commands, browser use, web search, multi-agent tools, and shell snapshots disabled | Verified each run (effective feature list, empty MCP list); Tested: repository hooks and MCP launchers did not run in the smoke test |
+| Tools | Read-only sandboxed commands. MCP servers, apps, plugins, hooks, notify commands, browser use, web search, multi-agent tools, and shell snapshots disabled | Verified each run (effective feature list, empty MCP list); Tested: repository hooks and MCP launchers did not run in the smoke test. The `mcp_servers={}` override does not remove servers defined in `~/.codex/config.toml` (Codex 0.162.1), so preflight refuses to run while any are configured; reviews ignore user configuration, but whether such servers would start during a review is not verified |
 | Environment | The Codex process inherits Duo's **entire environment**, including any cloud or API credentials. What its sandboxed commands see depends on Codex's own shell-environment policy, which Duo does not change | Not verified |
 | Network | The CLI talks to OpenAI. Web search is disabled | Configured; network access from sandboxed commands not verified |
 | Authentication | Codex's own stored login. Because reads are unrestricted, its commands can read credential files in your home directory | Not prevented |
@@ -60,10 +60,10 @@ Review each provider's data-handling settings before use.
 | --- | --- | --- |
 | Reading files | `view`, `glob`, `grep`, intended to be confined to the repository: fresh home with no trusted folders, temporary directory access disallowed | Configured; not tested with a file outside the repository |
 | Writing files | `write` and `shell` denied; not offered as tools | Verified each run (flags present, isolated settings in effect); Tested: plan unchanged |
-| Tools | Only `view`, `glob`, `grep`. `url` denied, built-in and repository MCP servers disabled; hooks, connectors, memory, project extensions, and the IDE connection off | Verified each run; Tested: hooks and MCP launchers did not run; real runs used only these tools |
+| Tools | Only `view`, `glob`, `grep`. `url` denied, built-in and repository MCP servers disabled; hooks, connectors, memory, project extensions, and the IDE connection off | Verified each run; Tested: hooks and MCP launchers did not run; real runs used only these tools (on Linux they appear as `glob`, `view`, and `rg`, Copilot's name for `grep`) |
 | Environment | Duo's environment minus other `COPILOT_*` settings. `GH_TOKEN`, `GITHUB_TOKEN`, and cloud credentials still pass through. Without a shell tool, the model has no direct way to read them | Configured |
 | Network | The CLI talks to GitHub Copilot. The `url` tool is denied | Configured |
-| Authentication | A token from the environment; the saved Copilot login is not used. The CLI process necessarily holds the token | Tested: tokens never appear in audit files |
+| Authentication | A token from the environment; the saved Copilot login is not used. The CLI process necessarily holds the token | Tested: tokens never appear in audit files (macOS and Linux) |
 
 ## Credential check
 
