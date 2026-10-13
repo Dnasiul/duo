@@ -36,7 +36,7 @@ Review each provider's data-handling settings before use.
 
 | Access | Behavior | Evidence |
 | --- | --- | --- |
-| Reading files | Sandboxed shell commands can read any file your user can read. Reads are **not** confined to the repository. | Tested: a recorded real run (`tests/fixtures/codex-0.162.1/events-approve.jsonl`) shows Codex checking for files in every directory above the repository; live runs on Linux also read `/tmp` and `/` |
+| Reading files | Sandboxed shell commands can read any file your user can read. Reads are **not** confined to the repository. | Tested: a recorded real run (`tests/fixtures/codex-0.162.1/events-approve.jsonl`) shows Codex checking for files in every directory above the repository; live runs on Linux also read `/tmp` and `/`. Tested (`--confinement`, Linux): read a file in the temporary directory, one in the home directory, and one through a symbolic link inside the repository |
 | Writing files | Read-only sandbox, approvals `never` | Verified each run (overrides applied); Tested: plan unchanged in the smoke test. Not verified: a deliberate write attempt |
 | Tools | Read-only sandboxed commands. MCP servers, apps, plugins, hooks, notify commands, browser use, web search, multi-agent tools, and shell snapshots disabled | Verified each run (effective feature list, empty MCP list); Tested: repository hooks and MCP launchers did not run in the smoke test. The `mcp_servers={}` override does not remove configured servers (Codex 0.162.1), so the MCP list is checked against an empty `CODEX_HOME`, the configuration reviews load. Tested: servers in user configuration, and in projects it trusts, are not loaded by a review; the smoke test passes with one configured. Because that check runs without credentials, MCP servers from policy fetched with your login are not verified |
 | Environment | The Codex process inherits Duo's **entire environment**, including any cloud or API credentials. What its sandboxed commands see depends on Codex's own shell-environment policy, which Duo does not change | Not verified |
@@ -47,7 +47,7 @@ Review each provider's data-handling settings before use.
 
 | Access | Behavior | Evidence |
 | --- | --- | --- |
-| Reading files | `Read`, `Glob`, and `Grep` only. Whether they can reach paths outside the repository in this mode is untested | Not verified; assume yes |
+| Reading files | `Read`, `Glob`, and `Grep` only. Restricted mode refuses reads outside the working directory, including through a symbolic link inside the repository | Tested (`--confinement`, Linux): `Read` was denied for a file in the temporary directory, one in the home directory, and one through a repository symlink, each listed in Claude Code's `permission_denials`. Not verified: `Glob` and `Grep` on outside paths |
 | Writing files | No write or shell tools | Verified each run (required flags present); Tested: plan unchanged in the smoke test |
 | Tools | Only `Read`, `Glob`, `Grep`. Safe and restricted modes, no setting sources, hooks and connector/plugin sync disabled, MCP, Chrome, and slash commands disabled | Verified each run (flags, `claude doctor` remote-policy state, managed-settings files); Tested: hooks and MCP launchers did not run |
 | Environment | Inherits Duo's entire environment. Without a shell tool, the model has no direct way to read it | Configured |
@@ -58,7 +58,7 @@ Review each provider's data-handling settings before use.
 
 | Access | Behavior | Evidence |
 | --- | --- | --- |
-| Reading files | `view`, `glob`, `grep`, intended to be confined to the repository: fresh home with no trusted folders, temporary directory access disallowed | Configured; not tested with a file outside the repository |
+| Reading files | `view`, `glob`, `grep`, confined to the repository: fresh home with no trusted folders, temporary directory access disallowed. An outside path needs approval that a non-interactive run cannot give, so it is denied; symbolic links are judged by their target | Tested (`--confinement`, Linux, both models): `view` was denied for a file in the temporary directory, one in the home directory, and one through a repository symlink ("Permission denied because no interactive user response was available"). Not verified: `glob` and `grep` on outside paths |
 | Writing files | `write` and `shell` denied; not offered as tools | Verified each run (flags present, isolated settings in effect); Tested: plan unchanged |
 | Tools | Only `view`, `glob`, `grep`. `url` denied, built-in and repository MCP servers disabled; hooks, connectors, memory, project extensions, and the IDE connection off | Verified each run; Tested: hooks and MCP launchers did not run; real runs used only these tools (on Linux they appear as `glob`, `view`, and `rg`, Copilot's name for `grep`) |
 | Environment | Duo's environment minus other `COPILOT_*` settings. `GH_TOKEN`, `GITHUB_TOKEN`, and cloud credentials still pass through. Without a shell tool, the model has no direct way to read them | Configured |
@@ -91,8 +91,10 @@ permission-bypass flags.
 
 ## Not claimed
 
-- Isolation from the rest of your files. Codex can read outside the repository,
-  and the other reviewers have not been tested against it.
+- Isolation from the rest of your files. Codex can read outside the repository.
+  Claude Code and Copilot refused file reads outside it in tests, but their
+  search tools were not tested against outside paths, and none of this isolates
+  the environment or the CLI process itself.
 - Hiding a credential from the CLI process that needs it to authenticate.
 - Protection against a compromised CLI binary or npm package.
 - Safety under enterprise-managed CLI policies: Duo refuses to run with them
@@ -108,7 +110,8 @@ Until an isolation profile exists, for repositories you are less sure of:
   `env -u AWS_SECRET_ACCESS_KEY -u GITHUB_TOKEN duo ...`. Reviewer CLIs still need
   `HOME` and `PATH` to find their logins, and Copilot needs its token;
 - prefer Claude Code or Copilot over native Codex where reads outside the
-  repository matter, keeping in mind that their confinement is untested.
+  repository matter: both refused outside reads in tests, which cover file
+  reads only.
 
 ## Reproducing the evidence
 
@@ -116,5 +119,7 @@ Until an isolation profile exists, for repositories you are less sure of:
   credential-filter, fixture, and limit tests.
 - `python scripts/smoke_inspection.py --codex-model ... --claude-model ...`: real
   CLIs, two model calls; checks that hooks and MCP launchers stay inert, the plan
-  is unchanged, and the repository is readable.
+  is unchanged, and the repository is readable. `--confinement` adds two model
+  calls that ask each reviewer to read three files outside the repository and
+  reports, per file, whether its random phrase reached the response or audit files.
 - Every run's `reviewer-policy.json` records the controls preflight verified.

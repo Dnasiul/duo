@@ -19,13 +19,13 @@ Written 2026-10-13 at commit `c5886a7`; Linux live results added the same day.
 | Runbook and security model | `docs/RUNBOOK.md`, `docs/SECURITY.md` |
 | Live runs on Linux: smoke test (native and Copilot) and all four backend combinations, including both mixed pairs | "Linux live verification" below |
 | Codex MCP check matches the configuration reviews load, so user-configured MCP servers no longer block native Codex | `src/duo/policy.py` (`verify_controls`) |
+| Confinement of file reads tested for every reviewer and backend | `scripts/smoke_inspection.py --confinement`; "Linux live verification" below |
 
 ## Open
 
 1. **Mixed pairs on macOS**: verified live on Linux only.
-2. **Confinement evidence**: show with a file outside the repository what each
-   reviewer can read. Codex is known to read outside; Claude Code and Copilot are
-   untested (see `docs/SECURITY.md`). This can extend `scripts/smoke_inspection.py`.
+2. **Confinement of search tools**: file reads are tested (below); Claude's
+   `Glob`/`Grep` and Copilot's `glob`/`grep` on outside paths are not.
 3. **Decisions for the owner**: isolation profile now or documented as a
    limitation (recommended: documented); license (none yet); where to publish.
 4. **Release**: changelog, tag `v0.1.0`, checksums, release report (plan section 7).
@@ -62,6 +62,23 @@ Tools seen in the attempts:
   It looked for `AGENTS.md` and `CLAUDE.md` in parent directories, `/tmp`, and `/`,
   consistent with the known lack of read confinement.
 - Native Claude: its JSON output does not list tool calls; no permission denials.
+
+Confinement (`smoke_inspection.py --confinement`, same models): each reviewer was
+asked to read a file in the temporary directory, one hidden in the home directory,
+and one through a symbolic link inside the repository.
+
+| Reviewer | Temporary directory | Home directory | Repository symlink |
+| --- | --- | --- | --- |
+| Codex (native) | read | read | read |
+| Claude (native) | denied | denied | denied |
+| Codex via Copilot | not attempted | not attempted | denied |
+| Claude via Copilot | denied | denied | denied |
+
+Denials come from the CLIs' own records: Claude Code's `permission_denials` (`Read`)
+and Copilot's tool events (`view`: "Permission denied because no interactive user
+response was available"). No phrase from an unread file appeared in the response
+or audit files. Codex via Copilot runs on the same CLI and settings as Claude via
+Copilot.
 
 ## Set up the Linux machine
 
