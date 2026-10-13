@@ -48,6 +48,11 @@ Duo is a single-user command-line tool. The supported baseline is:
 Reviewer agreement is a signal, not a verdict: for consequential work, a person
 should still assess the final plan.
 
+[docs/SECURITY.md](docs/SECURITY.md) details what each reviewer can read and
+reach, which controls are tested or only configured, and what Duo does not
+claim. In short: Codex's reads are not confined to the repository, reviewer CLIs
+inherit your environment, and the credential check is best-effort.
+
 ### Compatibility
 
 | Area | Tested | Experimental or unsupported |
@@ -291,6 +296,9 @@ Duo applies and audits inspection restrictions before starting reviews:
   Conflicting repository settings and local managed policy cause a setup error;
   repository settings that require inspection must be plain JSON. Configurations
   and organization policy must remain stable during the run.
+
+See [docs/SECURITY.md](docs/SECURITY.md) for each reviewer's file, environment,
+network, and credential access and the evidence behind it.
 
 Because a reviewer may read files outside the repository, Duo rejects any
 response whose plan or reason contains a credential it introduced (private keys

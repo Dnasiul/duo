@@ -410,6 +410,26 @@ class ContractTests(Fixture):
         validate_review(response("revise", text + "x"), text)
         self.assertLess(time.monotonic() - started, 2)
 
+    def test_credential_scan_is_bounded_on_adversarial_inputs_at_size_limit(self):
+        import time
+        from duo.models import MAX_TEXT_BYTES, new_secret
+        header = "-----BEGIN RSA PRIVATE KEY-----"
+        n = MAX_TEXT_BYTES
+        repeated = (header + "\n") * (n // (len(header) + 1))
+        tokens = ("ghp_" + "a1" * 18 + " ") * (n // 41)
+        cases = (
+            (header + ("\nab" * n)[:n - len(header)], ""),       # short lines, no footer
+            (header + ("\\n" * n)[:n - len(header)], ""),        # escaped line breaks
+            (header + "\n" + "A" * (n - 80) + "\n-----END DSA PRIVATE KEY-----", ""),
+            (repeated, repeated),                                # every match already known
+            (tokens, tokens),
+        )
+        for text, known in cases:
+            started = time.monotonic()
+            new_secret(text, known)
+            # About 0.2 s on a laptop; the bound catches super-linear behavior.
+            self.assertLess(time.monotonic() - started, 5)
+
     def test_whitespace_is_preserved(self):
         text = "  code  \r\nValue\u00a0"
         self.assertEqual(validate_review(response("revise", text), "Old")["plan"],
