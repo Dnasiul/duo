@@ -17,6 +17,7 @@ Written 2026-10-13 at commit `c5886a7`; Linux live results added the same day.
 | Output and run-storage limits enforced while reviewers run; 1 MiB input limits; `duo-clean` | `src/duo/adapters.py`, `src/duo/cleanup.py` |
 | Deployment contract, compatibility matrix, restart behavior | README "Supported deployment" |
 | Runbook and security model | `docs/RUNBOOK.md`, `docs/SECURITY.md` |
+| Owner decisions (2026-10-13): no isolation profile in 0.1.0, documented as a limitation; MIT License; GitHub release only | `docs/SECURITY.md`, `LICENSE`, `CHANGELOG.md` |
 | Live runs on Linux: smoke test (native and Copilot) and all four backend combinations, including both mixed pairs | "Linux live verification" below |
 | Codex MCP check matches the configuration reviews load, so user-configured MCP servers no longer block native Codex | `src/duo/policy.py` (`verify_controls`) |
 | Confinement of file reads and searches tested for every reviewer and backend | `scripts/smoke_inspection.py --confinement`, `--search-confinement`; "Linux live verification" below |
@@ -24,9 +25,7 @@ Written 2026-10-13 at commit `c5886a7`; Linux live results added the same day.
 ## Open
 
 1. **Mixed pairs on macOS**: verified live on Linux only.
-2. **Decisions for the owner**: isolation profile now or documented as a
-   limitation (recommended: documented); license (none yet); where to publish.
-3. **Release**: changelog, tag `v0.1.0`, checksums, release report (plan section 7).
+2. **Release**: changelog, tag `v0.1.0`, checksums, release report (plan section 7).
 
 ## Linux live verification
 

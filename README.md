@@ -24,6 +24,10 @@ pins the exact versions CI tests on every Python version. Without `-c
 constraints.txt`, pip installs the newest versions within those ranges, which CI
 also exercises but which are not part of a tested release.
 
+Releases are published on GitHub only, as a wheel and source distribution with
+SHA-256 checksums; install a downloaded wheel the same way, replacing `.` with
+its path. Duo is released under the MIT License (see `LICENSE`).
+
 For development from this directory, the micromamba environment named `duo`
 works as well:
 

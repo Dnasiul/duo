@@ -134,6 +134,10 @@ python3 -m venv ~/.venvs/duo-previous
 ~/.venvs/duo-previous/bin/python -m pip install -c duo-previous/constraints.txt ./duo-previous
 ```
 
+Or download the previous release's wheel, `SHA256SUMS`, and `constraints.txt` from
+its GitHub release, check the wheel with `sha256sum --ignore-missing -c SHA256SUMS`
+(`shasum -a 256` on macOS), and install the wheel with `-c constraints.txt`.
+
 Plans and audit runs are plain files and stay compatible across versions; no
 migration is needed. If a reviewer CLI upgrade caused the problem, reinstall the
 CLI version listed as tested for that release.
