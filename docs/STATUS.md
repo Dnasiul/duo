@@ -27,10 +27,29 @@ progress against it.
 ## Open
 
 1. **Mixed pairs on macOS**: verified live on Linux only.
-2. **Document modes** (branch `document-modes`, local only): `--mode report`,
-   `description`, `review`, `--instructions-file`, `--output`. One live
-   description run on Linux; report and review modes and Copilot untested.
-   Candidate for 0.2.0 after rebasing onto `main`.
+2. **Document modes** (branch `document-modes`): `--mode report`, `description`,
+   `review`, `--instructions-file`, `--output`. Every mode ran live on Linux
+   (below); not yet live on macOS or with mixed backend pairs. Candidate for 0.2.0.
+
+## Document modes live verification
+
+2026-10-13, branch `document-modes`, same Linux machine and CLI versions as above.
+Each run used a synthetic folder with two NVT runs: T300 completed 2000 steps;
+T500 aborted at step 1200 (SCC failure), with known energies and temperatures.
+Every number the reviewers wrote was recomputed independently from the data.
+
+| Mode | Backends and models | Outcome | Check |
+| --- | --- | --- | --- |
+| `description` | native `gpt-6-astra`, `claude-sonnet-5-5` | agreed, 4 turns | accurate, cites files, finds the T500 abort |
+| `report` | native, same models | agreed, 3 turns | every statistic matches (means, SDs, slopes, endpoint changes, matched-window comparison) |
+| `review` | native, same models | agreed, 3 turns | all 5 planted errors found (major), 2 correct claims confirmed; all cited values and lines correct |
+| `review` | Copilot `gpt-5.4`, `claude-sonnet-5.5` | agreed, 5 turns | same 5 errors and 2 correct claims; all cited values correct; tools `view`, `glob`, `rg` only; no token in audit files |
+
+The first description run hit its turn limit: the document is saved inside the
+folder it describes, so a reviewer revised it to describe itself, resetting
+approvals. Non-plan modes now tell reviewers which file holds the document; the
+rerun agreed. In every run, the material under review was left unchanged and
+only the mode's document was written.
 
 ## Releasing
 
