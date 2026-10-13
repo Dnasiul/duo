@@ -51,8 +51,8 @@ should still assess the final plan.
 [docs/SECURITY.md](docs/SECURITY.md) details what each reviewer can read and
 reach, which controls are tested or only configured, and what Duo does not
 claim. In short: Codex's reads are not confined to the repository (Claude Code
-and Copilot refused file reads outside it in tests), reviewer CLIs inherit your
-environment, and the credential check is best-effort.
+and Copilot refused file reads and searches outside it in tests), reviewer CLIs
+inherit your environment, and the credential check is best-effort.
 
 ### Compatibility
 
@@ -496,7 +496,9 @@ and `--copilot-bin`; Copilot smoke runs require the same environment token as Du
 outside the repository: one in the temporary directory, one hidden in your home
 directory (removed afterwards), and one through a symbolic link inside the
 repository. It reports per file whether the reviewer read it, and shows the
-CLI's own denials where it records them.
+CLI's own denials where it records them. `--search-confinement` adds two model
+calls that ask each reviewer to list and search three directories outside the
+repository the same way, reporting leaked file names and contents separately.
 
 ## Implementation
 

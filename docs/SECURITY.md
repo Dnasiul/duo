@@ -47,7 +47,7 @@ Review each provider's data-handling settings before use.
 
 | Access | Behavior | Evidence |
 | --- | --- | --- |
-| Reading files | `Read`, `Glob`, and `Grep` only. Restricted mode refuses reads outside the working directory, including through a symbolic link inside the repository | Tested (`--confinement`, Linux): `Read` was denied for a file in the temporary directory, one in the home directory, and one through a repository symlink, each listed in Claude Code's `permission_denials`. Not verified: `Glob` and `Grep` on outside paths |
+| Reading files | `Read`, `Glob`, and `Grep` only. Restricted mode refuses reads outside the working directory, including through a symbolic link inside the repository | Tested (`--confinement`, Linux): `Read` was denied for a file in the temporary directory, one in the home directory, and one through a repository symlink, each listed in Claude Code's `permission_denials`. Tested (`--search-confinement`, Linux): `Glob` and `Grep` were denied for a directory in the temporary directory and one in the home directory; searching the repository did not follow a symbolic link to an outside directory |
 | Writing files | No write or shell tools | Verified each run (required flags present); Tested: plan unchanged in the smoke test |
 | Tools | Only `Read`, `Glob`, `Grep`. Safe and restricted modes, no setting sources, hooks and connector/plugin sync disabled, MCP, Chrome, and slash commands disabled | Verified each run (flags, `claude doctor` remote-policy state, managed-settings files); Tested: hooks and MCP launchers did not run |
 | Environment | Inherits Duo's entire environment. Without a shell tool, the model has no direct way to read it | Configured |
@@ -58,7 +58,7 @@ Review each provider's data-handling settings before use.
 
 | Access | Behavior | Evidence |
 | --- | --- | --- |
-| Reading files | `view`, `glob`, `grep`, confined to the repository: fresh home with no trusted folders, temporary directory access disallowed. An outside path needs approval that a non-interactive run cannot give, so it is denied; symbolic links are judged by their target | Tested (`--confinement`, Linux, both models): `view` was denied for a file in the temporary directory, one in the home directory, and one through a repository symlink ("Permission denied because no interactive user response was available"). Not verified: `glob` and `grep` on outside paths |
+| Reading files | `view`, `glob`, `grep`, confined to the repository: fresh home with no trusted folders, temporary directory access disallowed. An outside path needs approval that a non-interactive run cannot give, so it is denied; symbolic links are judged by their target | Tested (`--confinement`, Linux, both models): `view` was denied for a file in the temporary directory, one in the home directory, and one through a repository symlink ("Permission denied because no interactive user response was available"). Tested (`--search-confinement`, Linux, both models): `glob` and `grep` (shown to the Codex model as `rg`) were denied the same way for a directory in the temporary directory and one in the home directory; searching the repository did not follow a symbolic link to an outside directory |
 | Writing files | `write` and `shell` denied; not offered as tools | Verified each run (flags present, isolated settings in effect); Tested: plan unchanged |
 | Tools | Only `view`, `glob`, `grep`. `url` denied, built-in and repository MCP servers disabled; hooks, connectors, memory, project extensions, and the IDE connection off | Verified each run; Tested: hooks and MCP launchers did not run; real runs used only these tools (on Linux they appear as `glob`, `view`, and `rg`, Copilot's name for `grep`) |
 | Environment | Duo's environment minus other `COPILOT_*` settings. `GH_TOKEN`, `GITHUB_TOKEN`, and cloud credentials still pass through. Without a shell tool, the model has no direct way to read them | Configured |
@@ -92,9 +92,8 @@ permission-bypass flags.
 ## Not claimed
 
 - Isolation from the rest of your files. Codex can read outside the repository.
-  Claude Code and Copilot refused file reads outside it in tests, but their
-  search tools were not tested against outside paths, and none of this isolates
-  the environment or the CLI process itself.
+  Claude Code and Copilot refused file reads and searches outside it in tests,
+  but that confines their tools, not the environment or the CLI process itself.
 - Hiding a credential from the CLI process that needs it to authenticate.
 - Protection against a compromised CLI binary or npm package.
 - Safety under enterprise-managed CLI policies: Duo refuses to run with them
@@ -110,8 +109,7 @@ Until an isolation profile exists, for repositories you are less sure of:
   `env -u AWS_SECRET_ACCESS_KEY -u GITHUB_TOKEN duo ...`. Reviewer CLIs still need
   `HOME` and `PATH` to find their logins, and Copilot needs its token;
 - prefer Claude Code or Copilot over native Codex where reads outside the
-  repository matter: both refused outside reads in tests, which cover file
-  reads only.
+  repository matter: both refused outside reads and searches in tests.
 
 ## Reproducing the evidence
 
@@ -122,4 +120,6 @@ Until an isolation profile exists, for repositories you are less sure of:
   is unchanged, and the repository is readable. `--confinement` adds two model
   calls that ask each reviewer to read three files outside the repository and
   reports, per file, whether its random phrase reached the response or audit files.
+  `--search-confinement` adds two model calls that do the same with the search
+  tools, reporting file names and contents separately.
 - Every run's `reviewer-policy.json` records the controls preflight verified.

@@ -19,16 +19,14 @@ Written 2026-10-13 at commit `c5886a7`; Linux live results added the same day.
 | Runbook and security model | `docs/RUNBOOK.md`, `docs/SECURITY.md` |
 | Live runs on Linux: smoke test (native and Copilot) and all four backend combinations, including both mixed pairs | "Linux live verification" below |
 | Codex MCP check matches the configuration reviews load, so user-configured MCP servers no longer block native Codex | `src/duo/policy.py` (`verify_controls`) |
-| Confinement of file reads tested for every reviewer and backend | `scripts/smoke_inspection.py --confinement`; "Linux live verification" below |
+| Confinement of file reads and searches tested for every reviewer and backend | `scripts/smoke_inspection.py --confinement`, `--search-confinement`; "Linux live verification" below |
 
 ## Open
 
 1. **Mixed pairs on macOS**: verified live on Linux only.
-2. **Confinement of search tools**: file reads are tested (below); Claude's
-   `Glob`/`Grep` and Copilot's `glob`/`grep` on outside paths are not.
-3. **Decisions for the owner**: isolation profile now or documented as a
+2. **Decisions for the owner**: isolation profile now or documented as a
    limitation (recommended: documented); license (none yet); where to publish.
-4. **Release**: changelog, tag `v0.1.0`, checksums, release report (plan section 7).
+3. **Release**: changelog, tag `v0.1.0`, checksums, release report (plan section 7).
 
 ## Linux live verification
 
@@ -79,6 +77,21 @@ and Copilot's tool events (`view`: "Permission denied because no interactive use
 response was available"). No phrase from an unread file appeared in the response
 or audit files. Codex via Copilot runs on the same CLI and settings as Claude via
 Copilot.
+
+Search confinement (`smoke_inspection.py --search-confinement`, same models): each
+outside directory held one file whose name and content carried separate random
+phrases; reviewers were asked to list and search each directory with their search
+tools only.
+
+| Reviewer | Temporary directory | Home directory | Repository with a symlinked directory |
+| --- | --- | --- | --- |
+| Claude (native) | `Glob`, `Grep` denied | `Glob`, `Grep` denied | searched; link not followed |
+| Codex via Copilot | `glob`, `rg` denied | `glob`, `rg` denied | `glob`, `rg` searched; link not followed |
+| Claude via Copilot | `glob`, `grep` denied | denied | denied (one call covered all three) |
+| Codex (native) | declined: no search tools | declined | declined |
+
+No file-name or content phrase appeared in any response or audit file. Copilot
+names its grep tool `rg` for the Codex model and `grep` for the Claude model.
 
 ## Set up the Linux machine
 
