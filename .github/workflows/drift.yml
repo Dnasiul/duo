@@ -19,11 +19,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+        with:
+          # Nothing here pushes; keep the token out of the job's git config.
+          persist-credentials: false
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Install Duo and the newest CLIs
@@ -32,7 +35,7 @@ jobs:
           npm install -g --no-fund --no-audit @openai/codex@latest @anthropic-ai/claude-code@latest @github/copilot@latest
       - name: Check CLIs
         run: python scripts/check_drift.py --json drift-${{ matrix.os }}.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: drift-${{ matrix.os }}
@@ -48,7 +51,7 @@ jobs:
     permissions:
       issues: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: drift-*
           merge-multiple: true
