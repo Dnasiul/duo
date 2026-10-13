@@ -11,7 +11,7 @@ import threading
 
 from .adapters import CLIAdapter
 from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLAUDE_MAX_TURNS,
-                     MAX_TEXT_BYTES, Config, RunError, State, Terminated, Turn)
+                     DOCUMENT_MODES, MAX_TEXT_BYTES, Config, RunError, State, Terminated, Turn)
 from .prompts import plan_diff
 from .storage import PlanFile, RunStore, run_lock, timestamp
 from .workflow import Reviewer, build_graph, initial_state
@@ -20,7 +20,8 @@ EXIT_CODES = {"agreed": 0, "error": 1, "blocked": 3, "limit_reached": 4}
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(description="Alternate Codex and Claude reviews of plan.md")
+    result = argparse.ArgumentParser(description="Alternate Codex and Claude reviews of plan.md "
+                                                 "or another document (--mode)")
     result.add_argument("--repo", type=Path, default=Path.cwd(), help="Target repository")
     task = result.add_mutually_exclusive_group(required=True)
     task.add_argument("--task", help="Original task to plan")
@@ -28,6 +29,13 @@ def parser() -> argparse.ArgumentParser:
     criteria = result.add_mutually_exclusive_group()
     criteria.add_argument("--criteria", default="", help="Fixed acceptance criteria")
     criteria.add_argument("--criteria-file", type=Path, help="UTF-8 acceptance criteria file")
+    result.add_argument("--mode", choices=DOCUMENT_MODES, default="plan",
+                        help="Document the reviewers produce (default: plan)")
+    result.add_argument("--instructions-file", type=Path,
+                        help="UTF-8 review checklist replacing the mode's own; the review "
+                             "protocol itself stays fixed")
+    result.add_argument("--output", type=Path,
+                        help="Document path relative to --repo (default: <mode>.md)")
     result.add_argument("--codex-model", required=True, help="Explicit Codex model identifier")
     result.add_argument("--claude-model", required=True, help="Explicit Claude model identifier")
     result.add_argument("--codex-backend", choices=["native", "copilot"], default="native",
@@ -83,13 +91,13 @@ def emit(summary: dict, as_json: bool) -> None:
             print(f"Audit: {summary['run_dir']}")
 
 
-def show_review(number: int, review: Turn, before: str, after: str) -> None:
+def show_review(number: int, review: Turn, before: str, after: str, document: str = "plan") -> None:
     details = ""
     if review["decision"] == "revise":
         if before.strip():
-            details = "\n\nPlan diff:\n" + plan_diff(before, after)
+            details = f"\n\n{document.capitalize()} diff:\n" + plan_diff(before, after)
         else:
-            details = "\n\nInitial plan:\n" + after
+            details = f"\n\nInitial {document}:\n" + after
     label = review['agent'] + (" via Copilot" if review.get("backend") == "copilot" else "")
     print(
         f"\n--- Turn {number}: {label} [{review['decision']}] ---\n"
@@ -98,10 +106,10 @@ def show_review(number: int, review: Turn, before: str, after: str) -> None:
     )
 
 
-def outcome(state: State) -> dict:
+def outcome(state: State, document: str = "plan") -> dict:
     latest = state["history"][-1] if state["history"] else None
     message = state["error"] or {
-        "agreed": "Both reviewers approved the current plan",
+        "agreed": f"Both reviewers approved the current {document}",
         "blocked": "Review requires user input",
         "limit_reached": "Review budget exhausted",
         "error": "Review failed",
@@ -110,13 +118,31 @@ def outcome(state: State) -> dict:
             "latest_review": latest, "turns": state["turns"], "attempts": state["attempts"]}
 
 
-def is_plan_file(path: Path, repo: Path) -> bool:
-    plan = repo / "plan.md"
+def is_plan_file(path: Path, plan: Path) -> bool:
     try:
         return path.expanduser().samefile(plan)
     except OSError:
         # A missing file cannot be the same file; compare paths for clarity.
         return path.expanduser().resolve() == plan.resolve()
+
+
+def output_path(output: Path | None, mode: str, repo: Path) -> Path:
+    """The document path: <mode>.md, or --output, which must stay inside the repository."""
+    if output is None:
+        return repo / f"{mode}.md"
+    if output.is_absolute() or not output.name:
+        raise RunError("--output must be a file path relative to --repo")
+    path = repo / output
+    # Resolve the directory, not the file: a symlinked document is rejected later.
+    parent = path.parent.resolve()
+    if parent != repo and repo not in parent.parents:
+        raise RunError("--output must stay inside --repo")
+    if not parent.is_dir():
+        raise RunError(f"--output directory does not exist: {path.parent}")
+    document = parent / path.name
+    if ".git" in document.relative_to(repo).parts:
+        raise RunError("--output must not be inside .git")
+    return document
 
 
 def terminate(signum, frame) -> None:
@@ -155,7 +181,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
         nonlocal latest_review
         latest_review = review
         if args.show_conversation:
-            show_review(number, review, before, after)
+            show_review(number, review, before, after, args.mode)
 
     try:
         if os.name != "posix":
@@ -163,16 +189,21 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
         repo = args.repo.expanduser().resolve()
         if not repo.is_dir():
             raise RunError("Target repository directory does not exist")
-        for option, path in (("--task-file", args.task_file), ("--criteria-file", args.criteria_file)):
-            if path is not None and is_plan_file(path, repo):
-                # The review would then check the plan against itself.
-                raise RunError(f"{option} must not be the plan under review ({repo / 'plan.md'}); "
+        document = output_path(args.output, args.mode, repo)
+        for option, path in (("--task-file", args.task_file), ("--criteria-file", args.criteria_file),
+                             ("--instructions-file", args.instructions_file)):
+            if path is not None and is_plan_file(path, document):
+                # The review would then check the document against itself.
+                raise RunError(f"{option} must not be the {args.mode} under review ({document}); "
                                "describe the task separately")
         task = args.task_file.read_bytes().decode("utf-8") if args.task_file else args.task
         criteria = args.criteria_file.read_bytes().decode("utf-8") if args.criteria_file else args.criteria
+        guidance = args.instructions_file.read_bytes().decode("utf-8") if args.instructions_file else ""
         if not task.strip():
             raise ValueError("Task must not be empty")
-        for name, text in (("Task", task), ("Criteria", criteria)):
+        if args.instructions_file and not guidance.strip():
+            raise ValueError("Instructions file must not be empty")
+        for name, text in (("Task", task), ("Criteria", criteria), ("Instructions", guidance)):
             if len(text.encode("utf-8")) > MAX_TEXT_BYTES:
                 raise RunError(f"{name} exceeds the {MAX_TEXT_BYTES // 1024} KiB limit")
         config = Config(
@@ -188,22 +219,23 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             allow_untested_cli=args.allow_untested_cli,
             max_output_mb=args.max_output_mb, max_run_mb=args.max_run_mb,
             codex_bin=args.codex_bin, claude_bin=args.claude_bin,
+            mode=args.mode, guidance=guidance, output=str(document.relative_to(repo)),
         )
         default_state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "duo"
         state_dir = (args.state_dir or default_state).expanduser().resolve()
         if state_dir == repo or repo in state_dir.parents:
             raise RunError("--state-dir must be outside the target repository")
         with run_lock(repo):
-            plan = PlanFile(repo)
+            plan = PlanFile(document.parent, document.name)
             if len(plan.initial.encode("utf-8")) > MAX_TEXT_BYTES:
-                raise RunError(f"plan.md exceeds the {MAX_TEXT_BYTES // 1024} KiB limit")
+                raise RunError(f"{document.name} exceeds the {MAX_TEXT_BYTES // 1024} KiB limit")
             store = RunStore(state_dir)
             holder.append(store)
             adapter = CLIAdapter(config, store)
             state = initial_state(task, criteria, plan.initial, config)
             store.json("manifest.json", {
                 "started_at": timestamp(), "config": {**asdict(config), "repo": str(repo)},
-                "task": task, "criteria": criteria,
+                "task": task, "criteria": criteria, "document": str(document),
             })
             store.snapshot(0, plan.initial)
             reviewer = Reviewer(config, adapter, plan, store,
@@ -220,7 +252,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             result = graph.invoke(state, config={"recursion_limit": config.max_turns + 5})
             plan.check()
             store.json("result.json", {**result, "untested_cli": adapter.untested})
-        emit({**outcome(result), "untested_cli": adapter.untested,
+        emit({**outcome(result, args.mode), "untested_cli": adapter.untested,
               "plan_path": str(plan.path), "run_dir": str(store.path)}, args.json)
         return EXIT_CODES[result["status"]]
     except KeyboardInterrupt as exc:
@@ -228,7 +260,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
         signum = exc.signum if isinstance(exc, Terminated) else signal.SIGINT
         name = signal.Signals(signum).name
         reason = "Interrupted" if signum == signal.SIGINT else f"Terminated by {name}"
-        summary = {"status": "error", "message": f"{reason}; rerun to review the latest saved plan"}
+        summary = {"status": "error", "message": f"{reason}; rerun to review the latest saved {args.mode}"}
         code = 128 + signum
     except Exception as exc:
         # Includes setup, LangGraph, and storage failures; never signal success.

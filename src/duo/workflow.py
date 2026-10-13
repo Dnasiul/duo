@@ -64,7 +64,9 @@ class Reviewer:
             capped = remaining < self.config.timeout
             try:
                 payload = self.adapter(
-                    agent, build_prompt(state, self.config.history_limit, feedback),
+                    agent, build_prompt(state, self.config.history_limit, feedback,
+                                        self.config.mode, self.config.guidance,
+                                        self.config.output),
                     min(self.config.timeout, remaining),
                 )
                 self.plan_file.check()

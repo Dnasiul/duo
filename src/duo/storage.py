@@ -60,16 +60,19 @@ def run_usage(path: Path) -> int:
 
 
 class PlanFile:
-    """Keep the bytes last observed, including the distinction absent vs empty."""
+    """Keep the bytes last observed, including the distinction absent vs empty.
 
-    def __init__(self, repo: Path):
-        self.path = repo / "plan.md"
+    The document under review: plan.md by default, or --output inside the repository.
+    """
+
+    def __init__(self, repo: Path, name: str = "plan.md"):
+        self.path = repo / name
         self.expected = self._read()
         self.initial = normalize(self.expected.decode("utf-8")) if self.expected else ""
 
     def _read(self) -> bytes | None:
         if self.path.is_symlink():
-            raise RunError("plan.md must be a regular file, not a symbolic link")
+            raise RunError(f"{self.path.name} must be a regular file, not a symbolic link")
         try:
             return self.path.read_bytes()
         except FileNotFoundError:
@@ -77,11 +80,11 @@ class PlanFile:
 
     def check(self) -> None:
         if self._read() != self.expected:
-            raise RunError("plan.md changed outside Duo; restart review with the current file")
+            raise RunError(f"{self.path.name} changed outside Duo; restart review with the current file")
 
     def write(self, text: str) -> None:
         self.check()
-        # plan.md belongs to the repository; audit files stay private (0600).
+        # The document belongs to the repository; audit files stay private (0600).
         mode = (self.path.stat().st_mode & 0o777) if self.expected is not None else new_file_mode()
         data = text.encode("utf-8")
         atomic_write(self.path, data, mode)
