@@ -6,32 +6,67 @@ explicitly approve the same unchanged version. Every revision clears approvals.
 
 ## Install
 
-Requires **Python 3.10 or newer**, macOS or Linux, and authentication for the
+Requires **Python 3.10 to 3.14**, macOS or Linux, and authentication for the
 selected reviewer backends. By default these are the `codex` and `claude` CLIs;
-either reviewer can instead use GitHub Copilot CLI. Inspection controls have
-been checked with Codex **0.162.1**, Claude Code **2.1.296**, and Copilot **1.0.95**.
-Duo accepts only those tested ranges: later patch releases of Codex 0.162,
-Claude Code 2.1, and Copilot 1.0. Codex is still 0.x, where a minor release may
-break compatibility, so 0.163 is untested until verified. Any other version stops
-with a setup error. `--allow-untested-cli` runs it anyway as experimental: every
-inspection-control probe still applies, a warning is printed, and the untested
-versions are recorded in `versions.json`, `result.json`, and the summary
-(`untested_cli` in `--json` output). From this
-directory, use the existing Python 3.11 micromamba
-environment named `duo`:
+either reviewer can instead use GitHub Copilot CLI. See
+[Supported deployment](#supported-deployment) for tested versions.
+
+To install the tested dependency versions into a fresh virtual environment:
 
 ```sh
-micromamba activate duo
-python -m pip install -e .
-duo --help
+python3 -m venv ~/.venvs/duo
+~/.venvs/duo/bin/python -m pip install -c constraints.txt .
+~/.venvs/duo/bin/duo --help
 ```
 
-Without activating the environment, use
-`micromamba run -n duo python -m pip install -e .` to install and
-`micromamba run -n duo duo --help` to invoke the command. Installation downloads
-LangGraph and its dependencies from the configured package index.
+`pyproject.toml` declares the supported dependency ranges; `constraints.txt`
+pins the exact versions CI tests on every Python version. Without `-c
+constraints.txt`, pip installs the newest versions within those ranges, which CI
+also exercises but which are not part of a tested release.
 
-A standard virtual environment with Python 3.10 or newer works as well.
+For development from this directory, the micromamba environment named `duo`
+works as well:
+
+```sh
+micromamba run -n duo python -m pip install -e .
+micromamba run -n duo duo --help
+```
+
+## Supported deployment
+
+Duo is a single-user command-line tool. The supported baseline is:
+
+- one local user running Duo on their own machine;
+- repositories the user trusts (reviewers read them, and repository text reaches
+  the models);
+- reviewer CLIs without enterprise-managed configuration (Duo refuses to run
+  when managed policies or hooks are present);
+- provider data-handling settings the user has reviewed, since task, plan, and
+  repository content are sent to the selected model providers;
+- a working environment holding only the data and credentials the review needs.
+
+Reviewer agreement is a signal, not a verdict: for consequential work, a person
+should still assess the final plan.
+
+### Compatibility
+
+| Area | Tested | Experimental or unsupported |
+| --- | --- | --- |
+| Operating system | macOS on Apple silicon (live runs and CI); Ubuntu (CI with fake CLIs) | Live runs on Linux are not yet verified; Windows is unsupported |
+| Python | 3.10, 3.11, 3.12, 3.13, 3.14 (CI on both systems) | Older versions are unsupported |
+| Dependencies | `constraints.txt` | Newest versions within `pyproject.toml` ranges (CI checks them, untested for release) |
+| Codex CLI | 0.162.x from 0.162.1 | Other versions, only with `--allow-untested-cli` |
+| Claude Code | 2.1.x from 2.1.296 | Other versions, only with `--allow-untested-cli` |
+| Copilot CLI | 1.0.x from 1.0.95 | Other versions, only with `--allow-untested-cli` |
+| Backends | Native Codex with native Claude; both reviewers through Copilot (live runs) | Mixed native/Copilot pairs: fake-CLI tests only until verified live |
+| Models used in live runs | Native: `gpt-6-astra`, `claude-opus-5-5`, `claude-sonnet-5-5`; Copilot: `gpt-5.4`, `claude-sonnet-5.5` | Any other model your account offers; unknown names stop the run without retrying |
+| Authentication | Codex and Claude Code: their own CLI login. Copilot: a token in `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`; a fine-grained token needs the "Copilot Requests" permission | Copilot's saved interactive login is not used |
+
+The weekly drift check keeps the CLI rows honest (see
+[Responding to CLI drift](#responding-to-cli-drift)); a version enters the
+tested ranges only with recorded evidence. For operations such as renewing
+authentication, recovering interrupted runs, or rolling back, see
+[docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 ## Run
 
@@ -311,6 +346,13 @@ A proposal snapshot may exist even when publishing it to `plan.md` failed.
 Audit files contain task and repository-derived content. They are local records,
 not resumable LangGraph checkpoints, and are never deleted automatically.
 
+### Restarting
+
+A rerun starts a new review of whatever `plan.md` holds, which is always the last
+accepted plan: Duo saves a revision only after validating it. Approvals are not
+carried over, so both reviewers must approve again. Audit directories are
+records, not checkpoints; a run cannot be resumed from one.
+
 ### Resource limits
 
 While a reviewer CLI runs, Duo checks its output streams against
@@ -409,9 +451,20 @@ Recorded, sanitized output from the tested CLI versions lives in
 checks, so the fake CLIs cannot drift from real formats unnoticed. See
 `tests/fixtures/README.md` for refreshing it with `scripts/record_fixtures.py`.
 
-CI (`.github/workflows/ci.yml`) runs the suite on Ubuntu and macOS with Python
-3.10 and 3.13. It builds and installs the wheel, then tests the installed
-package rather than the source tree. CI uses no reviewer credentials.
+CI (`.github/workflows/ci.yml`) runs on Ubuntu and macOS with Python 3.10 to
+3.14. It builds the wheel and the source distribution, installs each into a
+clean environment with `constraints.txt`, and runs the suite against the
+installed package with `scripts/run_tests.py`, which fails on any skipped test
+(for example when LangGraph is missing). A separate job tests the newest
+dependency versions allowed by `pyproject.toml`, and another runs `pip-audit`
+on the pinned versions. CI uses no reviewer credentials.
+
+To update the pinned versions, regenerate them with one interpreter per
+supported Python version, then let CI test them and review the audit:
+
+```sh
+python scripts/update_constraints.py python3.10 python3.11 python3.12 python3.13 python3.14
+```
 
 The optional real-CLI smoke test creates a disposable Git repository containing
 harmless hook and MCP sentinels. It asks both reviewers to read a verification

@@ -1,0 +1,5 @@
+# Keep the source distribution self-contained: its tests read these files.
+graft tests/fixtures
+include scripts/*.py
+include constraints.txt
+global-exclude __pycache__ *.py[cod] .DS_Store
