@@ -3,6 +3,9 @@
 Duo alternates Codex CLI and Claude Code reviews of `plan.md` using LangGraph.
 It drafts an absent plan, applies validated revisions, and stops when both agents
 explicitly approve the same unchanged version. Every revision clears approvals.
+With `--mode`, the same read-only loop produces an analysis report, a folder
+description, or a critical review instead (see
+[Other documents](#other-documents-experimental)).
 
 ## Install
 
@@ -69,6 +72,7 @@ inherit your environment, and the credential check is best-effort.
 | Claude Code | 2.1.x from 2.1.296 | Other versions, only with `--allow-untested-cli` |
 | Copilot CLI | 1.0.x from 1.0.95 | Other versions, only with `--allow-untested-cli` |
 | Backends | All four native/Copilot combinations (live runs on Linux); native/native and Copilot/Copilot (live runs on macOS) | Mixed pairs on macOS: fake-CLI tests only |
+| Document modes | `report`, `description`, `review` (live runs on Linux, native; `review` also through Copilot) | macOS, mixed backend pairs, and `report`/`description` through Copilot: fake-CLI tests only |
 | Models used in live runs | Native: `gpt-6-astra`, `claude-opus-5-5`, `claude-sonnet-5-5`; Copilot: `gpt-5.4`, `claude-sonnet-5.5` | Any other model your account offers; unknown names stop the run without retrying |
 | Authentication | Codex and Claude Code: their own CLI login. Copilot: a token in `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`; a fine-grained token needs the "Copilot Requests" permission | Copilot's saved interactive login is not used |
 
@@ -147,13 +151,58 @@ read-only review loop:
 | `description` | `description.md` | Accuracy, completeness, organization, what could not be inspected |
 | `review` | `review.md` | Findings correct, specific, located, ranked by severity |
 
+The document under review is always one file: the existing one, if present, is
+the starting point, and both reviewers must approve the same version. Examples:
+
+**Plan** (the default) for a change in a project:
+
 ```sh
-duo \
-  --repo ~/sim/SiH_MD --skip-git-repo-check \
-  --mode description --output notes/folder.md \
-  --task "Describe the contents of this folder and the state of each run" \
+duo --repo ~/code/md-driver \
+  --task "Plan adding checkpoint/restart support to the MD driver" \
+  --criteria "Restarts must reproduce the trajectory bit for bit; include tests" \
   --codex-model gpt-6-astra --claude-model claude-opus-5-5
 ```
+
+**Report** analyzing results in a folder; the reviewers recheck every number
+against the files:
+
+```sh
+duo --repo ~/sim/SiH_MD --skip-git-repo-check --mode report \
+  --task "Analyze the NVT runs in T300/ and T500/: completion, equilibration, and a comparison of energies and temperatures" \
+  --criteria "Every number cites its file and rows; show how each statistic was computed; state limitations" \
+  --codex-model gpt-6-astra --claude-model claude-opus-5-5
+```
+
+**Description** of a folder, saved elsewhere than `description.md`:
+
+```sh
+mkdir -p ~/sim/SiH_MD/notes
+duo --repo ~/sim/SiH_MD --skip-git-repo-check --mode description \
+  --output notes/folder.md \
+  --task "Describe the contents of this folder and the state of each run" \
+  --criteria "Name the files each statement is based on; say what could not be read" \
+  --codex-model gpt-6-astra --claude-model claude-opus-5-5
+```
+
+**Review** of a draft against the data, with a custom checklist:
+
+```sh
+mkdir -p ~/duo-tasks
+cat > ~/duo-tasks/review-checks.txt <<'TXT'
+Check every factual and numerical claim in the draft against the input files,
+logs, and data. Quote each claim, give the evidence with file and line, and rate
+it major or minor. Note claims that are correct. Do not rewrite the draft.
+TXT
+duo --repo ~/sim/SiH_MD --skip-git-repo-check --mode review \
+  --instructions-file ~/duo-tasks/review-checks.txt \
+  --task "Critically review the draft results section draft-results.md against T300/ and T500/" \
+  --codex-model gpt-6-astra --claude-model claude-opus-5-5
+```
+
+In each case the material stays untouched; Duo writes only the mode's document.
+Claude can read and search text files only, so it cannot open binary trajectories;
+Codex can also run read-only commands on them. Whatever either reads is sent to
+the model providers.
 
 `--output` takes a path relative to `--repo` whose directory already exists; it
 must stay inside the repository and outside `.git`. Reviewers are told that this
@@ -365,10 +414,10 @@ See [Codex configuration](https://developers.openai.com/codex/config-reference),
 
 ## Files and concurrent work
 
-Duo atomically replaces `<repo>/plan.md` after validating a full response. It
-preserves existing permission bits; a new plan gets the mode your umask gives
-new files (usually `0644`).
-Symlinked plans are rejected. Literal Markdown, including significant whitespace,
+Duo atomically replaces `<repo>/plan.md` (or, with `--mode`, the mode's document)
+after validating a full response. It preserves existing permission bits; a new
+document gets the mode your umask gives new files (usually `0644`).
+Symlinked documents are rejected. Literal Markdown, including significant whitespace,
 is preserved apart from line-ending normalization.
 
 Audit files are stored under `$XDG_STATE_HOME/duo`, or `~/.local/state/duo` when
@@ -391,8 +440,8 @@ not resumable LangGraph checkpoints, and are never deleted automatically.
 
 ### Restarting
 
-A rerun starts a new review of whatever `plan.md` holds, which is always the last
-accepted plan: Duo saves a revision only after validating it. Approvals are not
+A rerun starts a new review of whatever `plan.md` (or the mode's document) holds,
+which is always the last accepted version: Duo saves a revision only after validating it. Approvals are not
 carried over, so both reviewers must approve again. Audit directories are
 records, not checkpoints; a run cannot be resumed from one.
 
@@ -404,7 +453,8 @@ creates, against `--max-run-mb`. Checks run about twice a second, so a CLI writi
 very fast can overshoot by what it writes in that interval; this is not a hard
 disk quota. On a violation Duo stops the CLI's process group, keeps the last
 accepted plan, and ends the run with an error (exit 1) without retrying. Tasks,
-criteria, `plan.md`, and each review's plan and reason are limited to 1 MiB.
+criteria, custom instructions, the document under review, and each review's
+document and reason are limited to 1 MiB.
 
 Copilot unpacks its own runtime (about 165 MiB) into each attempt's fresh cache.
 Duo deletes it after preflight and after every attempt and leaves it out of the
@@ -432,7 +482,8 @@ runtime cleanup may each hold several hundred MiB of Copilot runtime copies;
 An OS lock on the repository directory excludes other Duo runs on the same
 repository, whatever their `--state-dir` or the path used to name it. It creates
 no file and is released when the process exits, even after a crash.
-Duo also checks `plan.md` before and after agent calls and before saving it. An
+Duo also checks the document (`plan.md` by default) before and after agent calls
+and before saving it. An
 external edit stops the run rather than knowingly overwriting it. Checks cannot
 eliminate races with an uncooperative writer. Keep repository files stable during
 a review: this version does not fingerprint all code or detect every code edit.
@@ -487,7 +538,8 @@ Install the declared dependencies before validating the deliverable. The
 acceptance suite requires real LangGraph integration tests to execute.
 The suite covers approval invalidation, retries, deadlines, malformed responses,
 verbatim inputs, reviewer policy, CLI response formats, process cleanup, file
-conflicts, write/flush/fsync/chmod/replace failures, and exits.
+conflicts, write/flush/fsync/chmod/replace failures, exits, and document modes
+(prompts, output paths, and rejected inputs).
 
 Recorded, sanitized output from the tested CLI versions lives in
 `tests/fixtures`; the suite replays it through the same parsers and control
@@ -537,12 +589,13 @@ repository the same way, reporting leaked file names and contents separately.
 `src/duo/workflow.py` builds the LangGraph cycle. `adapters.py` runs the CLIs,
 `policy.py` defines and verifies their inspection configuration,
 `models.py` validates the shared response contract, `prompts.py` builds review
-context, and `storage.py` manages plan publication and audit files.
+context and each mode's checklist, and `storage.py` manages document publication
+and audit files.
 
 Persistent graph checkpoint recovery,
 repository snapshot tracking, cycle detection, and structured issue tracking are
-future improvements. Agreement means both reviewers accept the plan; it does not
-prove that the proposed implementation is correct.
+future improvements. Agreement means both reviewers accept the document; it does
+not prove that a plan, report, description, or review is correct.
 
 CLI behavior follows the [Codex non-interactive documentation](https://developers.openai.com/codex/noninteractive)
 and [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference).
