@@ -13,6 +13,8 @@ CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_CLAUDE_MAX_TURNS = 20
 # Task, criteria, plan, and reason size limit (UTF-8 bytes), checked before any CLI call.
 MAX_TEXT_BYTES = 1024 * 1024
+# Kinds of document the reviewers can produce; each has its own checklist (prompts.py).
+DOCUMENT_MODES = ("plan", "report", "description", "review")
 COPILOT_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 SCHEMA = {
     "type": "object",
@@ -104,10 +106,17 @@ class Config:
     allow_untested_cli: bool = False
     max_output_mb: int = 32  # per captured stdout/stderr stream
     max_run_mb: int = 256    # per run directory, including CLI logs and caches
+    mode: str = "plan"       # which document the reviewers produce
+    guidance: str = ""       # custom review checklist replacing the mode's own
+    output: str = ""         # document path relative to repo; "" means <mode>.md
 
     def __post_init__(self):
         if self.start not in AGENTS:
             raise ValueError("Starting agent must be codex or claude")
+        if self.mode not in DOCUMENT_MODES:
+            raise ValueError(f"mode must be one of: {', '.join(DOCUMENT_MODES)}")
+        if len(self.guidance.encode("utf-8")) > MAX_TEXT_BYTES:
+            raise ValueError(f"Instructions exceed the {MAX_TEXT_BYTES // 1024} KiB limit")
         if not self.codex_model.strip() or not self.claude_model.strip():
             raise ValueError("Both model identifiers must be nonempty")
         for name, choices in (("codex_effort", CODEX_EFFORTS), ("claude_effort", CLAUDE_EFFORTS)):

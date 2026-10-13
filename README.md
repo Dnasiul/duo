@@ -135,6 +135,34 @@ Conversation output goes to stderr, so it works with `--json`. To save the
 conversation and progress output, append `2>conversation.log` to the command.
 This option does not change the prompts, approval rules, or audit files.
 
+### Other documents (experimental)
+
+`--mode` makes the reviewers produce another kind of document with the same
+read-only review loop:
+
+| Mode | Default file | Reviewers check |
+| --- | --- | --- |
+| `plan` (default) | `plan.md` | Requirements, feasibility, dependencies, order, testing |
+| `report` | `report.md` | Claims supported by repository files, numbers quoted with sources, methods, limitations |
+| `description` | `description.md` | Accuracy, completeness, organization, what could not be inspected |
+| `review` | `review.md` | Findings correct, specific, located, ranked by severity |
+
+```sh
+duo \
+  --repo ~/sim/SiH_MD --skip-git-repo-check \
+  --mode description --output notes/folder.md \
+  --task "Describe the contents of this folder and the state of each run" \
+  --codex-model gpt-6-astra --claude-model claude-opus-5-5
+```
+
+`--output` takes a path relative to `--repo` whose directory already exists; it
+must stay inside the repository and outside `.git`. Reviewers are told that this
+file is Duo's output, not material to describe. `--instructions-file` replaces
+the mode's checklist with your own; the review protocol (read-only inspection,
+complete revisions, repository text treated as material, not instructions) stays
+fixed. The default `plan` mode sends exactly the prompt it always has. The mode,
+instructions, and document path are recorded in each run's `manifest.json`.
+
 ### Use models through GitHub Copilot
 
 Select the transport independently for each reviewer with `--codex-backend` and
