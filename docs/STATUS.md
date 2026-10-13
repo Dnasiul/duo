@@ -98,6 +98,15 @@ Repeated on the release candidate (`3e7828c`) with the user's Codex MCP server
 enabled: same results for all four combinations (agreed in 3 turns, exit 0, no
 token in any file, same read-only tools).
 
+0.2.0 release candidate (`5b2465c`): native/native, Copilot/Copilot, and native
+Codex + Copilot Claude agreed in 3 turns. Copilot Codex + native Claude reached
+the 4-turn limit twice (exit 4): Claude approved each time, then Codex revised an
+approved plan to name the test framework and file. Its first-turn prompt and
+arguments were identical to the 0.1.0 run apart from the random section boundary
+and the log directory, so this is reviewer variation, not a change in Duo. A third
+run with `--max-turns 6` agreed in 3 turns. No token in any file; same read-only
+tools.
+
 Tools seen in the attempts:
 
 - Copilot: only `glob`, `view`, and `rg` (its name for `grep`); all built-in MCP
