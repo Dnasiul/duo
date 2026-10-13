@@ -1,8 +1,9 @@
 # Status and handoff
 
 Where Duo's production readiness stands, and how to continue on a Linux machine.
-Written 2026-10-13 at commit `c5886a7`; Linux live results added the same day.
-`plan.md` is the full production plan; this page tracks progress against it.
+Written 2026-10-13 at commit `c5886a7`; Linux live results and the 0.1.0 release
+added the same day. `plan.md` is the full production plan; this page tracks
+progress against it.
 
 ## Done
 
@@ -21,11 +22,34 @@ Written 2026-10-13 at commit `c5886a7`; Linux live results added the same day.
 | Live runs on Linux: smoke test (native and Copilot) and all four backend combinations, including both mixed pairs | "Linux live verification" below |
 | Codex MCP check matches the configuration reviews load, so user-configured MCP servers no longer block native Codex | `src/duo/policy.py` (`verify_controls`) |
 | Confinement of file reads and searches tested for every reviewer and backend | `scripts/smoke_inspection.py --confinement`, `--search-confinement`; "Linux live verification" below |
+| Release 0.1.0 (2026-10-13): tag `v0.1.0` on `94186b7`, wheel, sdist, `constraints.txt`, `SHA256SUMS`; release notes hold the release report | https://github.com/Dnasiul/duo/releases/tag/v0.1.0 |
 
 ## Open
 
 1. **Mixed pairs on macOS**: verified live on Linux only.
-2. **Release**: changelog, tag `v0.1.0`, checksums, release report (plan section 7).
+2. **Document modes** (branch `document-modes`, local only): `--mode report`,
+   `description`, `review`, `--instructions-file`, `--output`. One live
+   description run on Linux; report and review modes and Copilot untested.
+   Candidate for 0.2.0 after rebasing onto `main`.
+
+## Releasing
+
+How 0.1.0 was released; repeat for later versions.
+
+1. Date the version in `CHANGELOG.md` and commit; that commit is the release target.
+2. Rerun the live backend matrix and `scripts/check_drift.py` on it when code
+   changed since the last evidence, and record the results here.
+3. Build the wheel and sdist from a clean clone of that commit; install each into
+   a fresh environment with its `constraints.txt` and run the tests from the
+   installed package; write `SHA256SUMS` for the wheel, sdist, and constraints.
+4. Push, wait for all CI jobs to pass on that commit, then push an annotated tag
+   and create the GitHub release with the notes (the release report) and the four
+   files. Check the published files against `SHA256SUMS` after download.
+
+Notes: macOS CI jobs can wait for a runner and be cancelled without running;
+rerun the failed jobs instead of pushing a new commit, which would change the
+release target. Creating a release needs a token with Contents read and write;
+rerunning jobs also needs Actions read and write.
 
 ## Linux live verification
 
