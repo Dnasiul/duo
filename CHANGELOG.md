@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-13)
 
 First release: a single-user command-line tool in which Codex and Claude take
 turns reviewing `plan.md` until both approve the same version.
