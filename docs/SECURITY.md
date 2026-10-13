@@ -21,12 +21,14 @@ Repository contents and model output are untrusted input. Repository text can
 attempt prompt injection. Duo limits what a manipulated reviewer can do (read-only
 tools, no network tools) and validates every response, but it cannot make a model
 ignore what it reads. Duo never executes model output; it only writes a validated
-plan to `plan.md` as text.
+document as text: `plan.md`, or with `--mode` the mode's file or `--output`, which
+must stay inside the repository and outside `.git`.
 
 ## What leaves your machine
 
-The task, criteria, current plan, recent review reasons, and every repository file
-a reviewer reads are sent to the provider behind each backend: OpenAI for Codex,
+The task, criteria, any `--instructions-file` text, the current document, recent
+review reasons, and every repository file a reviewer reads are sent to the
+provider behind each backend: OpenAI for Codex,
 Anthropic for Claude Code, and GitHub, plus the model's vendor, for Copilot.
 Review each provider's data-handling settings before use.
 
@@ -85,7 +87,9 @@ take well under a second (tested).
 The state directory (`~/.local/state/duo` by default) and every run directory are
 created with mode `0700`, so only your user can read them. They contain raw CLI
 output, including **rejected responses and anything a reviewer printed**, so
-treat them as sensitive. `plan.md` gets your usual permissions for new files.
+treat them as sensitive; `manifest.json` also records the task, criteria, and
+any custom instructions. The document Duo writes (`plan.md` by default) gets your
+usual permissions for new files.
 Duo never copies credentials, edits global CLI settings, or passes
 permission-bypass flags.
 
