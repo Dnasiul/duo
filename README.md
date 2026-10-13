@@ -307,6 +307,43 @@ external edit stops the run rather than knowingly overwriting it. Checks cannot
 eliminate races with an uncooperative writer. Keep repository files stable during
 a review: this version does not fingerprint all code or detect every code edit.
 
+## Responding to CLI drift
+
+The **CLI drift** workflow (`.github/workflows/drift.yml`) runs every Monday and
+on demand. On Ubuntu and macOS it installs the newest Codex, Claude Code, and
+Copilot releases from npm and runs `scripts/check_drift.py`. That script applies
+Duo's own credential-free setup checks and compares help flags and Codex
+feature names with the recorded fixtures. Each CLI is reported as:
+
+- `compatible`: a tested version whose controls all verify. Nothing to do.
+- `untested-version`: the controls verify, but the version is outside the tested
+  range. Duo refuses it unless `--allow-untested-cli` is passed.
+- `probe-failure`: a control is missing or did not take effect, or the CLI did
+  not start. The job fails.
+
+When action is needed, the workflow opens a single "CLI drift: action needed"
+issue or comments on it, and it closes the issue once every CLI is compatible
+again. The repository owner triages it; the issue's arrival is the weekly
+review prompt.
+
+- For `untested-version`: record its probes with `scripts/record_fixtures.py`,
+  run the inspection smoke test and one bounded live Duo run against it, and
+  review the reported flag and feature changes. If everything passes, add the
+  fixtures, extend `TESTED_VERSIONS` in `src/duo/policy.py` (for Codex, one
+  minor version at a time), and update the versions near the top of this file
+  in a normal release.
+- For `probe-failure`: keep the version rejected and note it as a known
+  incompatibility. If a removed or changed control affects reviewer isolation,
+  review the security boundary before supporting any version of that CLI again.
+- Changes to Copilot model IDs or effort values show up as live-run failures,
+  which Duo reports without retrying; update the README examples when they occur.
+
+To run the check locally against your installed CLIs:
+
+```sh
+micromamba run -n duo python scripts/check_drift.py
+```
+
 ## Tests
 
 The tests use standard-library `unittest` and fake CLI executables, so they make

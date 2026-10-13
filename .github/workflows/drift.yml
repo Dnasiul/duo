@@ -1,0 +1,90 @@
+name: CLI drift
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"  # Mondays, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # Newest CLI releases against Duo's version policy, control probes, and
+    # recorded fixtures. No reviewer credentials are used.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Duo and the newest CLIs
+        run: |
+          python -m pip install .
+          npm install -g --no-fund --no-audit @openai/codex@latest @anthropic-ai/claude-code@latest @github/copilot@latest
+      - name: Check CLIs
+        run: python scripts/check_drift.py --json drift-${{ matrix.os }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: drift-${{ matrix.os }}
+          path: drift-${{ matrix.os }}.json
+          if-no-files-found: warn
+
+  report:
+    # One issue tracks drift: opened or updated when action is needed, closed
+    # when every CLI is compatible again.
+    needs: check
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: drift-*
+          merge-multiple: true
+      - name: Open, update, or close the drift issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'EOF'
+          import glob, json, os
+          rows, attention = [], False
+          files = sorted(glob.glob("drift-*.json"))
+          for path in files:
+              platform = path[len("drift-"):-len(".json")]
+              for item in json.load(open(path)):
+                  attention |= item["status"] != "compatible"
+                  changes = "; ".join(f"{k} {w}: {', '.join(n)}" for k, d in item["changes"].items()
+                                      for w, n in d.items()) or "none"
+                  rows.append(f"| {platform} | {item['cli']} | {item['version'] or '?'} | "
+                              f"{item['status']} | {item.get('error', changes)} |")
+          if len(files) < 2:
+              attention = True
+              rows.append("| | | | missing results | a check job did not finish; see the run |")
+          body = ("Weekly CLI drift check: " + os.environ["RUN_URL"] + "\n\n"
+                  "| Platform | CLI | Version | Result | Details |\n| --- | --- | --- | --- | --- |\n"
+                  + "\n".join(rows) + "\n\nSee \"Responding to CLI drift\" in README.md.\n")
+          open("body.md", "w").write(body)
+          open("attention", "w").write("yes" if attention else "no")
+          EOF
+          title="CLI drift: action needed"
+          number=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')
+          if [ "$(cat attention)" = yes ]; then
+            if [ -n "$number" ]; then gh issue comment "$number" --body-file body.md
+            else gh issue create --title "$title" --body-file body.md; fi
+          elif [ -n "$number" ]; then
+            gh issue close "$number" --comment "All CLIs are compatible again: $RUN_URL"
+          fi
+          cat body.md >> "$GITHUB_STEP_SUMMARY"
