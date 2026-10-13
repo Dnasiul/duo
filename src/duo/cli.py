@@ -11,7 +11,7 @@ import threading
 
 from .adapters import CLIAdapter
 from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLAUDE_MAX_TURNS,
-                     Config, RunError, State, Terminated, Turn)
+                     MAX_TEXT_BYTES, Config, RunError, State, Terminated, Turn)
 from .prompts import plan_diff
 from .storage import PlanFile, RunStore, run_lock, timestamp
 from .workflow import Reviewer, build_graph, initial_state
@@ -48,6 +48,10 @@ def parser() -> argparse.ArgumentParser:
                         help=f"Internal Claude turns per call (default: {DEFAULT_CLAUDE_MAX_TURNS}; "
                              "native Claude only)")
     result.add_argument("--claude-max-budget-usd", type=float, help="Claude per-call API budget")
+    result.add_argument("--max-output-mb", type=int, default=32,
+                        help="MiB per captured CLI output stream (default: 32)")
+    result.add_argument("--max-run-mb", type=int, default=256,
+                        help="MiB per run audit directory, including CLI logs and caches (default: 256)")
     result.add_argument("--skip-git-repo-check", action="store_true")
     result.add_argument("--allow-untested-cli", action="store_true",
                         help="Run CLI versions outside the tested ranges as experimental; "
@@ -134,6 +138,16 @@ def main(argv: list[str] | None = None) -> int:
 
 def run(argv: list[str] | None) -> int:
     args = parser().parse_args(argv)
+    holder: list[RunStore] = []
+    try:
+        return review(args, holder)
+    finally:
+        # Release the run-directory lock once every audit file is written.
+        for store in holder:
+            store.close()
+
+
+def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
     store = None
     latest_review = None
 
@@ -158,6 +172,9 @@ def run(argv: list[str] | None) -> int:
         criteria = args.criteria_file.read_bytes().decode("utf-8") if args.criteria_file else args.criteria
         if not task.strip():
             raise ValueError("Task must not be empty")
+        for name, text in (("Task", task), ("Criteria", criteria)):
+            if len(text.encode("utf-8")) > MAX_TEXT_BYTES:
+                raise RunError(f"{name} exceeds the {MAX_TEXT_BYTES // 1024} KiB limit")
         config = Config(
             repo=repo, codex_model=args.codex_model, claude_model=args.claude_model,
             codex_effort=args.codex_effort, claude_effort=args.claude_effort,
@@ -169,6 +186,7 @@ def run(argv: list[str] | None) -> int:
             claude_max_budget_usd=args.claude_max_budget_usd,
             skip_git_repo_check=args.skip_git_repo_check,
             allow_untested_cli=args.allow_untested_cli,
+            max_output_mb=args.max_output_mb, max_run_mb=args.max_run_mb,
             codex_bin=args.codex_bin, claude_bin=args.claude_bin,
         )
         default_state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "duo"
@@ -177,7 +195,10 @@ def run(argv: list[str] | None) -> int:
             raise RunError("--state-dir must be outside the target repository")
         with run_lock(repo):
             plan = PlanFile(repo)
+            if len(plan.initial.encode("utf-8")) > MAX_TEXT_BYTES:
+                raise RunError(f"plan.md exceeds the {MAX_TEXT_BYTES // 1024} KiB limit")
             store = RunStore(state_dir)
+            holder.append(store)
             adapter = CLIAdapter(config, store)
             state = initial_state(task, criteria, plan.initial, config)
             store.json("manifest.json", {

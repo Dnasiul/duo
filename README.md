@@ -188,6 +188,8 @@ the latest successfully published plan; they never imply agreement.
 | `--max-seconds` | 7200 | Run deadline, including retries and backoff |
 | `--claude-max-turns` | 20 | Claude's internal agent turns per invocation |
 | `--claude-max-budget-usd` | Unset | Claude's per-invocation API budget |
+| `--max-output-mb` | 32 | MiB per captured CLI output stream (stdout, stderr) |
+| `--max-run-mb` | 256 | MiB per run audit directory, including CLI logs and caches |
 | `--start` | `codex` | First reviewer |
 | `--codex-effort` | Unset | Requested Codex reasoning effort |
 | `--claude-effort` | Unset | Requested Claude reasoning effort |
@@ -307,7 +309,40 @@ Each run has a private directory containing:
 
 A proposal snapshot may exist even when publishing it to `plan.md` failed.
 Audit files contain task and repository-derived content. They are local records,
-not resumable LangGraph checkpoints; no automatic cleanup is performed.
+not resumable LangGraph checkpoints, and are never deleted automatically.
+
+### Resource limits
+
+While a reviewer CLI runs, Duo checks its output streams against
+`--max-output-mb` and the whole run directory, including logs and caches the CLI
+creates, against `--max-run-mb`. Checks run about twice a second, so a CLI writing
+very fast can overshoot by what it writes in that interval; this is not a hard
+disk quota. On a violation Duo stops the CLI's process group, keeps the last
+accepted plan, and ends the run with an error (exit 1) without retrying. Tasks,
+criteria, `plan.md`, and each review's plan and reason are limited to 1 MiB.
+
+Copilot unpacks its own runtime (about 165 MiB) into each attempt's fresh cache.
+Duo deletes it after preflight and after every attempt and leaves it out of the
+run-size count; it briefly needs that space while an attempt runs.
+
+### Cleaning up audit runs
+
+`duo-clean` deletes old runs. It only reports what it would do unless `--delete`
+is given:
+
+```sh
+duo-clean --older-than 30            # runs untouched for more than 30 days
+duo-clean --max-total-mb 500         # oldest runs until the rest fit in 500 MiB
+duo-clean --copilot-runtime          # leftover Copilot runtimes; audit files kept
+duo-clean --older-than 30 --delete
+```
+
+It considers only directories directly under `<state-dir>/runs`, skips runs a
+running Duo still holds, never follows symbolic links, and never touches project
+files such as `plan.md`. An interrupted cleanup leaves the partly deleted run in
+place; run the command again to finish. Runs from Duo versions before the
+runtime cleanup may each hold several hundred MiB of Copilot runtime copies;
+`--copilot-runtime` reclaims that space without losing audit records.
 
 An OS lock on the repository directory excludes other Duo runs on the same
 repository, whatever their `--state-dir` or the path used to name it. It creates

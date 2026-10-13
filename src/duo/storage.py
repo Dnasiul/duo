@@ -41,6 +41,24 @@ def new_file_mode() -> int:
     return 0o666 & ~mask
 
 
+def run_usage(path: Path) -> int:
+    """Bytes stored under a run directory, without following symbolic links.
+
+    Copilot's unpacked runtime (copilot-cache/pkg, about 165 MiB) is excluded: it
+    is the CLI's own program, deleted after each attempt, not run output.
+    """
+    total = 0
+    for directory, subdirectories, files in os.walk(path, followlinks=False):
+        if os.path.basename(directory) == "copilot-cache" and "pkg" in subdirectories:
+            subdirectories.remove("pkg")
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(directory, name)).st_size
+            except FileNotFoundError:
+                pass  # removed while counting
+    return total
+
+
 class PlanFile:
     """Keep the bytes last observed, including the distinction absent vs empty."""
 
@@ -101,6 +119,15 @@ class RunStore:
         runs = state_dir / "runs"
         runs.mkdir(exist_ok=True, mode=0o700)
         self.path = Path(tempfile.mkdtemp(prefix="run-", dir=runs))
+        # Held for the run's lifetime so duo-clean never deletes an active run.
+        import fcntl
+        self._lock = os.open(self.path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def close(self) -> None:
+        if self._lock is not None:
+            os.close(self._lock)  # also releases the flock
+            self._lock = None
 
     def json(self, name: str, value: object) -> None:
         atomic_write(self.path / name, (json.dumps(value, indent=2) + "\n").encode("utf-8"))

@@ -12,6 +12,7 @@ dependencies = ["langgraph>=1.0,<2"]
 
 [project.scripts]
 duo = "duo.cli:main"
+duo-clean = "duo.cleanup:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

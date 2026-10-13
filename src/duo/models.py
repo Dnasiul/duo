@@ -11,6 +11,8 @@ AGENTS = {"codex", "claude"}
 CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_CLAUDE_MAX_TURNS = 20
+# Task, criteria, plan, and reason size limit (UTF-8 bytes), checked before any CLI call.
+MAX_TEXT_BYTES = 1024 * 1024
 COPILOT_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 SCHEMA = {
     "type": "object",
@@ -100,6 +102,8 @@ class Config:
     claude_backend: str = "native"
     copilot_bin: str = "copilot"
     allow_untested_cli: bool = False
+    max_output_mb: int = 32  # per captured stdout/stderr stream
+    max_run_mb: int = 256    # per run directory, including CLI logs and caches
 
     def __post_init__(self):
         if self.start not in AGENTS:
@@ -121,7 +125,8 @@ class Config:
         if self.claude_backend == "copilot" and (
                 self.claude_max_budget_usd is not None or self.claude_max_turns is not None):
             raise ValueError("Claude internal-turn and dollar limits require --claude-backend native")
-        for name in ("max_turns", "max_attempts", "history_limit", "claude_max_turns"):
+        for name in ("max_turns", "max_attempts", "history_limit", "claude_max_turns",
+                     "max_output_mb", "max_run_mb"):
             value = getattr(self, name)
             if name == "claude_max_turns" and value is None:
                 continue
@@ -194,6 +199,9 @@ def validate_review(value: object, plan: str) -> dict[str, str]:
     result = dict(validate_payload(value))
     if not result["reason"].strip():
         raise AgentError("Response must explain its decision")
+    for field in ("plan", "reason"):
+        if len(result[field].encode("utf-8")) > MAX_TEXT_BYTES:
+            raise AgentError(f"Response {field} exceeds the {MAX_TEXT_BYTES // 1024} KiB limit; shorten it")
     # Reviewers can read outside the repository (Codex's sandbox allows it), so
     # never publish credentials they introduce. The message never echoes them.
     # Fields are separate documents: a header at the end of the plan must not

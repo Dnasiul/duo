@@ -5,8 +5,11 @@ from dataclasses import replace
 import io
 import json
 from pathlib import Path
+import os
 import signal
 import subprocess
+import sys
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -191,16 +194,42 @@ sys.exit(1)
         with self.assertRaises(AgentError):
             adapter('codex', 'Review', 5)
 
-    def test_interrupt_and_timeout_kill_process_group(self):
-        for failure in (KeyboardInterrupt(), subprocess.TimeoutExpired('agent', 1)):
-            process = Mock(pid=1234)
-            process.communicate.side_effect = failure
-            with self.subTest(failure=type(failure)), patch('duo.adapters.subprocess.Popen', return_value=process) as launch, patch('duo.adapters.os.killpg') as kill:
-                with self.assertRaises(type(failure)):
-                    run_process(['agent'], 'Review', self.repo, 1, self.root / 'out', self.root / 'err')
-            self.assertTrue(launch.call_args.kwargs['start_new_session'])
-            kill.assert_called_once_with(1234, signal.SIGKILL)
-            process.wait.assert_called_once()
+    def test_interrupt_kills_process_group(self):
+        process = Mock(pid=1234)
+        process.wait.side_effect = [KeyboardInterrupt(), 0]
+        with patch('duo.adapters.subprocess.Popen', return_value=process) as launch, patch('duo.adapters.os.killpg') as kill:
+            with self.assertRaises(KeyboardInterrupt):
+                run_process(['agent'], 'Review', self.repo, 1, self.root / 'out', self.root / 'err')
+        self.assertTrue(launch.call_args.kwargs['start_new_session'])
+        kill.assert_called_once_with(1234, signal.SIGKILL)
+        self.assertEqual(process.wait.call_count, 2)
+
+    def test_timeout_and_limits_kill_real_process_group(self):
+        from duo.adapters import LimitExceeded
+        for failure in ('timeout', 'limit'):
+            marker = self.root / f'{failure}.pid'
+            # The CLI starts a grandchild; both must be stopped.
+            child = ("import pathlib, subprocess, sys, time\n"
+                     "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                     f"pathlib.Path({str(marker)!r}).write_text(str(p.pid))\n"
+                     "time.sleep(60)\n")
+            check = (lambda: 'Too much output' if marker.exists() else None) if failure == 'limit' else None
+            expected = subprocess.TimeoutExpired if failure == 'timeout' else LimitExceeded
+            started = time.monotonic()
+            with self.subTest(failure=failure), self.assertRaises(expected):
+                run_process([sys.executable, '-c', child], '', self.repo, 3 if failure == 'timeout' else 30,
+                            self.root / 'out', self.root / 'err', check=check)
+            self.assertLess(time.monotonic() - started, 10)
+            grandchild = int(marker.read_text())
+            for _ in range(40):
+                try:
+                    os.kill(grandchild, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                os.kill(grandchild, signal.SIGKILL)
+                self.fail(f'{failure}: grandchild survived')
 
     def test_task_and_criteria_files_reach_prompt_verbatim(self):
         task = 'Task\r\n<tag> &amp;  \r\n'
@@ -294,3 +323,115 @@ pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'\\xff')
         adapter = CLIAdapter(self.config, self.store)
         with self.assertRaises(AgentError):
             adapter('codex', 'Review', 5)
+
+
+class ResourceLimitTests(Fixture):
+    def limited(self, body, **limits):
+        binary = self.executable('limited', body)
+        return CLIAdapter(replace(self.config, codex_bin=binary, claude_bin=binary, **limits), self.store)
+
+    def test_runaway_output_stops_cli_without_retry(self):
+        # Throttled so the sampling overshoot stays small and predictable.
+        adapter = self.limited('''import sys, time
+sys.stdin.read()
+while True:
+    sys.stdout.write("x" * 262144); sys.stdout.flush(); time.sleep(0.05)
+''', max_output_mb=1)
+        started = time.monotonic()
+        with self.assertRaises(AgentError) as caught:
+            adapter('codex', 'Review', 30)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertFalse(caught.exception.retryable)
+        self.assertIn('stdout exceeded the 1 MiB output limit', str(caught.exception))
+        stdout = next(self.store.path.glob('attempt-*/stdout.log'))
+        self.assertLess(stdout.stat().st_size, 8 * 1024 * 1024)
+
+    def test_run_storage_counts_files_the_cli_creates(self):
+        adapter = self.limited('''import pathlib, sys, time
+sys.stdin.read()
+attempt = pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).parent
+for n in range(1000):
+    (attempt / f"cache-{n}").write_bytes(b"x" * 262144); time.sleep(0.05)
+''', max_run_mb=1)
+        with self.assertRaises(AgentError) as caught:
+            adapter('codex', 'Review', 30)
+        self.assertIn('Run storage exceeded the 1 MiB limit', str(caught.exception))
+
+    def test_failed_limit_keeps_last_accepted_plan(self):
+        (self.repo / 'plan.md').write_text('# Accepted\n')
+        binary = self.executable('noisy', '''import sys, time
+sys.stdin.read()
+while True:
+    sys.stderr.write("e" * 262144); sys.stderr.flush(); time.sleep(0.05)
+''')
+        output = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(io.StringIO()), \
+                patch('duo.adapters.CLIAdapter.preflight', return_value={}):
+            code = main(['--repo', str(self.repo), '--state-dir', str(self.audit), '--task', 'Task',
+                         '--codex-model', 'c', '--claude-model', 'a', '--codex-bin', binary,
+                         '--claude-bin', binary, '--max-output-mb', '1', '--json'])
+        self.assertEqual(code, 1)
+        self.assertIn('stderr exceeded the 1 MiB output limit', json.loads(output.getvalue())['message'])
+        self.assertEqual((self.repo / 'plan.md').read_text(), '# Accepted\n')
+
+    def test_copilot_runtime_is_discarded_and_not_counted(self):
+        from duo import copilot
+        binary = self.executable('copilot', '''import json, os, pathlib, sys
+sys.stdin.read()
+runtime = pathlib.Path(os.environ['COPILOT_CACHE_HOME']) / 'pkg' / 'darwin-arm64'
+runtime.mkdir(parents=True)
+(runtime / 'runtime.bin').write_bytes(b"r" * (3 * 1024 * 1024))
+reply = {'decision': 'approve', 'plan': '', 'reason': 'Ready'}
+print(json.dumps({'type': 'assistant.message', 'data': {'content': json.dumps(reply),
+                  'phase': 'final_answer', 'toolRequests': []}}))
+''')
+        config = replace(self.config, codex_backend='copilot', copilot_bin=binary, max_run_mb=1)
+        adapter = CLIAdapter(config, self.store)
+        adapter.policy_verified = True
+        with patch('duo.copilot.check_sources'), patch.dict(os.environ, {'COPILOT_GITHUB_TOKEN': 'duo-test-token'}):
+            self.assertEqual(adapter('codex', 'Review', 30)['decision'], 'approve')
+        attempt = next(self.store.path.glob('attempt-*'))
+        self.assertFalse((attempt / 'copilot-cache' / 'pkg').exists())
+        self.assertTrue((attempt / 'stdout.log').exists())
+        # A symlinked runtime is unlinked, never followed.
+        outside = self.root / 'outside'
+        outside.mkdir()
+        (outside / 'keep').write_text('keep')
+        link_dir = self.root / 'linked'
+        (link_dir / 'copilot-cache').mkdir(parents=True)
+        (link_dir / 'copilot-cache' / 'pkg').symlink_to(outside)
+        copilot.discard_runtime(link_dir)
+        self.assertFalse((link_dir / 'copilot-cache' / 'pkg').exists())
+        self.assertEqual((outside / 'keep').read_text(), 'keep')
+
+    def test_oversized_inputs_rejected_before_any_cli_call(self):
+        from duo.models import MAX_TEXT_BYTES
+        big = 'x' * (MAX_TEXT_BYTES + 1)
+        (self.root / 'task.txt').write_text(big)
+        cases = ((['--task-file', str(self.root / 'task.txt')], 'Task exceeds'),
+                 (['--task', 'Task', '--criteria', big], 'Criteria exceeds'))
+        for extra, message in cases:
+            output = io.StringIO()
+            with self.subTest(message=message), redirect_stdout(output), \
+                    patch('duo.adapters.run_process') as launch:
+                code = main(['--repo', str(self.repo), '--state-dir', str(self.audit), *extra,
+                             '--codex-model', 'c', '--claude-model', 'a', '--json'])
+                self.assertEqual(code, 1)
+                self.assertIn(message, json.loads(output.getvalue())['message'])
+                launch.assert_not_called()
+        (self.repo / 'plan.md').write_text(big)
+        output = io.StringIO()
+        with redirect_stdout(output), patch('duo.adapters.run_process') as launch:
+            self.assertEqual(main(['--repo', str(self.repo), '--state-dir', str(self.audit), '--task', 'T',
+                                   '--codex-model', 'c', '--claude-model', 'a', '--json']), 1)
+        self.assertIn('plan.md exceeds', json.loads(output.getvalue())['message'])
+        launch.assert_not_called()
+        with self.assertRaisesRegex(AgentError, 'plan exceeds the 1024 KiB limit'):
+            validate_review(response('revise', big), '')
+
+    def test_limits_must_be_positive(self):
+        from duo.models import Config
+        for name in ('max_output_mb', 'max_run_mb'):
+            for value in (0, -1, 1.5):
+                with self.subTest(name=name, value=value), self.assertRaises(ValueError):
+                    Config(self.repo, 'c', 'a', **{name: value})

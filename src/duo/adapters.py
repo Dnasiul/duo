@@ -8,32 +8,74 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import threading
+import time
+from typing import Callable
 
 from . import copilot
 from .models import (Agent, AgentError, AgentTimeout, Config, DEFAULT_CLAUDE_MAX_TURNS, RunError,
                      SCHEMA, validate_payload)
 from .policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options,
                      codex_options, verify_controls, verify_version)
-from .storage import RunStore
+from .storage import RunStore, run_usage
+
+
+class LimitExceeded(Exception):
+    """A resource limit was exceeded while the CLI ran; the message is safe to report."""
+
+
+POLL_SECONDS = 0.5  # how often limits are checked; overshoot is bounded by output rate x this
 
 
 def run_process(argv: list[str], prompt: str, repo: Path, timeout: float,
-                stdout: Path, stderr: Path, *, env: dict[str, str] | None = None) -> int:
-    """Keep diagnostics on disk and terminate the entire CLI process group."""
+                stdout: Path, stderr: Path, *, env: dict[str, str] | None = None,
+                check: Callable[[], str | None] | None = None) -> int:
+    """Keep diagnostics on disk and terminate the entire CLI process group.
+
+    While the CLI runs, ``check`` is called every POLL_SECONDS; a message from it
+    stops the process group and raises LimitExceeded.
+    """
     with stdout.open("wb") as out, stderr.open("wb") as err:
         process = subprocess.Popen(
             argv, stdin=subprocess.PIPE, stdout=out, stderr=err,
             cwd=repo, start_new_session=True, env=env,
         )
+
+        def feed() -> None:
+            # A thread, so a CLI that exits or stops reading cannot block monitoring.
+            try:
+                process.stdin.write(prompt.encode("utf-8"))
+                process.stdin.close()
+            except (OSError, ValueError):
+                pass
+
+        writer = threading.Thread(target=feed, daemon=True)
+        writer.start()
+        deadline = time.monotonic() + timeout
         try:
-            process.communicate(input=prompt.encode("utf-8"), timeout=timeout)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            while True:
+                try:
+                    process.wait(timeout=max(0.0, min(POLL_SECONDS, deadline - time.monotonic())))
+                    break
+                except subprocess.TimeoutExpired:
+                    if time.monotonic() >= deadline:
+                        raise subprocess.TimeoutExpired(argv, timeout) from None
+                    message = check() if check else None
+                    if message:
+                        raise LimitExceeded(message)
+        except (subprocess.TimeoutExpired, LimitExceeded, KeyboardInterrupt):
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             process.wait()
             raise
+        finally:
+            writer.join(timeout=5)
+    # A fast CLI may finish between checks; its output still counts.
+    message = check() if check else None
+    if message:
+        raise LimitExceeded(message)
     return process.returncode
 
 
@@ -305,6 +347,21 @@ class CLIAdapter:
             argv += ["--max-budget-usd", str(config.claude_max_budget_usd)]
         return argv
 
+    def limit_message(self, stdout: Path, stderr: Path) -> str | None:
+        """A resource-limit violation for the running attempt, or None."""
+        output_limit = self.config.max_output_mb * 1024 * 1024
+        for stream in (stdout, stderr):
+            try:
+                if stream.stat().st_size > output_limit:
+                    return (f"Agent CLI {stream.stem} exceeded the {self.config.max_output_mb} MiB "
+                            "output limit (--max-output-mb)")
+            except FileNotFoundError:
+                pass
+        if run_usage(self.store.path) > self.config.max_run_mb * 1024 * 1024:
+            return (f"Run storage exceeded the {self.config.max_run_mb} MiB limit (--max-run-mb), "
+                    "including CLI logs and caches")
+        return None
+
     def __call__(self, agent: Agent, prompt: str, timeout: float) -> dict[str, str]:
         if not self.policy_verified:
             self.preflight()
@@ -328,11 +385,18 @@ class CLIAdapter:
                           "model": getattr(self.config, f"{agent}_model"),
                           "attempt_dir": directory.name})
         try:
-            code = run_process(argv, prompt, self.config.repo, timeout, stdout, stderr, env=env)
+            code = run_process(argv, prompt, self.config.repo, timeout, stdout, stderr, env=env,
+                               check=lambda: self.limit_message(stdout, stderr))
         except subprocess.TimeoutExpired as exc:
             raise AgentTimeout("Agent CLI timed out") from exc
+        except LimitExceeded as exc:
+            # Retrying would likely repeat the runaway output; stop the run instead.
+            raise AgentError(str(exc), retryable=False) from exc
         except OSError as exc:
             raise AgentError("Cannot start or capture the agent CLI", retryable=False) from exc
+        finally:
+            if backend == "copilot":
+                copilot.discard_runtime(directory)
         if code:
             # Bounded reads; diagnostic text is kept local, never put in a prompt.
             # Only structured error fields are read from stdout, which otherwise

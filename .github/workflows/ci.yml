@@ -36,5 +36,7 @@ jobs:
         # Run outside the checkout's src so the installed wheel is what gets tested.
         working-directory: tests
         run: python -B -m unittest discover -s . -v
-      - name: Check the installed entry point
-        run: duo --help
+      - name: Check the installed entry points
+        run: |
+          duo --help
+          duo-clean --help

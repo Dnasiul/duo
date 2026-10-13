@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -117,6 +118,19 @@ def mcp_names(repo: Path) -> list[str]:
     return sorted(names)
 
 
+def discard_runtime(directory: Path) -> None:
+    """Delete the runtime Copilot unpacks into each fresh cache (about 165 MiB).
+
+    It is the CLI's own program, not review output; keeping a copy per attempt
+    filled the audit directory.
+    """
+    runtime = directory / 'copilot-cache' / 'pkg'
+    if runtime.is_symlink():
+        runtime.unlink()
+    elif runtime.is_dir():
+        shutil.rmtree(runtime, ignore_errors=True)
+
+
 def command(config: Config, agent: Agent, directory: Path) -> list[str]:
     argv = [config.copilot_bin, '--no-auto-update', '--silent', '--stream', 'off',
             '--output-format', 'json', '--model', getattr(config, f'{agent}_model'),
@@ -135,6 +149,13 @@ def command(config: Config, agent: Agent, directory: Path) -> list[str]:
 
 
 def preflight(config: Config, directory: Path) -> tuple[str, dict]:
+    try:
+        return _preflight(config, directory)
+    finally:
+        discard_runtime(directory)
+
+
+def _preflight(config: Config, directory: Path) -> tuple[str, dict]:
     check_sources(config.repo)
     disabled_servers = mcp_names(config.repo)
     env = environment(directory)
