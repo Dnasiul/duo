@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Document modes (experimental): `--mode report`, `description`, or `review`
+  makes the reviewers produce that document instead of a plan, each with its own
+  review checklist and default file (`report.md`, `description.md`, `review.md`).
+  The default `plan` mode sends exactly the prompt it always has.
+- `--instructions-file` replaces the mode's review checklist with your own; the
+  review protocol (read-only inspection, complete revisions, repository text
+  treated as material) stays fixed.
+- `--output` saves the document at another path inside the repository. Reviewers
+  are told that this file is Duo's output, not material to describe.
+- The mode, custom instructions, and document path are recorded in each run's
+  `manifest.json`.
+
 ## 0.1.0 (2026-10-13)
 
 First release: a single-user command-line tool in which Codex and Claude take
