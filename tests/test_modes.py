@@ -92,11 +92,16 @@ class ModeTests(Fixture):
         (self.root / 'elsewhere').mkdir()
         (self.repo / 'escape').symlink_to(self.root / 'elsewhere', target_is_directory=True)
         (self.repo / '.git').mkdir()
+        (self.repo / 'docs').mkdir()
         for output, message in ((str(self.root / 'x.md'), 'relative to --repo'),
                                 ('../x.md', 'inside --repo'),
                                 ('escape/x.md', 'inside --repo'),
                                 ('.git/x.md', 'not be inside .git'),
                                 ('sub/../.git/x.md', 'not be inside .git'),
+                                ('.GIT/x.md', 'not be inside .git'),
+                                ('.Git', 'not be inside .git'),
+                                ('docs', 'is a directory'),
+                                ('docs/', 'is a directory'),
                                 ('missing/x.md', 'does not exist')):
             with self.subTest(output=output):
                 code, summary, prompts = self.run_main('--output', output)
@@ -104,6 +109,7 @@ class ModeTests(Fixture):
                 self.assertIn(message, summary['message'])
                 self.assertEqual(prompts, [])
         self.assertEqual(list((self.root / 'elsewhere').iterdir()), [])
+        self.assertEqual(list((self.repo / '.git').iterdir()), [])
 
     def test_inputs_must_not_be_the_document_under_review(self):
         (self.repo / 'report.md').write_text('# Report\n')
