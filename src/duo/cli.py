@@ -59,6 +59,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--pass-env", action="append", default=[], metavar="NAME",
                         help="Also pass this environment variable to reviewer CLIs (repeatable); "
                              "by default they get only what they need to run and log in")
+    result.add_argument("--allow-web", action="store_true",
+                        help="Experimental: give reviewers web search and page fetching "
+                             "(Copilot: fetching only); see docs/SECURITY.md before using it")
     result.add_argument("--max-output-mb", type=int, default=32,
                         help="MiB per captured CLI output stream (default: 32)")
     result.add_argument("--max-run-mb", type=int, default=256,
@@ -227,7 +230,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             max_output_mb=args.max_output_mb, max_run_mb=args.max_run_mb,
             codex_bin=args.codex_bin, claude_bin=args.claude_bin,
             mode=args.mode, guidance=guidance, output=str(document.relative_to(repo)),
-            pass_env=tuple(args.pass_env),
+            pass_env=tuple(args.pass_env), allow_web=args.allow_web,
         )
         default_state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "duo"
         state_dir = (args.state_dir or default_state).expanduser().resolve()
@@ -257,6 +260,10 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
                 print(f"Warning: running untested CLI versions as experimental: {names}",
                       file=sys.stderr, flush=True)
             store.json("versions.json", versions)
+            if config.allow_web:
+                print("Warning: --allow-web gives reviewers web access; what they read can "
+                      "reach the web through their queries and fetched URLs",
+                      file=sys.stderr, flush=True)
             result = graph.invoke(state, config={"recursion_limit": config.max_turns + 5})
             plan.check()
             store.json("result.json", {**result, "untested_cli": adapter.untested})

@@ -15,7 +15,7 @@ from typing import Callable
 from . import copilot
 from .models import (Agent, AgentError, AgentTimeout, Config, DEFAULT_CLAUDE_MAX_TURNS, RunError,
                      SCHEMA, validate_payload)
-from .policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options,
+from .policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options, claude_tools,
                      codex_options, reviewer_environment, verify_controls, verify_version)
 from .storage import RunStore, run_usage
 
@@ -301,7 +301,7 @@ class CLIAdapter:
             self.store.json("claude-settings.json", CLAUDE_SETTINGS)
         policy = verify_controls(self.config.codex_bin, self.config.claude_bin,
                                  self.settings_path, self.probe, agents=native,
-                                 pass_env=self.config.pass_env)
+                                 pass_env=self.config.pass_env, allow_web=self.config.allow_web)
         if len(native) < 2:
             directory = Path(tempfile.mkdtemp(prefix="copilot-preflight-", dir=self.store.path))
             versions["copilot"], policy["copilot"] = copilot.preflight(self.config, directory)
@@ -343,7 +343,7 @@ class CLIAdapter:
                     "-o", str(directory / "response.json")]
             if config.codex_effort is not None:
                 argv += ["-c", f'model_reasoning_effort="{config.codex_effort}"']
-            argv += codex_options()
+            argv += codex_options(config.allow_web)
             if config.skip_git_repo_check:
                 argv.append("--skip-git-repo-check")
             return argv + ["-"]
@@ -351,7 +351,8 @@ class CLIAdapter:
             raise ValueError("Unknown agent")
         argv = [config.claude_bin, "-p", "--model", config.claude_model,
                 "--output-format", "json", "--json-schema", json.dumps(SCHEMA),
-                "--tools", "Read,Glob,Grep", "--allowedTools", "Read,Glob,Grep",
+                "--tools", ",".join(claude_tools(config.allow_web)),
+                "--allowedTools", ",".join(claude_tools(config.allow_web)),
                 *claude_options(self.settings_path), "--disallowedTools", "mcp__*",
                 "--no-session-persistence", "--max-turns",
                 str(config.claude_max_turns or DEFAULT_CLAUDE_MAX_TURNS)]

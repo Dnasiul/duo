@@ -110,6 +110,7 @@ class Config:
     guidance: str = ""       # custom review checklist replacing the mode's own
     output: str = ""         # document path relative to repo; "" means <mode>.md
     pass_env: tuple[str, ...] = ()  # extra environment variable names for reviewer CLIs
+    allow_web: bool = False  # give reviewers web search and page fetching
 
     def __post_init__(self):
         if self.start not in AGENTS:

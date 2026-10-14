@@ -66,7 +66,7 @@ class Reviewer:
                 payload = self.adapter(
                     agent, build_prompt(state, self.config.history_limit, feedback,
                                         self.config.mode, self.config.guidance,
-                                        self.config.output),
+                                        self.config.output, self.config.allow_web),
                     min(self.config.timeout, remaining),
                 )
                 self.plan_file.check()
