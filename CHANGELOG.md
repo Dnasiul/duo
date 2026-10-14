@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 (2026-10-14)
+
+### Fixed
+
+- Copilot again receives `GH_HOST`, which selects a GitHub Enterprise host. The
+  restricted reviewer environment in 0.3.0 passed only `COPILOT_GH_HOST`, so with
+  `GH_HOST` alone Copilot authenticated against github.com instead.
+
 ## 0.3.0 (2026-10-13)
 
 ### Changed

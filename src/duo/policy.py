@@ -51,7 +51,9 @@ ENVIRONMENT = (
 CLI_ENVIRONMENT = {
     "codex": ("CODEX_HOME", "CODEX_API_KEY", "OPENAI_API_KEY"),
     "claude": ("CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"),
-    "copilot": ("COPILOT_GH_HOST",),  # its token is added by copilot.environment()
+    # GH_HOST selects the GitHub host (Enterprise); COPILOT_GH_HOST overrides it for
+    # Copilot only. Its token is added by copilot.environment().
+    "copilot": ("COPILOT_GH_HOST", "GH_HOST"),
 }
 
 
