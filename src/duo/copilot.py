@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 from .models import Agent, Config, RunError
-from .policy import verify_version
+from .policy import reviewer_environment, verify_version
 from .storage import atomic_write
 
 SETTINGS = {
@@ -77,14 +77,24 @@ def check_sources(repo: Path) -> None:
                 raise RunError(f'Copilot repository settings conflict with inspection policy: {path}')
 
 
-def environment(directory: Path) -> dict[str, str]:
-    """Fresh config/cache per invocation; credentials stay in the child environment."""
+def token_variable() -> str | None:
+    """The variable holding the token Copilot uses: the first set of AUTH_VARIABLES."""
+    return next((key for key in AUTH_VARIABLES if os.environ.get(key, '').strip()), None)
+
+
+def environment(directory: Path, extra: tuple[str, ...] = ()) -> dict[str, str]:
+    """Fresh config/cache per invocation, the reviewer environment, and one token.
+
+    Only the token Copilot would use (first of AUTH_VARIABLES) is passed, under its
+    own name; other COPILOT_* settings and provider overrides are dropped.
+    """
     home = directory / 'copilot-home'
     home.mkdir(mode=0o700)
     atomic_write(home / 'settings.json', (json.dumps(SETTINGS) + '\n').encode())
-    keep = {'COPILOT_GITHUB_TOKEN', 'COPILOT_GH_HOST'}
-    env = {key: value for key, value in os.environ.items()
-           if not key.startswith(('COPILOT_', 'GITHUB_COPILOT_')) or key in keep}
+    env = reviewer_environment('copilot', extra)
+    token = token_variable()
+    if token:
+        env[token] = os.environ[token]
     env.update(COPILOT_HOME=str(home), COPILOT_CACHE_HOME=str(directory / 'copilot-cache'),
                COPILOT_AUTO_UPDATE='false', COPILOT_ALLOW_ALL='false',
                GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS='false',
@@ -158,7 +168,7 @@ def preflight(config: Config, directory: Path) -> tuple[str, dict]:
 def _preflight(config: Config, directory: Path) -> tuple[str, dict]:
     check_sources(config.repo)
     disabled_servers = mcp_names(config.repo)
-    env = environment(directory)
+    env = environment(directory, config.pass_env)
     def probe(args: list[str]) -> str:
         try:
             result = subprocess.run([config.copilot_bin, '--no-auto-update', *args],

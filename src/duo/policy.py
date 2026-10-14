@@ -34,6 +34,34 @@ CLAUDE_SETTINGS = {
 }
 
 
+# Environment variables a reviewer CLI receives; everything else is dropped, so
+# cloud credentials, other tools' tokens, an SSH agent, or NODE_OPTIONS (which can
+# make Node load code) do not reach the reviewer. --pass-env adds names explicitly.
+ENVIRONMENT = (
+    "HOME", "PATH", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "TZ", "LANG", "LANGUAGE",
+    # Per-user directories and the session bus, which Linux keyrings use for CLI logins.
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    # Network access to the provider through proxies or private certificate authorities.
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
+    "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "NODE_USE_SYSTEM_CA",
+)
+# Each CLI's own configuration and login variables.
+CLI_ENVIRONMENT = {
+    "codex": ("CODEX_HOME", "CODEX_API_KEY", "OPENAI_API_KEY"),
+    "claude": ("CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"),
+    "copilot": ("COPILOT_GH_HOST",),  # its token is added by copilot.environment()
+}
+
+
+def reviewer_environment(cli: str, extra: tuple[str, ...] = ()) -> dict[str, str]:
+    """The environment for a reviewer CLI: the allowlist, its own variables, and extra names."""
+    names = set(ENVIRONMENT) | set(CLI_ENVIRONMENT[cli]) | set(extra)
+    return {key: value for key, value in os.environ.items()
+            if key in names or key.startswith("LC_")}
+
+
 def codex_options() -> list[str]:
     return [item for override in CODEX_OVERRIDES for item in ("-c", override)]
 
@@ -144,8 +172,12 @@ def verify_claude_remote(report: str) -> str:
 
 
 def verify_controls(codex: str, claude: str, settings: Path,
-                    probe: Callable[..., str], agents: set[str] | None = None) -> dict:
-    """Verify the inspection controls; probe(argv, env=None) returns a CLI's stdout."""
+                    probe: Callable[..., str], agents: set[str] | None = None,
+                    pass_env: tuple[str, ...] = ()) -> dict:
+    """Verify the inspection controls; probe(argv, env=None) returns a CLI's stdout.
+
+    Without env, probe must run the CLI in its reviewer environment.
+    """
     agents = {"codex", "claude"} if agents is None else agents
     policy = {
         "id": POLICY_ID,
@@ -170,7 +202,7 @@ def verify_controls(codex: str, claude: str, settings: Path,
         # projects it trusts.
         with tempfile.TemporaryDirectory(prefix="duo-codex-home-") as home:
             listing = probe([codex, *codex_options(), "mcp", "list", "--json"],
-                            env={**os.environ, "CODEX_HOME": home})
+                            env={**reviewer_environment("codex", pass_env), "CODEX_HOME": home})
         try:
             servers = json.loads(listing)
         except ValueError as exc:

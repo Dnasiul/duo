@@ -16,7 +16,7 @@ from . import copilot
 from .models import (Agent, AgentError, AgentTimeout, Config, DEFAULT_CLAUDE_MAX_TURNS, RunError,
                      SCHEMA, validate_payload)
 from .policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options,
-                     codex_options, verify_controls, verify_version)
+                     codex_options, reviewer_environment, verify_controls, verify_version)
 from .storage import RunStore, run_usage
 
 
@@ -245,7 +245,13 @@ class CLIAdapter:
         self.untested: dict[str, str] = {}
         self.settings_path = self.store.path / "claude-settings.json"
 
+    def environment(self, cli: str) -> dict[str, str]:
+        return reviewer_environment(cli, self.config.pass_env)
+
     def probe(self, argv: list[str], env: dict[str, str] | None = None) -> str:
+        """Run a setup probe in the same restricted environment a review gets."""
+        if env is None:
+            env = self.environment("claude" if argv[0] == self.config.claude_bin else "codex")
         try:
             proc = subprocess.run(argv, capture_output=True, text=True, timeout=30,
                                   cwd=self.config.repo, env=env, stdin=subprocess.DEVNULL)
@@ -272,8 +278,8 @@ class CLIAdapter:
             if shutil.which(binary) is None:
                 raise RunError(f"{agent} executable not found: {binary}")
             try:
-                proc = subprocess.run([binary, "--version"], capture_output=True,
-                                      text=True, timeout=15, cwd=self.config.repo)
+                proc = subprocess.run([binary, "--version"], capture_output=True, text=True,
+                                      timeout=15, cwd=self.config.repo, env=self.environment(agent))
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise RunError(f"Cannot run {agent} --version") from exc
             if proc.returncode:
@@ -294,7 +300,8 @@ class CLIAdapter:
         if "claude" in native:
             self.store.json("claude-settings.json", CLAUDE_SETTINGS)
         policy = verify_controls(self.config.codex_bin, self.config.claude_bin,
-                                 self.settings_path, self.probe, agents=native)
+                                 self.settings_path, self.probe, agents=native,
+                                 pass_env=self.config.pass_env)
         if len(native) < 2:
             directory = Path(tempfile.mkdtemp(prefix="copilot-preflight-", dir=self.store.path))
             versions["copilot"], policy["copilot"] = copilot.preflight(self.config, directory)
@@ -305,6 +312,12 @@ class CLIAdapter:
                     "model": getattr(self.config, f"{agent}_model")}
             for agent in ("codex", "claude")
         }
+        # Names only: which variables each reviewer CLI receives, never their values.
+        clis = native | ({"copilot"} if len(native) < 2 else set())
+        policy["environment"] = {cli: sorted(self.environment(cli)) for cli in sorted(clis)}
+        if "copilot" in clis and copilot.token_variable():
+            policy["environment"]["copilot"] = sorted(
+                policy["environment"]["copilot"] + [copilot.token_variable()])
         policy["versions"] = versions
         # Probes still ran; the versions are simply not part of the supported set.
         self.untested = {name: versions[name] for name in untested}
@@ -369,10 +382,10 @@ class CLIAdapter:
         if agent == "claude" and backend == "native":
             check_claude_managed_files()
         directory = self.store.attempt_dir()
-        env = None
+        env = self.environment(agent)
         if backend == "copilot":
             copilot.check_sources(self.config.repo)
-            env = copilot.environment(directory)
+            env = copilot.environment(directory, self.config.pass_env)
             copilot.require_auth(env)
             prompt = ("Return only one JSON object, without Markdown fences or narration, "
                       "matching this schema: " + json.dumps(SCHEMA) + "\n\n" + prompt)

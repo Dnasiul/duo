@@ -109,10 +109,16 @@ class Config:
     mode: str = "plan"       # which document the reviewers produce
     guidance: str = ""       # custom review checklist replacing the mode's own
     output: str = ""         # document path relative to repo; "" means <mode>.md
+    pass_env: tuple[str, ...] = ()  # extra environment variable names for reviewer CLIs
 
     def __post_init__(self):
         if self.start not in AGENTS:
             raise ValueError("Starting agent must be codex or claude")
+        for name in self.pass_env:
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                raise ValueError(f"--pass-env needs an environment variable name, not {name!r}")
+            if name.startswith(("COPILOT_", "GITHUB_COPILOT_")):
+                raise ValueError(f"--pass-env cannot pass {name}: Duo controls Copilot settings")
         if self.mode not in DOCUMENT_MODES:
             raise ValueError(f"mode must be one of: {', '.join(DOCUMENT_MODES)}")
         if len(self.guidance.encode("utf-8")) > MAX_TEXT_BYTES:
