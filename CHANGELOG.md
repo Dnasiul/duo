@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `reviewer-policy.json` now lists every variable Copilot receives, including
+  the settings Duo sets for it (`COPILOT_HOME`, `COPILOT_ALLOW_ALL`, and others),
+  not only the ones it inherits.
+
 ## 0.3.1 (2026-10-14)
 
 ### Fixed

@@ -313,11 +313,12 @@ class CLIAdapter:
             for agent in ("codex", "claude")
         }
         # Names only: which variables each reviewer CLI receives, never their values.
-        clis = native | ({"copilot"} if len(native) < 2 else set())
-        policy["environment"] = {cli: sorted(self.environment(cli)) for cli in sorted(clis)}
-        if "copilot" in clis and copilot.token_variable():
-            policy["environment"]["copilot"] = sorted(
-                policy["environment"]["copilot"] + [copilot.token_variable()])
+        policy["environment"] = {cli: sorted(self.environment(cli)) for cli in sorted(native)}
+        if len(native) < 2:
+            # Built as a review builds it, so Duo's own Copilot settings are listed too.
+            names = directory / "environment"
+            names.mkdir()
+            policy["environment"]["copilot"] = sorted(copilot.environment(names, self.config.pass_env))
         policy["versions"] = versions
         # Probes still ran; the versions are simply not part of the supported set.
         self.untested = {name: versions[name] for name in untested}
