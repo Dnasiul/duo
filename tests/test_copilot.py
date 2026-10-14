@@ -114,7 +114,8 @@ reply(result)
         recorded = set(json.loads((run / 'reviewer-policy.json').read_text())['environment']['copilot'])
         self.assertTrue({'COPILOT_GITHUB_TOKEN', 'COPILOT_HOME', 'COPILOT_ALLOW_ALL'} <= recorded)
         for home in homes:
-            self.assertEqual(set(json.loads((home.parent / 'env.json').read_text())), recorded)
+            # A subset: the OS may add its own variables to a process (macOS does).
+            self.assertLessEqual(recorded, set(json.loads((home.parent / 'env.json').read_text())))
         self.assertEqual(len(set(homes)), 3)
         for path in run.rglob('*'):
             if path.is_file():
