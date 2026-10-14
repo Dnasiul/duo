@@ -1,8 +1,8 @@
 # Status and handoff
 
 Where Duo's production readiness stands, and how to continue on a Linux machine.
-Written 2026-10-13 at commit `c5886a7`; Linux live results and the 0.1.0 and 0.2.0
-releases added the same day. `plan.md` is the full production plan; this page tracks
+Written 2026-10-13 at commit `c5886a7`; Linux live results and the 0.1.0, 0.2.0, and
+0.2.1 releases added the same day. `plan.md` is the full production plan; this page tracks
 progress against it.
 
 ## Done
@@ -24,6 +24,7 @@ progress against it.
 | Confinement of file reads and searches tested for every reviewer and backend | `scripts/smoke_inspection.py --confinement`, `--search-confinement`; "Linux live verification" below |
 | Release 0.1.0 (2026-10-13): tag `v0.1.0` on `94186b7`, wheel, sdist, `constraints.txt`, `SHA256SUMS`; release notes hold the release report | https://github.com/Dnasiul/duo/releases/tag/v0.1.0 |
 | Release 0.2.0 (2026-10-13): document modes (experimental); tag `v0.2.0` on `67538e2`, same files and release report | https://github.com/Dnasiul/duo/releases/tag/v0.2.0 |
+| Release 0.2.1 (2026-10-13): `--output` fixes (`.git` case-insensitive, directory targets) and `duo.__version__`; tag `v0.2.1` on `c41ea59`, same files and release report; published with `gh`, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.2.1 |
 
 ## Open
 
@@ -70,7 +71,8 @@ How 0.1.0 was released; repeat for later versions.
 
 Notes: macOS CI jobs can wait for a runner and be cancelled without running;
 rerun the failed jobs instead of pushing a new commit, which would change the
-release target. Creating a release needs a token with Contents read and write;
+release target. Creating a release needs a token with Contents read and write (on the macOS
+machine, `gh` is logged in: `gh release create vX.Y.Z --verify-tag --notes-file ...`);
 rerunning jobs also needs Actions read and write. The per-job API sometimes
 returns HTTP 502; the run's overall conclusion is enough, since any failed or
 cancelled job makes it a failure. A live run that stops at the turn limit is not
