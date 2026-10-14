@@ -3,4 +3,5 @@ graft tests/fixtures
 include scripts/*.py
 include constraints.txt
 include CHANGELOG.md
+include examples/*.md
 global-exclude __pycache__ *.py[cod] .DS_Store

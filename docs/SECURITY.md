@@ -108,6 +108,9 @@ Crossref check confirmed every finding. Native Codex's sandboxed `curl` and
 Python requests failed to resolve hosts, so its web access went only through
 web search. Native Claude, with Duo's exact command line, returned a release
 checksum it could only have read by fetching the file. No token in any file.
+Copilot started with `--repo` set to a subfolder of a Git repository was refused
+a file in a sibling folder, by relative and absolute path, so a web-enabled run
+pointed at a subfolder cannot read the rest of the project through Copilot.
 
 Use it only on repositories whose every file you trust, preferably with Claude
 Code or Copilot for both reviewers, and check web-derived claims against the URLs

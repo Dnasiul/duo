@@ -210,6 +210,10 @@ example to check references against their DOI records. It lets text the
 reviewers read steer them into sending data out through queries and URLs; read
 "Web access" in [docs/SECURITY.md](docs/SECURITY.md) before using it.
 
+For how the modes fit together across a research project, from observations and
+hypotheses to a paper with confirmed references, see
+[examples/scientific_research_pipeline.md](examples/scientific_research_pipeline.md).
+
 `--output` takes a path relative to `--repo` whose directory already exists; it
 must stay inside the repository and outside `.git`. Reviewers are told that this
 file is Duo's output, not material to describe. `--instructions-file` replaces

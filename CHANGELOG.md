@@ -8,6 +8,8 @@
   page fetching: Codex's live web search, Claude Code's `WebSearch` and
   `WebFetch`, and Copilot's `web_fetch`. It lets prompt injection send data out;
   see "Web access" in `docs/SECURITY.md`.
+- `examples/scientific_research_pipeline.md`: using Duo at each stage of a
+  research project, from observations to a paper with confirmed references.
 
 ### Fixed
 
