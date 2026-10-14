@@ -120,6 +120,27 @@ only `HOME`, `LANG`, `LC_ALL`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `TMPDIR`, and
 restricted environment with real model calls. Native/native and Copilot/Copilot
 ran live on macOS before 0.1.0.
 
+0.3.0 release candidate (`4a4ce4d`, 2026-10-13, macOS 26.6.2 arm64; codex-cli
+0.162.1, Claude Code 2.1.299, Copilot CLI 1.0.95): the restricted reviewer
+environment is new, so the full backend matrix and both smoke tests were rerun.
+Same `calc.py` task and models as before, `--max-turns 4 --max-attempts 2`:
+
+| Codex | Claude | Exit | Status | Turns | Files containing the token |
+| --- | --- | --- | --- | --- | --- |
+| native | native | 0 | agreed | 3 | 0 |
+| native | Copilot | 0 | agreed | 3 | 0 |
+| Copilot | native | 4 | limit reached | 4 | 0 |
+| Copilot | Copilot | 0 | agreed | 3 | 0 |
+
+The Copilot Codex + native Claude run repeated the pattern seen on the 0.2.0
+candidate: Codex revised a plan Claude had approved, to settle two open choices
+and adopt the test-file name Claude suggested; Claude approved again on turn 4.
+Rerun with `--max-turns 6`: agreed in 3 turns, no token. Each native CLI received
+9 environment variables and Copilot 10 (its token included); only read-only tools
+were used. Smoke test, natively and through Copilot: repository inspected, no hook
+or MCP sentinel ran. `check_drift.py`: all compatible. Live runs on Linux predate
+the restricted environment.
+
 ## Linux live verification
 
 2026-10-13, Ubuntu 22.04.5 LTS, kernel 5.15.0-198-generic, x86-64, Python 3.11.17.
