@@ -20,6 +20,7 @@ progress against it.
 | Runbook and security model | `docs/RUNBOOK.md`, `docs/SECURITY.md` |
 | Owner decisions (2026-10-13): no isolation profile in 0.1.0, documented as a limitation; MIT License; GitHub release only | `docs/SECURITY.md`, `LICENSE`, `CHANGELOG.md` |
 | Live runs on Linux: smoke test (native and Copilot) and all four backend combinations, including both mixed pairs | "Linux live verification" below |
+| Live mixed pairs on macOS, with the restricted reviewer environment (`8ffff97`) | "macOS live verification" below |
 | Codex MCP check matches the configuration reviews load, so user-configured MCP servers no longer block native Codex | `src/duo/policy.py` (`verify_controls`) |
 | Confinement of file reads and searches tested for every reviewer and backend | `scripts/smoke_inspection.py --confinement`, `--search-confinement`; "Linux live verification" below |
 | Release 0.1.0 (2026-10-13): tag `v0.1.0` on `94186b7`, wheel, sdist, `constraints.txt`, `SHA256SUMS`; release notes hold the release report | https://github.com/Dnasiul/duo/releases/tag/v0.1.0 |
@@ -28,8 +29,7 @@ progress against it.
 
 ## Open
 
-1. **Mixed pairs on macOS**: verified live on Linux only.
-2. **Document modes** (released in 0.2.0 as experimental): every mode ran live on
+1. **Document modes** (released in 0.2.0 as experimental): every mode ran live on
    Linux, natively and through Copilot (below); not yet live on macOS or with
    mixed backend pairs.
 
@@ -84,6 +84,27 @@ previous release's before deciding.
 version string, so the live backend matrix was not rerun; the offline suite covers
 both changes on Linux and macOS in CI. `check_drift.py`: codex-cli 0.162.1,
 Claude Code 2.1.296, and Copilot CLI 1.0.95 all compatible, no flag changes.
+
+## macOS live verification
+
+2026-10-13, macOS 26.6.2 (arm64), commit `8ffff97` (unreleased: reviewer CLIs get
+only the environment they need). CLIs: codex-cli 0.162.1, Claude Code 2.1.299,
+Copilot CLI 1.0.95. Same synthetic `calc.py` task and limits as on Linux
+(`--max-turns 4 --max-attempts 2`); models `gpt-6-astra` and `claude-sonnet-5-5`
+natively, `gpt-5.4` and `claude-sonnet-5.5` through Copilot.
+
+| Codex | Claude | Exit | Status | Turns | Attempts | Files containing the token |
+| --- | --- | --- | --- | --- | --- | --- |
+| native | Copilot | 0 | agreed | 3 | 3 | 0 |
+| Copilot | native | 0 | agreed | 3 | 3 | 0 |
+
+Tools: native Codex ran read-only commands (`pwd`, `ls`, a loop checking for
+`AGENTS.md`/`CLAUDE.md`); Copilot used `glob`, `view`, and `rg`; native Claude
+had no permission denials ($0.03). `reviewer-policy.json` shows each CLI received
+only `HOME`, `LANG`, `LC_ALL`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `TMPDIR`, and
+`USER`, plus `COPILOT_GITHUB_TOKEN` for Copilot, so both logins work under the
+restricted environment with real model calls. Native/native and Copilot/Copilot
+ran live on macOS before 0.1.0.
 
 ## Linux live verification
 
