@@ -73,7 +73,7 @@ best-effort.
 | Claude Code | 2.1.x from 2.1.296 | Other versions, only with `--allow-untested-cli` |
 | Copilot CLI | 1.0.x from 1.0.95 | Other versions, only with `--allow-untested-cli` |
 | Backends | All four native/Copilot combinations (live runs on Linux and macOS) | — |
-| Document modes | `report`, `description`, `review` (live runs on Linux, native and through Copilot) | macOS and mixed backend pairs: fake-CLI tests only |
+| Document modes | `report`, `description`, `review` (live runs on Linux, native and through Copilot; on macOS, native) | Copilot on macOS and mixed backend pairs: fake-CLI tests only |
 | Models used in live runs | Native: `gpt-6-astra`, `claude-opus-5-5`, `claude-sonnet-5-5`; Copilot: `gpt-5.4`, `claude-sonnet-5.5` | Any other model your account offers; unknown names stop the run without retrying |
 | Authentication | Codex and Claude Code: their own CLI login. Copilot: a token in `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`; a fine-grained token needs the "Copilot Requests" permission | Copilot's saved interactive login is not used |
 
