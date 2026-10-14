@@ -137,3 +137,10 @@ class ModeTests(Fixture):
         self.assertEqual(prompts, [])
         with self.assertRaisesRegex(ValueError, 'mode must be one of'):
             Config(self.repo, 'c', 'a', mode='essay')
+
+
+class VersionTests(Fixture):
+    def test_version_matches_installed_package(self):
+        from importlib.metadata import version
+        import duo
+        self.assertEqual(duo.__version__, version('duo-plan'))

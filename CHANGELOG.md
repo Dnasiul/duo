@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 (2026-10-13)
 
 ### Fixed
 
@@ -9,6 +9,7 @@
   repository's Git directory. Names are now compared case-insensitively.
 - `--output` naming a directory now fails with a clear message instead of
   `[Errno 21] Is a directory`.
+- `duo.__version__` reported 0.1.0; it now reads the installed package version.
 
 ## 0.2.0 (2026-10-13)
 
