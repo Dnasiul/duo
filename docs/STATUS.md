@@ -21,7 +21,7 @@ progress against it.
 | Owner decisions (2026-10-13): no isolation profile in 0.1.0, documented as a limitation; MIT License; GitHub release only | `docs/SECURITY.md`, `LICENSE`, `CHANGELOG.md` |
 | Live runs on Linux: smoke test (native and Copilot) and all four backend combinations, including both mixed pairs | "Linux live verification" below |
 | Live mixed pairs on macOS, with the restricted reviewer environment (`8ffff97`) | "macOS live verification" below |
-| Restricted reviewer environment live on Linux: native/native and Copilot/Copilot (0.3.1 candidate) | "Linux live verification" below |
+| Restricted reviewer environment live on Linux: all four backend combinations (0.3.1) | "Linux live verification" below |
 | Codex MCP check matches the configuration reviews load, so user-configured MCP servers no longer block native Codex | `src/duo/policy.py` (`verify_controls`) |
 | Confinement of file reads and searches tested for every reviewer and backend | `scripts/smoke_inspection.py --confinement`, `--search-confinement`; "Linux live verification" below |
 | Release 0.1.0 (2026-10-13): tag `v0.1.0` on `94186b7`, wheel, sdist, `constraints.txt`, `SHA256SUMS`; release notes hold the release report | https://github.com/Dnasiul/duo/releases/tag/v0.1.0 |
@@ -191,8 +191,18 @@ unchanged. `reviewer-policy.json` shows each native CLI received `DBUS_SESSION_B
 logins and the Copilot token work under it on Linux. Tools: native Codex ran
 read-only `rg`, `ls`, and `cat` commands; Claude had no permission denials
 ($0.03); Copilot used `glob`, `view`, and `rg`. `check_drift.py` under the
-restricted environment: all compatible. The mixed pairs were not rerun on Linux;
-they ran on macOS with the restricted environment.
+restricted environment: all compatible.
+
+Mixed pairs on Linux with the restricted environment (2026-10-14, `93e8b27`, the
+0.3.1 release, same CLIs, task, and limits): native Codex + Copilot Claude and
+Copilot Codex + native Claude each agreed in 3 turns and 3 attempts (exit 0), no
+token in any file, `calc.py` unchanged. Native CLIs received the same 10 variables,
+Copilot those plus its token; native Codex ran read-only `rg`, `cat`, and
+file-existence loops, Copilot used `glob`, `view`, and `rg`, and native Claude had
+no permission denials. All four backend combinations have now run live with the
+restricted environment on Linux and macOS. These runs' `reviewer-policy.json`
+omitted the settings Duo sets for Copilot (`COPILOT_HOME`, `COPILOT_ALLOW_ALL`,
+and others); it now lists every variable a Copilot review receives.
 
 Tools seen in the attempts:
 

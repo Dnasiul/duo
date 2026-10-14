@@ -79,6 +79,7 @@ assert '--disable-builtin-mcps' in sys.argv
 assert '--resume' not in sys.argv and '--continue' not in sys.argv
 assert os.environ['COPILOT_GITHUB_TOKEN'] == 'duo-test-token'
 assert sys.argv[sys.argv.index('--reasoning-effort') + 1] == 'high'
+pathlib.Path(os.environ['COPILOT_HOME']).parent.joinpath('env.json').write_text(json.dumps(sorted(os.environ)))
 prompt = sys.stdin.read()
 assert 'additionalProperties' in prompt
 if '(No plan exists yet.' in prompt:
@@ -109,6 +110,11 @@ reply(result)
         self.assertFalse((run / 'claude-settings.json').exists())
         homes = list(run.glob('attempt-*/copilot-home'))
         self.assertEqual(len(homes), 3)
+        # The audit names every variable a review received, Duo's own settings included.
+        recorded = set(json.loads((run / 'reviewer-policy.json').read_text())['environment']['copilot'])
+        self.assertTrue({'COPILOT_GITHUB_TOKEN', 'COPILOT_HOME', 'COPILOT_ALLOW_ALL'} <= recorded)
+        for home in homes:
+            self.assertEqual(set(json.loads((home.parent / 'env.json').read_text())), recorded)
         self.assertEqual(len(set(homes)), 3)
         for path in run.rglob('*'):
             if path.is_file():
