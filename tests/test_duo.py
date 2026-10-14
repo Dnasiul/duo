@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import replace
 import importlib.util
 import io
@@ -16,10 +16,10 @@ from unittest.mock import Mock, patch
 
 from duo.adapters import CLIAdapter, classify_failure, run_process
 from duo.cli import main
-from duo.models import AgentError, Config, RunError, validate_review
+from duo.models import MAX_TEXT_BYTES, AgentError, Config, RunError, validate_review
 from duo.policy import CODEX_DISABLED
 from duo.prompts import build_prompt, revision_diff
-from duo.storage import PlanFile, RunStore, atomic_write, run_lock
+from duo.storage import PlanFile, RunStore, atomic_write, read_input, run_lock
 from duo.workflow import Reviewer, build_graph, initial_state
 
 
@@ -456,6 +456,42 @@ class ContractTests(Fixture):
 
 
 class StorageTests(Fixture):
+    def test_input_limit_and_symlink_policy(self):
+        path = self.root / 'input'
+        data = b'x' * MAX_TEXT_BYTES
+        path.write_bytes(data)
+        self.assertEqual(read_input(path), data)
+        link = self.repo / 'plan.md'
+        link.symlink_to(path)
+        self.assertEqual(read_input(link), data)
+        with self.assertRaisesRegex(RunError, 'symbolic link'):
+            PlanFile(self.repo)
+        path.write_bytes(data + b'x')
+        with self.assertRaisesRegex(RunError, 'exceeds the 1024 KiB limit'):
+            read_input(path)
+        with self.assertRaisesRegex(RunError, 'regular file'):
+            read_input(self.repo)
+
+    def test_input_read_stays_bounded_if_file_grows_after_stat(self):
+        path = self.root / 'growing'
+        path.write_bytes(b'x' * (MAX_TEXT_BYTES * 2))
+        real_fdopen = os.fdopen
+        reads = []
+
+        @contextmanager
+        def capture(*args, **kwargs):
+            with real_fdopen(*args, **kwargs) as stream:
+                proxy = Mock(wraps=stream)
+                reads.append(proxy.read)
+                yield proxy
+
+        info = Mock(st_mode=path.stat().st_mode, st_size=0)
+        with patch('duo.storage.os.fstat', return_value=info), \
+                patch('duo.storage.os.fdopen', side_effect=capture):
+            with self.assertRaisesRegex(RunError, 'exceeds the 1024 KiB limit'):
+                read_input(path)
+        reads[0].assert_called_once_with(MAX_TEXT_BYTES + 1)
+
     def test_atomic_write_preserves_mode_and_cleans_temporary_files(self):
         path = self.repo / "plan.md"
         path.write_text("Old")

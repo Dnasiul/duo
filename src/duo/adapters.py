@@ -50,9 +50,9 @@ def run_process(argv: list[str], prompt: str, repo: Path, timeout: float,
                 pass
 
         writer = threading.Thread(target=feed, daemon=True)
-        writer.start()
-        deadline = time.monotonic() + timeout
         try:
+            writer.start()
+            deadline = time.monotonic() + timeout
             while True:
                 try:
                     process.wait(timeout=max(0.0, min(POLL_SECONDS, deadline - time.monotonic())))
@@ -63,7 +63,9 @@ def run_process(argv: list[str], prompt: str, repo: Path, timeout: float,
                     message = check() if check else None
                     if message:
                         raise LimitExceeded(message)
-        except (subprocess.TimeoutExpired, LimitExceeded, KeyboardInterrupt):
+        except BaseException:
+            # Monitoring and setup failures must stop the reviewer too, including
+            # filesystem errors while measuring its output or audit directory.
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -71,7 +73,8 @@ def run_process(argv: list[str], prompt: str, repo: Path, timeout: float,
             process.wait()
             raise
         finally:
-            writer.join(timeout=5)
+            if writer.ident is not None:
+                writer.join(timeout=5)
     # A fast CLI may finish between checks; its output still counts.
     message = check() if check else None
     if message:

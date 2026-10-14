@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Copilot runtime cleanup skips symbolic links in attempt and cache directories,
+  preventing deletion outside the audit directory.
+- Reviewer processes are stopped and reaped when resource monitoring or prompt
+  writer startup fails.
+- Input files must be regular files and are read with a 1 MiB bound, preventing
+  named pipes from hanging startup and oversized files from exhausting memory.
+- The Git-root test no longer depends on the host temporary directory having no
+  Git ancestors.
+
 ## 0.4.0 (2026-10-14)
 
 ### Added

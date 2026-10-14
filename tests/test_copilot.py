@@ -307,7 +307,10 @@ class CopilotSourceTests(unittest.TestCase):
             sub = repo / 'pkg'
             sub.mkdir()
             self.assertEqual(copilot.workspace_roots(sub), [sub, repo])
-            self.assertEqual(copilot.workspace_roots(home / 'work'), [home / 'work'])
+            # The host's temporary directory can itself be under a Git root.
+            # Model the no-Git case explicitly instead of relying on its parents.
+            with patch.object(Path, 'exists', return_value=False):
+                self.assertEqual(copilot.workspace_roots(home / 'work'), [home / 'work'])
             with patch('duo.copilot.sys.platform', 'linux'), patch.object(Path, 'lstat', side_effect=FileNotFoundError):
                 check_copilot_sources(sub)
             self.assertEqual(copilot.mcp_names(sub), [])

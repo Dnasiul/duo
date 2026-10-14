@@ -204,6 +204,38 @@ sys.exit(1)
         kill.assert_called_once_with(1234, signal.SIGKILL)
         self.assertEqual(process.wait.call_count, 2)
 
+    def test_monitoring_error_stops_the_reviewer(self):
+        processes = []
+        launch = subprocess.Popen
+
+        def capture(*args, **kwargs):
+            process = launch(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        try:
+            with patch('duo.adapters.subprocess.Popen', side_effect=capture):
+                with self.assertRaisesRegex(OSError, 'monitor failed'):
+                    run_process([sys.executable, '-c', 'import time; time.sleep(60)'],
+                                '', self.repo, 10, self.root / 'out', self.root / 'err',
+                                check=Mock(side_effect=OSError('monitor failed')))
+            self.assertEqual(processes[0].poll(), -signal.SIGKILL)
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+
+    def test_writer_start_failure_stops_the_reviewer(self):
+        process = Mock(pid=1234)
+        with patch('duo.adapters.subprocess.Popen', return_value=process), \
+                patch('duo.adapters.threading.Thread.start', side_effect=RuntimeError('no thread')), \
+                patch('duo.adapters.os.killpg') as kill:
+            with self.assertRaisesRegex(RuntimeError, 'no thread'):
+                run_process(['agent'], '', self.repo, 1, self.root / 'out', self.root / 'err')
+        kill.assert_called_once_with(1234, signal.SIGKILL)
+        process.wait.assert_called_once()
+
     def test_timeout_and_limits_kill_real_process_group(self):
         from duo.adapters import LimitExceeded
         for failure in ('timeout', 'limit'):
@@ -403,6 +435,39 @@ print(json.dumps({'type': 'assistant.message', 'data': {'content': json.dumps(re
         copilot.discard_runtime(link_dir)
         self.assertFalse((link_dir / 'copilot-cache' / 'pkg').exists())
         self.assertEqual((outside / 'keep').read_text(), 'keep')
+
+    def test_copilot_discard_does_not_follow_intermediate_links(self):
+        from duo import copilot
+        outside = self.root / 'outside'
+        (outside / 'copilot-cache' / 'pkg').mkdir(parents=True)
+        keep = outside / 'copilot-cache' / 'pkg' / 'keep'
+        keep.write_text('Keep')
+        linked_attempt = self.root / 'linked-attempt'
+        linked_attempt.symlink_to(outside, target_is_directory=True)
+        linked_cache = self.root / 'attempt'
+        linked_cache.mkdir()
+        (linked_cache / 'copilot-cache').symlink_to(outside / 'copilot-cache', target_is_directory=True)
+        for attempt in (linked_attempt, linked_cache):
+            with self.subTest(attempt=attempt):
+                copilot.discard_runtime(attempt)
+                self.assertEqual(keep.read_text(), 'Keep')
+
+    def test_nonregular_inputs_fail_without_waiting_for_a_writer(self):
+        fifo = self.root / 'input'
+        os.mkfifo(fifo)
+        os.mkfifo(self.repo / 'plan.md')
+        base = [sys.executable, '-B', '-m', 'duo', '--repo', str(self.repo),
+                '--state-dir', str(self.audit), '--codex-model', 'c', '--claude-model', 'a',
+                '--json']
+        cases = [(['--task', 'Task'], 'plan.md'),
+                 (['--task-file', str(fifo)], 'Task'),
+                 (['--task', 'Task', '--criteria-file', str(fifo)], 'Criteria'),
+                 (['--task', 'Task', '--instructions-file', str(fifo)], 'Instructions')]
+        for options, label in cases:
+            with self.subTest(label=label):
+                result = subprocess.run(base + options, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(f'{label} must be a regular file', json.loads(result.stdout)['message'])
 
     def test_oversized_inputs_rejected_before_any_cli_call(self):
         from duo.models import MAX_TEXT_BYTES

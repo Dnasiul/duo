@@ -99,6 +99,20 @@ class CleanupTests(unittest.TestCase):
         self.assertFalse((run / "attempt-1" / "copilot-cache" / "pkg").exists())
         self.assertTrue((run / "attempt-1" / "stdout.log").exists())
 
+    def test_runtime_cleanup_does_not_follow_intermediate_links(self):
+        outside = self.root / "outside"
+        (outside / "copilot-cache" / "pkg").mkdir(parents=True)
+        keep = outside / "copilot-cache" / "pkg" / "keep"
+        keep.write_text("Keep")
+        run = self.run_dir("run-linked", 1)
+        (run / "attempt-link").symlink_to(outside, target_is_directory=True)
+        (run / "attempt-1" / "copilot-cache").symlink_to(
+            outside / "copilot-cache", target_is_directory=True)
+        for args in (("--copilot-runtime", "--delete"), ("--older-than", "0", "--delete")):
+            with self.subTest(args=args):
+                self.clean(*args)
+                self.assertEqual(keep.read_text(), "Keep")
+
     def test_requires_a_selection_and_handles_missing_state(self):
         with self.assertRaises(SystemExit), redirect_stdout(io.StringIO()), \
                 patch("sys.stderr", io.StringIO()):
