@@ -2,7 +2,7 @@
 
 Where Duo's production readiness stands, and how to continue on a Linux machine.
 Written 2026-10-13 at commit `c5886a7`; Linux live results and the 0.1.0, 0.2.0,
-0.2.1, and 0.3.0 releases added the same day. `plan.md` is the full production plan; this page tracks
+0.2.1, and 0.3.0 releases added the same day; 0.3.1 on 2026-10-14. `plan.md` is the full production plan; this page tracks
 progress against it.
 
 ## Done
@@ -21,6 +21,7 @@ progress against it.
 | Owner decisions (2026-10-13): no isolation profile in 0.1.0, documented as a limitation; MIT License; GitHub release only | `docs/SECURITY.md`, `LICENSE`, `CHANGELOG.md` |
 | Live runs on Linux: smoke test (native and Copilot) and all four backend combinations, including both mixed pairs | "Linux live verification" below |
 | Live mixed pairs on macOS, with the restricted reviewer environment (`8ffff97`) | "macOS live verification" below |
+| Restricted reviewer environment live on Linux: native/native and Copilot/Copilot (0.3.1 candidate) | "Linux live verification" below |
 | Codex MCP check matches the configuration reviews load, so user-configured MCP servers no longer block native Codex | `src/duo/policy.py` (`verify_controls`) |
 | Confinement of file reads and searches tested for every reviewer and backend | `scripts/smoke_inspection.py --confinement`, `--search-confinement`; "Linux live verification" below |
 | Release 0.1.0 (2026-10-13): tag `v0.1.0` on `94186b7`, wheel, sdist, `constraints.txt`, `SHA256SUMS`; release notes hold the release report | https://github.com/Dnasiul/duo/releases/tag/v0.1.0 |
@@ -139,8 +140,8 @@ and adopt the test-file name Claude suggested; Claude approved again on turn 4.
 Rerun with `--max-turns 6`: agreed in 3 turns, no token. Each native CLI received
 9 environment variables and Copilot 10 (its token included); only read-only tools
 were used. Smoke test, natively and through Copilot: repository inspected, no hook
-or MCP sentinel ran. `check_drift.py`: all compatible. Live runs on Linux predate
-the restricted environment.
+or MCP sentinel ran. `check_drift.py`: all compatible. The restricted environment
+ran live on Linux with the 0.3.1 candidate ("Linux live verification").
 
 ## Linux live verification
 
@@ -178,6 +179,19 @@ arguments were identical to the 0.1.0 run apart from the random section boundary
 and the log directory, so this is reviewer variation, not a change in Duo. A third
 run with `--max-turns 6` agreed in 3 turns. No token in any file; same read-only
 tools.
+
+0.3.1 release candidate (2026-10-14, `e793894` plus the `GH_HOST` fix; codex-cli
+0.162.1, Claude Code 2.1.299, Copilot CLI 1.0.96), the first Linux runs with the
+restricted reviewer environment: native/native and Copilot/Copilot each agreed in
+3 turns and 3 attempts (exit 0), with no token in any file and `calc.py`
+unchanged. `reviewer-policy.json` shows each native CLI received `DBUS_SESSION_BUS_ADDRESS`,
+`HOME`, `LANG`, `LC_ALL`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `USER`, and
+`XDG_RUNTIME_DIR`, and Copilot the same plus `COPILOT_GITHUB_TOKEN`, so both native
+logins and the Copilot token work under it on Linux. Tools: native Codex ran
+read-only `rg`, `ls`, and `cat` commands; Claude had no permission denials
+($0.03); Copilot used `glob`, `view`, and `rg`. `check_drift.py` under the
+restricted environment: all compatible. The mixed pairs were not rerun on Linux;
+they ran on macOS with the restricted environment.
 
 Tools seen in the attempts:
 

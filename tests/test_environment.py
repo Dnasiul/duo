@@ -93,6 +93,14 @@ else:
                 self.assertFalse(set(SECRETS) - {"GH_TOKEN"} & set(env))
                 self.assertEqual(env["COPILOT_ALLOW_ALL"], "false")
 
+    def test_copilot_keeps_its_github_host(self):
+        hosts = {"GH_HOST": "example.ghe.com", "COPILOT_GH_HOST": "copilot.ghe.com"}
+        with patch.dict(os.environ, {**SECRETS, **hosts}):
+            env = copilot.environment(self.store.attempt_dir())
+            codex = reviewer_environment("codex")
+        self.assertEqual({key: env[key] for key in hosts}, hosts)
+        self.assertFalse(set(hosts) & set(codex))
+
     def test_pass_env_adds_names_and_is_validated(self):
         binary, marker = self.dump_env("passing")
         with patch.dict(os.environ, SECRETS):
