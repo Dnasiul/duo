@@ -59,7 +59,8 @@ should still assess the final plan.
 reach, which controls are tested or only configured, and what Duo does not
 claim. In short: Codex's reads are not confined to the repository (Claude Code
 and Copilot refused file reads and searches outside it in tests), reviewer CLIs
-inherit your environment, and the credential check is best-effort.
+receive only the environment variables they need, and the credential check is
+best-effort.
 
 ### Compatibility
 
@@ -310,6 +311,7 @@ the latest successfully published plan; they never imply agreement.
 | `--max-seconds` | 7200 | Run deadline, including retries and backoff |
 | `--claude-max-turns` | 20 | Claude's internal agent turns per invocation |
 | `--claude-max-budget-usd` | Unset | Claude's per-invocation API budget |
+| `--pass-env` | None | Extra environment variable for reviewer CLIs (repeatable) |
 | `--max-output-mb` | 32 | MiB per captured CLI output stream (stdout, stderr) |
 | `--max-run-mb` | 256 | MiB per run audit directory, including CLI logs and caches |
 | `--start` | `codex` | First reviewer |
@@ -392,6 +394,12 @@ echoing the value; matches already present in the current plan are allowed.
 The rejected raw response remains in the private audit directory.
 
 Native CLI authentication is retained; Copilot uses an environment token.
+Reviewer CLIs, and the setup probes that check them, receive only the environment
+they need to run and log in (see `ENVIRONMENT` in `src/duo/policy.py`); cloud
+credentials, other tools' tokens, the SSH agent, and `NODE_OPTIONS` are dropped.
+Pass anything else a CLI needs, such as cloud credentials for a Bedrock-based
+Claude login, with `--pass-env NAME`. `reviewer-policy.json` lists the variable
+names each CLI received, never their values.
 Duo does not copy credentials, edit
 global settings, or pass permission-bypass flags. Custom provider configuration
 and authentication helpers in ignored settings files are not inherited; this

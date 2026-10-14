@@ -56,6 +56,9 @@ def parser() -> argparse.ArgumentParser:
                         help=f"Internal Claude turns per call (default: {DEFAULT_CLAUDE_MAX_TURNS}; "
                              "native Claude only)")
     result.add_argument("--claude-max-budget-usd", type=float, help="Claude per-call API budget")
+    result.add_argument("--pass-env", action="append", default=[], metavar="NAME",
+                        help="Also pass this environment variable to reviewer CLIs (repeatable); "
+                             "by default they get only what they need to run and log in")
     result.add_argument("--max-output-mb", type=int, default=32,
                         help="MiB per captured CLI output stream (default: 32)")
     result.add_argument("--max-run-mb", type=int, default=256,
@@ -224,6 +227,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             max_output_mb=args.max_output_mb, max_run_mb=args.max_run_mb,
             codex_bin=args.codex_bin, claude_bin=args.claude_bin,
             mode=args.mode, guidance=guidance, output=str(document.relative_to(repo)),
+            pass_env=tuple(args.pass_env),
         )
         default_state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "duo"
         state_dir = (args.state_dir or default_state).expanduser().resolve()

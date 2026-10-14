@@ -68,6 +68,10 @@ logged in`, or `Agent authentication is unauthorized`. Duo does not retry these.
   `GITHUB_TOKEN`, never Copilot's saved login. Create a new fine-grained token
   with the "Copilot Requests" permission, export it, and rerun. Revoke a token
   that was exposed, for example by pasting it into a chat or a command line.
+- A CLI that logs in through an environment variable Duo does not pass (for
+  example cloud credentials for a Bedrock or Vertex Claude login) fails the same
+  way. Add the variable with `--pass-env NAME`; each run's `reviewer-policy.json`
+  lists the variables every CLI received.
 
 ## CLI upgrades and drift reports
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Reviewer CLIs and their setup probes no longer inherit Duo's whole
+  environment. They receive only what they need to run and log in (home, path,
+  user and locale, temporary and XDG directories, the session bus, proxy and
+  certificate settings, and each CLI's own variables); Copilot gets only the
+  token it uses. Cloud credentials, other tools' tokens, the SSH agent, and
+  `NODE_OPTIONS` are dropped.
+
+### Added
+
+- `--pass-env NAME` passes an additional environment variable to reviewer CLIs.
+  Each run's `reviewer-policy.json` records the variable names every CLI
+  received, never their values.
+
 ## 0.2.1 (2026-10-13)
 
 ### Fixed

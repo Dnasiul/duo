@@ -33,7 +33,7 @@ except ImportError:
 from duo import copilot  # noqa: E402
 from duo.models import Config, RunError  # noqa: E402
 from duo.policy import (CLAUDE_SETTINGS, TESTED_VERSIONS, check_claude_managed_files,  # noqa: E402
-                        verify_controls, verify_version)
+                        reviewer_environment, verify_controls, verify_version)
 
 FLAG = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")
 
@@ -72,7 +72,8 @@ def check(agent: str, binary: str, scratch: Path) -> dict:
     outputs: dict[str, str] = {}
 
     def probe(argv: list[str], env: dict[str, str] | None = None) -> str:
-        text = run(argv, env)
+        # The environment a review gives this CLI, as Duo's own preflight uses.
+        text = run(argv, reviewer_environment(agent) if env is None else env)
         outputs[" ".join(argv[1:])] = text
         return text
 
