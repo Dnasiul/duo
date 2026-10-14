@@ -2,7 +2,7 @@
 
 Where Duo's production readiness stands, and how to continue on a Linux machine.
 Written 2026-10-13 at commit `c5886a7`; Linux live results and the 0.1.0, 0.2.0,
-0.2.1, and 0.3.0 releases added the same day; 0.3.1 on 2026-10-14. `plan.md` is the full production plan; this page tracks
+0.2.1, and 0.3.0 releases added the same day; 0.3.1, 0.4.0, and 0.4.1 on 2026-10-14. `plan.md` is the full production plan; this page tracks
 progress against it.
 
 ## Done
@@ -239,6 +239,15 @@ Copilot/Copilot were rerun on the `calc.py` task (`--max-turns 4 --max-attempts
 unchanged, read-only tools only. The policy recorded `web: false`, 10 variables
 for each native CLI, and all 20 Copilot receives, including Duo's own settings.
 `check_drift.py`: all compatible.
+
+0.4.1 release candidate (2026-10-14, Linux; `18a1b09` plus the version bump;
+codex-cli 0.162.1, Claude Code 2.1.300, Copilot CLI 1.0.96): the fixes touch how
+Duo stops reviewers, discards Copilot's runtime, and reads input files, all on
+every run's path, so native/native and Copilot/Copilot were rerun on the
+`calc.py` task. Both agreed in 3 turns and 3 attempts, no token in any file,
+`calc.py` unchanged, read-only tools only, and no Copilot runtime left in any
+attempt. The policy recorded `web: false`, 10 variables for each native CLI, and
+20 for Copilot. `check_drift.py`: all compatible.
 
 Tools seen in the attempts:
 
