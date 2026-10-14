@@ -26,6 +26,9 @@ CODEX_OVERRIDES = (
     'sandbox_mode="read-only"', 'web_search="disabled"',
     *(f"features.{name}=false" for name in CODEX_DISABLED),
 )
+# Claude Code tools: read-only inspection, plus web search and fetch with --allow-web.
+CLAUDE_TOOLS = ("Read", "Glob", "Grep")
+CLAUDE_WEB_TOOLS = ("WebSearch", "WebFetch")
 CLAUDE_SETTINGS = {
     "disableAllHooks": True,
     "disableClaudeAiConnectors": True,
@@ -64,8 +67,23 @@ def reviewer_environment(cli: str, extra: tuple[str, ...] = ()) -> dict[str, str
             if key in names or key.startswith("LC_")}
 
 
-def codex_options() -> list[str]:
-    return [item for override in CODEX_OVERRIDES for item in ("-c", override)]
+def codex_overrides(allow_web: bool = False) -> tuple[str, ...]:
+    """Codex configuration overrides; --allow-web turns on its live web search tool.
+
+    Sandboxed commands stay read-only and without network access either way.
+    """
+    if not allow_web:
+        return CODEX_OVERRIDES
+    return tuple('web_search="live"' if item == 'web_search="disabled"' else item
+                 for item in CODEX_OVERRIDES)
+
+
+def codex_options(allow_web: bool = False) -> list[str]:
+    return [item for override in codex_overrides(allow_web) for item in ("-c", override)]
+
+
+def claude_tools(allow_web: bool = False) -> tuple[str, ...]:
+    return CLAUDE_TOOLS + (CLAUDE_WEB_TOOLS if allow_web else ())
 
 
 def claude_options(settings: Path) -> list[str]:
@@ -175,7 +193,7 @@ def verify_claude_remote(report: str) -> str:
 
 def verify_controls(codex: str, claude: str, settings: Path,
                     probe: Callable[..., str], agents: set[str] | None = None,
-                    pass_env: tuple[str, ...] = ()) -> dict:
+                    pass_env: tuple[str, ...] = (), allow_web: bool = False) -> dict:
     """Verify the inspection controls; probe(argv, env=None) returns a CLI's stdout.
 
     Without env, probe must run the CLI in its reviewer environment.
@@ -184,6 +202,7 @@ def verify_controls(codex: str, claude: str, settings: Path,
     policy = {
         "id": POLICY_ID,
         "model_and_effort": "Requested values are in manifest.json; effective values are not exposed",
+        "web": allow_web,
     }
     if "codex" in agents:
         help_text = probe([codex, "exec", "--help"])
@@ -191,7 +210,7 @@ def verify_controls(codex: str, claude: str, settings: Path,
                  "--ignore-user-config", "--strict-config")
         if any(flag not in help_text for flag in flags):
             raise RunError("Installed codex lacks required inspection options")
-        effective = probe([codex, *codex_options(), "features", "list"])
+        effective = probe([codex, *codex_options(allow_web), "features", "list"])
         features = {parts[0]: parts[-1] for line in effective.splitlines()
                     if len(parts := line.split()) >= 3}
         if any(features.get(name) != "false" for name in CODEX_DISABLED):
@@ -203,7 +222,7 @@ def verify_controls(codex: str, claude: str, settings: Path,
         # loads: managed and system configuration, no user configuration, and no
         # projects it trusts.
         with tempfile.TemporaryDirectory(prefix="duo-codex-home-") as home:
-            listing = probe([codex, *codex_options(), "mcp", "list", "--json"],
+            listing = probe([codex, *codex_options(allow_web), "mcp", "list", "--json"],
                             env={**reviewer_environment("codex", pass_env), "CODEX_HOME": home})
         try:
             servers = json.loads(listing)
@@ -213,7 +232,7 @@ def verify_controls(codex: str, claude: str, settings: Path,
             raise RunError("Codex MCP servers are configured outside user configuration "
                            "(for example, managed configuration); Duo cannot disable them")
         policy["codex"] = {
-            "overrides": list(CODEX_OVERRIDES),
+            "overrides": list(codex_overrides(allow_web)),
             "verified_disabled_features": list(CODEX_DISABLED),
             "verified_mcp_servers": [],
             "settings_sources": "CLI overrides; user config and exec rules ignored during review",
@@ -233,7 +252,7 @@ def verify_controls(codex: str, claude: str, settings: Path,
         check_claude_managed_files()
         policy["claude"] = {
             "settings": CLAUDE_SETTINGS, "settings_sources": [],
-            "safe_mode": True, "restricted": True, "tools": ["Read", "Glob", "Grep"],
+            "safe_mode": True, "restricted": True, "tools": list(claude_tools(allow_web)),
             "mcp": "disabled", "managed_settings": remote,
             "authentication": "existing CLI authentication",
         }

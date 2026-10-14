@@ -141,12 +141,22 @@ def discard_runtime(directory: Path) -> None:
         shutil.rmtree(runtime, ignore_errors=True)
 
 
+def tools(allow_web: bool = False) -> list[str]:
+    # Page fetching only: Copilot's web search comes from its built-in GitHub MCP
+    # server, which also offers repository-writing tools, so it stays disabled.
+    return ['view', 'glob', 'grep', *(['web_fetch'] if allow_web else [])]
+
+
 def command(config: Config, agent: Agent, directory: Path) -> list[str]:
+    # With --allow-web, URL access is allowed rather than denied; it applies to
+    # web_fetch and the shell, which stays denied.
+    web = ['--allow-all-urls'] if config.allow_web else []
     argv = [config.copilot_bin, '--no-auto-update', '--silent', '--stream', 'off',
             '--output-format', 'json', '--model', getattr(config, f'{agent}_model'),
             # List options take separate values; read-only access needs no allow rule.
-            '--available-tools', 'view', 'glob', 'grep',
-            '--deny-tool', 'write', 'shell', 'url', '--disable-builtin-mcps', '--no-ask-user',
+            '--available-tools', *tools(config.allow_web),
+            '--deny-tool', 'write', 'shell', *([] if config.allow_web else ['url']), *web,
+            '--disable-builtin-mcps', '--no-ask-user',
             '--no-custom-instructions', '--no-remote', '--no-remote-export',
             '--disallow-temp-dir', '--no-experimental', '--mode', 'interactive',
             '--log-dir', str(directory / 'copilot-logs')]
@@ -185,6 +195,8 @@ def _preflight(config: Config, directory: Path) -> tuple[str, dict]:
     help_text = probe(['--help'])
     if any(flag not in help_text for flag in FLAGS):
         raise RunError('Installed Copilot lacks required inspection options')
+    if config.allow_web and '--allow-all-urls' not in help_text:
+        raise RunError('Installed Copilot lacks the --allow-all-urls option needed for --allow-web')
     if any(getattr(config, f'{agent}_backend') == 'copilot' and
            getattr(config, f'{agent}_effort') is not None for agent in ('codex', 'claude')):
         if '--reasoning-effort' not in help_text:
@@ -197,7 +209,7 @@ def _preflight(config: Config, directory: Path) -> tuple[str, dict]:
         raise RunError('Copilot inspection settings did not take effect')
     return version, {
         'version_status': status,
-        'settings': SETTINGS, 'tools': ['view', 'glob', 'grep'],
+        'settings': SETTINGS, 'tools': tools(config.allow_web), 'web': config.allow_web,
         'configuration': 'fresh isolated home and cache per invocation',
         'authentication': 'environment token; values never included in audit metadata',
         'extensions': 'disabled; no inherited plugins, MCP servers or trusted folders',

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- `--allow-web` (experimental, off by default) gives reviewers web search and
+  page fetching: Codex's live web search, Claude Code's `WebSearch` and
+  `WebFetch`, and Copilot's `web_fetch`. It lets prompt injection send data out;
+  see "Web access" in `docs/SECURITY.md`.
+
 ### Fixed
 
 - `reviewer-policy.json` now lists every variable Copilot receives, including

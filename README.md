@@ -205,6 +205,11 @@ Claude can read and search text files only, so it cannot open binary trajectorie
 Codex can also run read-only commands on them. Whatever either reads is sent to
 the model providers.
 
+Reviewers have no web access unless you pass `--allow-web` (experimental), for
+example to check references against their DOI records. It lets text the
+reviewers read steer them into sending data out through queries and URLs; read
+"Web access" in [docs/SECURITY.md](docs/SECURITY.md) before using it.
+
 `--output` takes a path relative to `--repo` whose directory already exists; it
 must stay inside the repository and outside `.git`. Reviewers are told that this
 file is Duo's output, not material to describe. `--instructions-file` replaces
@@ -312,6 +317,7 @@ the latest successfully published plan; they never imply agreement.
 | `--claude-max-turns` | 20 | Claude's internal agent turns per invocation |
 | `--claude-max-budget-usd` | Unset | Claude's per-invocation API budget |
 | `--pass-env` | None | Extra environment variable for reviewer CLIs (repeatable) |
+| `--allow-web` | Off | Experimental: reviewers may search and fetch web pages (Copilot: fetch only); see `docs/SECURITY.md` |
 | `--max-output-mb` | 32 | MiB per captured CLI output stream (stdout, stderr) |
 | `--max-run-mb` | 256 | MiB per run audit directory, including CLI logs and caches |
 | `--start` | `codex` | First reviewer |
