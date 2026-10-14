@@ -29,12 +29,38 @@ progress against it.
 | Release 0.2.1 (2026-10-13): `--output` fixes (`.git` case-insensitive, directory targets) and `duo.__version__`; tag `v0.2.1` on `c41ea59`, same files and release report; published with `gh`, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.2.1 |
 | Release 0.3.0 (2026-10-13): reviewer CLIs get only the environment they need; `--pass-env`; tag `v0.3.0` on `dbbd30e`, same files and release report; published with `gh`, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.3.0 |
 | Release 0.3.1 (2026-10-14): Copilot receives `GH_HOST` again; tag `v0.3.1` on `b531f68`, same files and release report; built and install-tested on Linux, published through the API, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.3.1 |
+| `--allow-web` (experimental, unreleased; `b98dd5c`): reviewers may search and fetch web pages (Copilot: fetch only). Owner decision (2026-10-14): allowed with native Codex too, with a warning and documentation rather than a refusal | "Web access live verification" below; `docs/SECURITY.md` |
 
 ## Open
 
 1. **Document modes** (released in 0.2.0 as experimental): every mode ran live on
    Linux, natively and through Copilot, and natively on macOS (below); not yet
    through Copilot on macOS or with mixed backend pairs.
+2. **`--allow-web`** (experimental, unreleased): ran live on Linux with native and
+   Copilot pairs in report mode (below); not yet on macOS, with mixed pairs, or in
+   other modes.
+
+## Web access live verification
+
+2026-10-14, Linux, `b98dd5c` (codex-cli 0.162.1, Claude Code 2.1.299, Copilot CLI
+1.0.96). Report mode with `--allow-web --max-turns 6`: check a `refs.bib` of two
+real entries (Hohenberg–Kohn 1964, Kohn–Sham 1965) and one invented entry with
+an unregistered DOI against DOI records.
+
+| Pair | Status | Turns | Result |
+| --- | --- | --- | --- |
+| native `gpt-6-astra` + `claude-sonnet-5-5` | agreed | 4 | real entries confirmed except missing end pages (B864–B871, A1133–A1138); invented DOI not found (Crossref and DOI handle API 404) |
+| Copilot `gpt-5.4` + `claude-sonnet-5.5` | agreed | 3 | same findings, every fetched URL listed |
+
+Every finding matched an independent Crossref query; no token in any file; the
+material was unchanged. Native Codex used web search; its sandboxed `curl` and
+Python requests could not resolve hosts. Copilot used only `web_fetch` (doi.org,
+api.crossref.org, journals.aps.org). Native Claude's JSON output lists no tool
+calls and its usage counters stayed at zero, so a separate call with Duo's exact
+command line asked it for the 0.3.1 wheel's checksum from the release's
+`SHA256SUMS`: it returned the correct value, which requires a fetch, and also ran
+a web search. Not yet tested: `--allow-web` on macOS, with mixed pairs, or in
+other modes.
 
 ## Document modes live verification
 
