@@ -29,14 +29,15 @@ progress against it.
 | Release 0.2.1 (2026-10-13): `--output` fixes (`.git` case-insensitive, directory targets) and `duo.__version__`; tag `v0.2.1` on `c41ea59`, same files and release report; published with `gh`, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.2.1 |
 | Release 0.3.0 (2026-10-13): reviewer CLIs get only the environment they need; `--pass-env`; tag `v0.3.0` on `dbbd30e`, same files and release report; published with `gh`, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.3.0 |
 | Release 0.3.1 (2026-10-14): Copilot receives `GH_HOST` again; tag `v0.3.1` on `b531f68`, same files and release report; built and install-tested on Linux, published through the API, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.3.1 |
-| `--allow-web` (experimental, unreleased; `b98dd5c`): reviewers may search and fetch web pages (Copilot: fetch only). Owner decision (2026-10-14): allowed with native Codex too, with a warning and documentation rather than a refusal | "Web access live verification" below; `docs/SECURITY.md` |
+| Release 0.4.0 (2026-10-14): `--allow-web` (experimental), the research pipeline example, the full Copilot environment record; tag `v0.4.0` on `a7571ad`, same files and release report; built and install-tested on Linux, published through the API, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.4.0 |
+| `--allow-web` (experimental, released in 0.4.0; `b98dd5c`): reviewers may search and fetch web pages (Copilot: fetch only). Owner decision (2026-10-14): allowed with native Codex too, with a warning and documentation rather than a refusal | "Web access live verification" below; `docs/SECURITY.md` |
 
 ## Open
 
 1. **Document modes** (released in 0.2.0 as experimental): every mode ran live on
    Linux, natively and through Copilot, and natively on macOS (below); not yet
    through Copilot on macOS or with mixed backend pairs.
-2. **`--allow-web`** (experimental, unreleased): ran live on Linux with native and
+2. **`--allow-web`** (released in 0.4.0 as experimental): ran live on Linux with native and
    Copilot pairs in report mode (below); not yet on macOS, with mixed pairs, or in
    other modes.
 
