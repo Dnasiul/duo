@@ -134,7 +134,11 @@ def discard_runtime(directory: Path) -> None:
     It is the CLI's own program, not review output; keeping a copy per attempt
     filled the audit directory.
     """
-    runtime = directory / 'copilot-cache' / 'pkg'
+    cache = directory / 'copilot-cache'
+    # Never traverse a linked attempt or cache into files outside this run.
+    if any(path.is_symlink() or not path.is_dir() for path in (directory, cache)):
+        return
+    runtime = cache / 'pkg'
     if runtime.is_symlink():
         runtime.unlink()
     elif runtime.is_dir():

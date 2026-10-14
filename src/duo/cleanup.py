@@ -48,8 +48,10 @@ def runtimes(run: Path) -> list[Path]:
     """Leftover Copilot runtime copies (from Duo versions that kept them)."""
     found = []
     for child in run.iterdir():
-        candidate = child / "copilot-cache" / "pkg"
-        if child.is_dir() and not child.is_symlink() and candidate.is_dir() and not candidate.is_symlink():
+        cache = child / "copilot-cache"
+        candidate = cache / "pkg"
+        # Checking only pkg follows an intermediate copilot-cache symlink.
+        if all(not path.is_symlink() and path.is_dir() for path in (child, cache, candidate)):
             found.append(candidate)
     return found
 

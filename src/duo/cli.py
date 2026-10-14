@@ -13,7 +13,7 @@ from .adapters import CLIAdapter
 from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLAUDE_MAX_TURNS,
                      DOCUMENT_MODES, MAX_TEXT_BYTES, Config, RunError, State, Terminated, Turn)
 from .prompts import plan_diff
-from .storage import PlanFile, RunStore, run_lock, timestamp
+from .storage import PlanFile, RunStore, read_input, run_lock, timestamp
 from .workflow import Reviewer, build_graph, initial_state
 
 EXIT_CODES = {"agreed": 0, "error": 1, "blocked": 3, "limit_reached": 4}
@@ -206,9 +206,9 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
                 # The review would then check the document against itself.
                 raise RunError(f"{option} must not be the {args.mode} under review ({document}); "
                                "describe the task separately")
-        task = args.task_file.read_bytes().decode("utf-8") if args.task_file else args.task
-        criteria = args.criteria_file.read_bytes().decode("utf-8") if args.criteria_file else args.criteria
-        guidance = args.instructions_file.read_bytes().decode("utf-8") if args.instructions_file else ""
+        task = read_input(args.task_file, "Task").decode("utf-8") if args.task_file else args.task
+        criteria = read_input(args.criteria_file, "Criteria").decode("utf-8") if args.criteria_file else args.criteria
+        guidance = read_input(args.instructions_file, "Instructions").decode("utf-8") if args.instructions_file else ""
         if not task.strip():
             raise ValueError("Task must not be empty")
         if args.instructions_file and not guidance.strip():
@@ -238,8 +238,6 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             raise RunError("--state-dir must be outside the target repository")
         with run_lock(repo):
             plan = PlanFile(document.parent, document.name)
-            if len(plan.initial.encode("utf-8")) > MAX_TEXT_BYTES:
-                raise RunError(f"{document.name} exceeds the {MAX_TEXT_BYTES // 1024} KiB limit")
             store = RunStore(state_dir)
             holder.append(store)
             adapter = CLIAdapter(config, store)

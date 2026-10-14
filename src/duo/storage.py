@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import errno
 import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import tempfile
 
-from .models import RunError, normalize
+from .models import MAX_TEXT_BYTES, RunError, normalize
 
 
 def timestamp() -> str:
@@ -17,6 +19,35 @@ def timestamp() -> str:
 
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def read_input(path: Path, label: str | None = None, *, follow_symlinks: bool = True) -> bytes:
+    """Read a bounded regular input file, without blocking on a named pipe."""
+    label = label or path.name
+    flags = os.O_RDONLY | os.O_NONBLOCK
+    if not follow_symlinks:
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        if not follow_symlinks and exc.errno == errno.ELOOP:
+            raise RunError(f"{label} must be a regular file, not a symbolic link") from exc
+        raise
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise RunError(f"{label} must be a regular file")
+        message = f"{label} exceeds the {MAX_TEXT_BYTES // 1024} KiB limit"
+        if info.st_size > MAX_TEXT_BYTES:
+            raise RunError(message)
+        # Bound the read even if the file grows after fstat.
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            data = stream.read(MAX_TEXT_BYTES + 1)
+        if len(data) > MAX_TEXT_BYTES:
+            raise RunError(message)
+        return data
+    finally:
+        os.close(descriptor)
 
 
 def atomic_write(path: Path, data: bytes, mode: int = 0o600) -> None:
@@ -71,10 +102,8 @@ class PlanFile:
         self.initial = normalize(self.expected.decode("utf-8")) if self.expected else ""
 
     def _read(self) -> bytes | None:
-        if self.path.is_symlink():
-            raise RunError(f"{self.path.name} must be a regular file, not a symbolic link")
         try:
-            return self.path.read_bytes()
+            return read_input(self.path, follow_symlinks=False)
         except FileNotFoundError:
             return None
 

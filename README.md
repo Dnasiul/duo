@@ -472,7 +472,8 @@ very fast can overshoot by what it writes in that interval; this is not a hard
 disk quota. On a violation Duo stops the CLI's process group, keeps the last
 accepted plan, and ends the run with an error (exit 1) without retrying. Tasks,
 criteria, custom instructions, the document under review, and each review's
-document and reason are limited to 1 MiB.
+document and reason are limited to 1 MiB. Input files must be regular files; a
+named pipe or device is rejected rather than read.
 
 Copilot unpacks its own runtime (about 165 MiB) into each attempt's fresh cache.
 Duo deletes it after preflight and after every attempt and leaves it out of the
