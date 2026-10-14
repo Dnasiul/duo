@@ -230,6 +230,15 @@ restricted environment on Linux and macOS. These runs' `reviewer-policy.json`
 omitted the settings Duo sets for Copilot (`COPILOT_HOME`, `COPILOT_ALLOW_ALL`,
 and others); it now lists every variable a Copilot review receives.
 
+0.4.0 release candidate (2026-10-14, Linux; `aa45d65` plus the version bump;
+codex-cli 0.162.1, Claude Code 2.1.299, Copilot CLI 1.0.96): the default path
+changed only in what `reviewer-policy.json` records, so native/native and
+Copilot/Copilot were rerun on the `calc.py` task (`--max-turns 4 --max-attempts
+2`). Both agreed in 3 turns and 3 attempts, no token in any file, `calc.py`
+unchanged, read-only tools only. The policy recorded `web: false`, 10 variables
+for each native CLI, and all 20 Copilot receives, including Duo's own settings.
+`check_drift.py`: all compatible.
+
 Tools seen in the attempts:
 
 - Copilot: only `glob`, `view`, and `rg` (its name for `grep`); all built-in MCP
