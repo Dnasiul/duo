@@ -77,6 +77,12 @@ cancelled job makes it a failure. A live run that stops at the turn limit is not
 necessarily a regression: compare the prompts in its attempt logs with the
 previous release's before deciding.
 
+0.2.1 evidence (2026-10-13, macOS 26.6.2 arm64): changes since 0.2.0 are the
+`--output` validation, which runs before any reviewer starts, and the package
+version string, so the live backend matrix was not rerun; the offline suite covers
+both changes on Linux and macOS in CI. `check_drift.py`: codex-cli 0.162.1,
+Claude Code 2.1.296, and Copilot CLI 1.0.95 all compatible, no flag changes.
+
 ## Linux live verification
 
 2026-10-13, Ubuntu 22.04.5 LTS, kernel 5.15.0-198-generic, x86-64, Python 3.11.17.
