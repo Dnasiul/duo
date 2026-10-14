@@ -30,8 +30,8 @@ progress against it.
 ## Open
 
 1. **Document modes** (released in 0.2.0 as experimental): every mode ran live on
-   Linux, natively and through Copilot (below); not yet live on macOS or with
-   mixed backend pairs.
+   Linux, natively and through Copilot, and natively on macOS (below); not yet
+   through Copilot on macOS or with mixed backend pairs.
 
 ## Document modes live verification
 
@@ -48,6 +48,20 @@ Every number the reviewers wrote was recomputed independently from the data.
 | `review` | Copilot `gpt-5.4`, `claude-sonnet-5.5` | agreed, 5 turns | same 5 errors and 2 correct claims; all cited values correct; tools `view`, `glob`, `rg` only; no token in audit files |
 | `report` | Copilot, same models (0.2.0, `a207d21`) | agreed, 5 turns | every number matches, including intermediate sums; its matched window (0–600 fs) keeps T500's failure-step row without flagging it, where the native report excluded it |
 | `description` | Copilot, same models (0.2.0, `a207d21`) | agreed, 3 turns | accurate, cites files, finds the T500 abort; does not describe itself |
+
+On macOS (2026-10-13, macOS 26.6.2 arm64, commit `c80a81f` with the restricted
+reviewer environment; codex-cli 0.162.1, Claude Code 2.1.299), an equivalent
+synthetic folder (regenerated with a fixed seed; T300 completed 2000 steps, T500
+aborted at step 1200) gave, natively with `gpt-6-astra` and `claude-sonnet-5-5`:
+
+| Mode | Outcome | Check |
+| --- | --- | --- |
+| `description` | agreed, 3 turns, 3 attempts | accurate, cites every file, finds the T500 abort, states what could not be verified |
+| `report` | agreed, 3 turns, 3 attempts | all 25 reported values recomputed and matching (full-run and 0–550 fs window means, SDs, ranges, block means, endpoint changes, differences); excluded T500's failed-step row |
+| `review` | agreed, 3 turns, 3 attempts | all 5 planted errors found (aborted run ranked high), both correct claims confirmed, every line reference correct |
+
+Native Claude cost $0.17 for all three runs. Only the mode's document was written;
+the material was unchanged.
 
 The first description run hit its turn limit: the document is saved inside the
 folder it describes, so a reviewer revised it to describe itself, resetting
