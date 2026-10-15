@@ -1,354 +1,217 @@
-# Duo production-readiness plan
+# Duo improvement plan
 
-## Goal and release scope
+## Goal and scope
 
-Prepare Duo for reliable unattended operation as a single-user planning CLI on
-macOS and Linux. Keep the existing two-reviewer workflow: Python publishes
-`plan.md`, any revision clears both approvals, and a run succeeds only when both
-reviewers approve the same plan. Agreement does not prove a plan is correct.
+Improve Duo after 0.4.1 without weakening what it already guarantees: two
+read-only reviewers, a run that succeeds only when both approve the same
+document hash, a restricted reviewer environment, and an audit record of every
+attempt. Agreement does not prove a document is correct.
 
-The first production release supports only CLI versions and backend combinations
-that have been explicitly tested. Define the supported security boundary before
-calling Duo production-ready. Using Duo on sensitive or untrusted repositories
-requires a separately validated isolation profile; running reviewers in ordinary
-read-only mode does not provide one.
-
-This document plans implementation and validation. Writing it does not authorize
+This plan replaces the production-readiness plan, most of which shipped in
+0.1.0–0.4.1; that plan is in Git history (`git show 918d2c5:plan.md`), and
+`docs/STATUS.md` records what was done. Writing this plan does not authorize
 publishing a release, distributing credentials, or making model calls.
 
-## Starting evidence
+## Starting point
 
-- The last verified run passed 95 tests. These included real LangGraph execution
-  with fake CLI executables, publication failures, retries, deadlines, process
-  cleanup, audit records, and credential-filter regressions. The tree now defines
-  97 `test_*` methods, so rerun the suite before using this as a baseline.
-- A disposable RSA key validated with OpenSSL confirmed the latest fix for
-  detecting keys with short body lines. This verifies that case only, not secret
-  detection in general.
-- The authenticated Copilot smoke test stopped during preflight because the
-  session had no environment token. That test made no live model call.
-- The repository includes a live inspection smoke script. The checks in this
-  session do not show live coverage of every supported backend combination.
-- Package metadata declares Python >=3.10 and `langgraph>=1.0,<2`. The repository
-  has no CI workflow, no release dependency constraints, and no license file.
-- `verify_version` in `src/duo/policy.py` accepts any release at or above the
-  first-tested version within the same major version. For Codex (first tested at
-  0.162.1), this accepts every future 0.x release.
-- Native Codex's read-only sandbox allows reads outside the repository. Raw
-  rejected responses remain in the private audit directory.
+- 0.4.1 is released; CI runs 165 offline tests on Ubuntu and macOS, Python
+  3.10–3.14, and a scheduled job checks the installed CLIs for drift.
+- All four backend combinations have run live on Linux and macOS. Document modes
+  have not run through Copilot on macOS or with mixed pairs; `--allow-web` has run
+  only on Linux, in report mode, with native and Copilot pairs.
+- Native Codex can read any file the user can read. There is no isolation
+  profile, so Duo is supported only on trusted repositories.
+- Native Claude runs with `--output-format json`: the audit record has its final
+  answer but not its tool calls. Token usage is present in the recorded fixture;
+  the web-search and web-fetch counters stayed at zero in the documented live
+  web checks, even when those tools were used. The requested files and URLs are
+  not recorded as tool calls.
+- Native Codex can run read-only commands such as `git log` and `git diff`, and
+  read saved test results. Claude and Copilot have no shell but can read logs
+  inside the repository. Context files would give both reviewers the same
+  captured evidence, including files outside their accessible directory.
+- Each release so far was built and published with scripts kept outside the
+  repository; `docs/STATUS.md` describes the steps but not the tools.
 
-Reconfirm this baseline against the release candidate. Results from earlier runs
-are not evidence for a different revision or environment.
+## 1. Release tooling in the repository
 
-## 1. Define the supported deployment and compatibility contract
+Relevant files: new `scripts/release.py`, new `.github/workflows/release.yml`,
+`docs/STATUS.md` ("Releasing").
 
-Relevant files: `README.md`, `pyproject.toml`, `src/duo/policy.py`.
+- [ ] Add `scripts/release.py` that, for a given commit:
+  - builds the wheel and sdist from a clean clone with a pinned build environment;
+  - installs each into a fresh environment with `constraints.txt`, runs the test
+    suite from the installed package, and runs `duo --help` and `duo-clean --help`;
+  - checks that the wheel's package files match the commit;
+  - writes `SHA256SUMS` and a release-notes template with the checksums filled in.
+- [ ] Add a release workflow triggered by a `v*` tag that builds the files with
+  the same steps, writes `SHA256SUMS`, and attaches them with build-provenance
+  attestations to a draft release. Builds are not byte-reproducible, so the
+  published files are the workflow's, not a local build's. Give only this job
+  `contents: write`, `attestations: write`, and `id-token: write`; never run it on
+  pull requests. The OIDC permission is required by
+  [GitHub's artifact-attestation workflow](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
+- [ ] Reject tags whose version does not match the package metadata. Before
+  publication, require successful results from all required CI jobs for the
+  exact commit the tag resolves to, and verify the release assets' checksums and
+  provenance against that commit.
+- [ ] Keep live runs, the drift check, and publishing the draft as manual steps
+  that need the owner's approval. Update "Releasing" in `docs/STATUS.md`.
 
-- [ ] Document a baseline deployment:
-  - one local user;
-  - trusted repositories;
-  - unmanaged CLI configuration;
-  - provider data-handling settings that have been reviewed;
-  - a dedicated working environment holding only the data and credentials it needs.
-- [ ] Keep a release compatibility matrix recording supported operating systems,
-  Python versions, CLI versions, model identifiers, authentication methods, and
-  backend combinations. Mark which configurations are tested and which are
-  experimental. Section 3 keeps this matrix current.
-- [ ] Align the Python version in package metadata with the versions Duo and its
-  resolved dependencies actually support. Test the declared minimum version.
-- [ ] Document restart behavior: a rerun reviews the latest saved plan with fresh
-  approvals. Audit files are not resumable LangGraph checkpoints.
+Acceptance: on either machine, `scripts/release.py` runs the pre-release checks
+from a fresh clone with the repository's own tools; the release workflow builds
+and publishes the files, which are traceable to the tagged commit. A version
+mismatch or a missing, failed, or cancelled required CI result prevents
+publication.
 
-Acceptance: a user can identify a supported deployment without guessing the
-versions, authentication method, or security guarantees that apply.
+## 2. Native Claude tool calls in the audit record
 
-## 2. Establish and test the security boundary
+Relevant files: `src/duo/adapters.py`, `src/duo/policy.py`,
+`scripts/record_fixtures.py`, `scripts/check_drift.py`, `tests/fixtures/`,
+`docs/SECURITY.md`.
 
-Relevant files: `src/duo/policy.py`, `src/duo/copilot.py`,
-`src/duo/adapters.py`, `src/duo/models.py`, `scripts/smoke_inspection.py`.
+- [ ] Verify live what `--output-format stream-json --verbose` emits for
+  `Read`, `Glob`, `Grep`, `WebSearch`, and `WebFetch`: requests and inputs,
+  results or permission denials, the final structured result, and usage. Record
+  which fields are available; do not infer successful access from a request.
+- [ ] Parse the final result from the stream; keep the existing schema
+  validation, limits, and failure classification. Preserve emitted tool requests
+  and available results or denials in the attempt's audit files. Mark incomplete
+  streams and unavailable usage explicitly; zero usage alone is not a failure.
+- [ ] Add tests for malformed and truncated streams, missing final results,
+  interrupted attempts, tool denials, and unsuccessful final results. Partial
+  assistant messages must never be accepted as a completed review.
+- [ ] Record new fixtures for the tested Claude Code version and extend the drift
+  check to the flags this needs.
+- [ ] Update `docs/SECURITY.md` and the release notes with the observed coverage
+  after live checks, including `--allow-web`. Retain limitations for anything
+  the stream does not expose; a recorded URL is not an archive of page contents.
 
-- [ ] Document which files, environment values, tools, network destinations, and
-  authentication facilities each reviewer can access. Treat repository contents
-  and model output as untrusted input.
-- [ ] Describe credential matching as best-effort detection. It cannot stop data a
-  reviewer has already read from reaching its provider, and it does not cover
-  every secret format. Keep rejected content out of prompts and public summaries.
-  Document that private raw logs can still contain sensitive content.
-- [ ] For sensitive or untrusted repositories, implement a reproducible isolation
-  profile that provides:
+Acceptance: successful, denied, and interrupted native Claude attempts retain
+the tool events the CLI emits, with requests distinguishable from confirmed
+results and missing completion or usage explicitly marked. Live fixtures
+demonstrate coverage for each enabled tool. The audit does not claim to enumerate
+every file read internally by a search or fetch tool.
+
+## 3. Context files for reviewers
+
+Relevant files: `src/duo/cli.py`, `src/duo/storage.py`, `src/duo/prompts.py`,
+`src/duo/models.py`, `README.md`.
+
+- [ ] Add `--context-file PATH` (repeatable): files such as a saved diff or test
+  output, read once at startup with `read_input` (regular UTF-8 files, bounded).
+  Capture their exact bytes in the run's audit record with their labels, paths,
+  and content hashes. Include the captured text in every prompt as labeled,
+  untrusted material; do not reread the source files between turns or retries.
+- [ ] Check each context file for credentials when it is captured, with the
+  patterns Duo already applies to reviewer responses (`SECRET_PATTERNS` in
+  `src/duo/models.py`). Refuse the run before any reviewer starts, naming the
+  file and the kind of credential without printing it. Saved logs and test
+  output are where tokens usually appear, and the response filter runs only
+  after the material has reached both providers.
+- [ ] Enforce a 1 MiB aggregate limit on the supplied context-file bytes, in
+  addition to the existing separate task, criteria, and document limits. Reject
+  a context file that is the document under review. Test aggregate overflow and
+  source-file changes after capture.
+- [ ] Document that context files go to the model providers like the task, and
+  add a code-review example (diff and test output as context, `--mode review`).
+
+Acceptance: a reviewer can review a change and its test results without the
+user copying them into the repository. Both reviewers receive the same captured
+context throughout the run, even if its source files change, and the audit record
+shows exactly what was supplied. A context file containing a recognized
+credential never reaches a reviewer. This does not freeze repository files the
+reviewers inspect separately.
+
+## 4. Isolation profile
+
+Relevant files: `src/duo/adapters.py`, `src/duo/copilot.py`, `src/duo/policy.py`,
+`scripts/smoke_inspection.py`, `docs/SECURITY.md`.
+
+Treat this as a separate milestone with a feasibility gate, not a prerequisite
+for the context-file and audit improvements.
+
+- [ ] Before implementation, define the allowed reads, writes, network access,
+  and login resources for each backend and platform. Specify how credentials
+  are provisioned and which remain accessible to the reviewer process or its
+  tools. Demonstrate that authentication and the boundary can coexist; mark
+  combinations that cannot satisfy it unsupported for this profile.
+- [ ] Run each reviewer CLI, when the profile is selected, with:
   - a read-only view of the repository;
   - a temporary home directory;
-  - explicitly listed writable scratch paths;
-  - only the runtime and authentication resources the reviewer needs.
+  - explicitly listed writable scratch paths (its audit attempt directory);
+  - only the runtime and login resources it needs.
 
-  Do not expose the user's full home directory, unrelated projects, SSH keys, or
-  cloud credentials.
-- [ ] Restrict inherited environment variables and use narrowly scoped
-  credentials. Do not claim that a credential is hidden from the CLI process that
-  needs it to authenticate. Test whether tools the model can use are able to read
-  that credential, and state any guarantee you cannot support.
-- [ ] Validate isolation separately on each platform where it is claimed. If
-  equivalent enforcement cannot be shown, mark that platform/profile unsupported.
-  Never fall back silently to ordinary execution.
-- [ ] Expand security fixtures with:
-  - synthetic canary files outside the repository;
-  - symlinks;
-  - hooks and MCP launchers;
-  - conflicting configuration;
-  - attempted writes.
+  Do not expose the user's home directory, unrelated projects, SSH keys, or cloud
+  credentials. Evaluate `bubblewrap` on Linux and `sandbox-exec` or a separate
+  user on macOS as candidates; accept a mechanism only after it demonstrates the
+  defined boundary.
+- [ ] Validate separately on each platform. If equivalent enforcement cannot be
+  shown, mark that platform unsupported; never fall back silently to ordinary
+  execution.
+- [ ] Extend the confinement tests with canary files outside the repository,
+  symbolic links, hooks and MCP launchers, conflicting configuration, and
+  attempted writes; check that forbidden reads fail and forbidden actions leave
+  no sentinel. Test every supported backend/platform combination, including
+  attempts to access excluded login resources. Use deterministic probes of the
+  boundary as well as live CLI checks: a model declining to attempt an operation
+  is not proof that the operation is denied.
+- [ ] Re-test `--allow-web` under the profile and state in `docs/SECURITY.md`
+  what it does and does not protect. Repository content still reaches the model
+  providers, and web tools can transmit content the reviewer can read. Filesystem
+  isolation alone does not establish safe handling of sensitive data or justify
+  expanding support to untrusted repositories.
 
-  Check that forbidden files cannot be read and that forbidden actions leave no
-  sentinel. Telling the model not to do something is not an enforcement test.
-- [ ] Keep credential-filter tests for complete, truncated, escaped, flattened, and
-  previously present keys, alongside harmless prose examples. Add malformed and
-  large-input cases. If regex backtracking cannot be kept predictably bounded,
-  switch to bounded parsing.
+Acceptance: every backend/platform combination claimed by the profile has
+recorded enforcement evidence for forbidden reads and writes, symlink escapes,
+excluded credential access, and inert hooks and MCP launchers, plus successful
+live authentication and repository inspection. Required checks fail closed;
+unsupported combinations never fall back to ordinary execution. Document the
+remaining provider and web exposure before any separate decision to expand the
+supported deployment contract.
 
-Acceptance: the documented boundary is demonstrated with synthetic data. The
-baseline release claims no more isolation than the evidence supports. Sensitive
-or untrusted use stays unsupported until its isolation profile passes.
+## 5. Smaller improvements
 
-## 3. Control CLI-compatibility drift
+- [ ] Add `--answer TEXT` with an explicit source-run selector for a run that
+  stopped with exit code 3. Require a blocked source run and validate its
+  repository and document identity; never choose the latest run implicitly.
+  Record the source run, its question and document hash, and the user's answer
+  in a new run's audit record and prompts. Review the current document with fresh
+  approvals; do not resume a graph checkpoint or restore old approvals. Test
+  multiple blocked runs, mismatched sources, and changed document contents.
+- [ ] Investigate whether Copilot can enable only the search tools of its
+  built-in GitHub MCP server, without the tools that write to repositories. Enable
+  web search through Copilot only if that can be enforced and tested.
+- [ ] Publish to PyPI through trusted publishing from the release workflow, if
+  the package name is available and the owner agrees.
 
-Relevant files: `src/duo/policy.py`, `src/duo/adapters.py`, `src/duo/copilot.py`,
-`tests/test_policy.py`, `tests/test_copilot.py`, `tests/test_duo.py`, new
-fixture directory and scheduled CI workflow, `README.md`.
+## 6. Open verification on macOS
 
-- [ ] Replace the open-ended same-major acceptance with an explicit version
-  policy. Recommended default:
-  - Production runs accept only CLI versions within the ranges recorded as tested
-    in the compatibility matrix.
-  - Any other version fails at setup with a message naming the tested range.
-  - An explicit opt-in (for example `--allow-untested-cli`) may run other versions.
-    It still applies every preflight probe, records `experimental` in
-    `versions.json`, the run result, and JSON output, and is never part of the
-    supported configuration.
-- [ ] Handle Codex 0.x separately. Under semantic versioning, a 0.x minor bump can
-  be breaking, so do not treat "0" as a stable major version. Bound the tested
-  range by minor version, or justify any wider bound with probe and live evidence.
-- [ ] Keep the configuration and help probes, which must fail closed. A probe that
-  cannot find a control, or finds an unknown value, stops setup even within a
-  tested range. Add tests showing that missing, renamed, or reworded flags,
-  feature names, and help output cause a setup error rather than silently
-  weakening a control.
-- [ ] Record sanitized real-CLI output fixtures for each tested CLI version:
-  - version strings;
-  - help and feature/config probe output;
-  - `claude doctor` policy output;
-  - Codex JSON event streams;
-  - Claude and Copilot response envelopes;
-  - representative error and rate-limit events.
+- [ ] Document modes through Copilot and with mixed backend pairs.
+- [ ] `--allow-web` on macOS, with mixed pairs, and in plan, description, and
+  review modes.
 
-  Run the parsers and the fake CLIs' output against these fixtures in offline CI,
-  so the fake CLIs cannot drift from real formats unnoticed. Refresh the fixtures
-  from a disposable, synthetic-content run whenever the matrix changes. Never
-  record tokens or account identifiers.
-- [ ] Add a scheduled drift job, plus a manual trigger, that installs the newest
-  available release of each CLI and runs the credential-free checks: version
-  parsing, help/config probes, managed-policy detection, and fixture comparison.
-  When credentials are explicitly provisioned for the protected live environment,
-  also run the inspection smoke test and one bounded end-to-end run (section 4).
-  Report the result as `compatible`, `probe-failure`, `format-change`, or
-  `not verified (no credentials)`.
-- [ ] Define the response to drift:
-  - A newer CLI that passes the probes, fixtures, and live checks may be added to
-    the matrix in a normal release.
-  - A failing CLI stays rejected and is listed as a known incompatibility in the
-    runbook.
-  - Changes affecting inspection controls trigger a re-review of the security
-    boundary (section 2).
-  - Name the person responsible for triaging drift reports, and set a review
-    interval.
-- [ ] Also track drift in Copilot model identifiers and effort values, and in
-  native model aliases used in documentation. Fail clearly on unknown models (as
-  Duo does now) and keep the examples in `README.md` matching the matrix.
+Record results in `docs/STATUS.md`.
 
-Acceptance: an untested CLI version cannot silently run as production-supported.
-Format or control changes in real CLIs are caught by fixture or scheduled drift
-checks before users rely on them. Every matrix update has recorded evidence.
+## Execution order
 
-## 4. Validate real CLI integrations
+1. Release tooling (section 1). The scripts used for every release so far exist
+   only in a temporary session directory and would be lost.
+2. A Duo self-review of the security claims against the code (`--mode review` on
+   a worktree of the latest tag); confirmed findings may change the order below.
+3. Context files (section 3) or the Claude audit record (section 2), depending on
+   whether code reviews or `--allow-web` are used more.
+4. The isolation profile (section 4) as a separate milestone, starting with its
+   feasibility gate. Keep the existing supported deployment contract until
+   evidence and an explicit decision justify changing it.
+5. Sections 5 and 6 as time allows; section 6 whenever the Mac is available.
 
-Relevant files: `scripts/smoke_inspection.py`, `tests/test_copilot.py`,
-`tests/test_policy.py`, `src/duo/adapters.py`.
+Each change that affects a documented guarantee needs a test that fails without
+it, and live evidence before release, as for 0.4.1.
 
-- [ ] Run an authenticated matrix covering native/native, native/Copilot,
-  Copilot/native, and Copilot/Copilot reviewers. Exercise both starting reviewers
-  and the model/effort combinations chosen for release.
-- [ ] Use disposable repositories and synthetic content. Get credentials through
-  the supported environment variable or CLI mechanism. Never put token values in
-  commands, repository fixtures, reports, or shared CI artifacts.
-- [ ] During the inspection smoke test, verify:
-  - repository reads work;
-  - reviews parse correctly;
-  - hooks and MCP stay disabled;
-  - repository files are unchanged.
-- [ ] Add a bounded end-to-end smoke run through the actual `duo` command,
-  covering:
-  - drafting and publication;
-  - two explicit approvals;
-  - transcript display;
-  - audit history;
-  - the final exit status.
-
-  Keep deterministic state-machine assertions in the offline suite; do not
-  require a model to follow an exact turn sequence.
-- [ ] Test these failures:
-  - missing or invalid authentication;
-  - unavailable models;
-  - malformed responses;
-  - timeout and interruption;
-  - supported configuration failures.
-
-  Use controlled test doubles for rate limits and provider outages, which cannot
-  be triggered safely or reproducibly against a live service.
-- [ ] Record the revision, OS, Python version, CLI versions, requested models and
-  efforts, outcome, and sanitized evidence. Where a backend does not confirm the
-  settings it applied, distinguish requested settings from effective ones.
-- [ ] Give live jobs explicit time and turn limits and a documented spending
-  allowance. Duo's run timeout is not a general provider credit cap. Missing
-  credentials mean "not verified", never a passing release result.
-
-Acceptance: every configuration claimed as production-supported has successful
-live evidence for the release candidate. Flaky or unsupported combinations are
-fixed and retested, or explicitly excluded.
-
-## 5. Make installation and releases reproducible
-
-Relevant files: `pyproject.toml`, new CI workflows and release constraints,
-`README.md`.
-
-- [ ] Add offline CI on Linux and macOS for each supported Python version. Run the
-  existing test suite and the section 3 fixture checks without credentials or
-  model requests.
-- [ ] Build both a wheel and a source distribution. Install each into a clean
-  temporary environment, run `duo --help`, and run a workflow from the installed
-  package using fake CLIs. Do not use `PYTHONPATH=src` for these checks.
-- [ ] Run integration checks with the real installed LangGraph dependency. A
-  missing dependency or a skipped mandatory test must fail the release job.
-- [ ] Check in resolved release dependency constraints, with per-platform or
-  per-Python variants where needed, and document how to install from them. Keep
-  the package's dependency ranges separate from the tested release environment.
-- [ ] Provide a controlled way to update dependencies: regenerate the constraints
-  and rerun the tests. Review dependency vulnerability findings before release.
-- [ ] Keep authenticated live jobs and scheduled drift jobs separate from
-  untrusted pull-request jobs. Restrict their credential access, artifact
-  visibility, retention, and execution permissions. Automated live calls must be
-  explicitly enabled.
-- [ ] Produce for each release:
-  - a versioned artifact;
-  - a changelog;
-  - a compatibility record;
-  - checksums;
-  - installation instructions;
-  - a rollback procedure using a previous artifact and its tested constraints.
-
-  Resolve distribution licensing (the repository has no license file) and the
-  distribution channel before publishing.
-
-Acceptance: a clean machine can install and run the same tested artifact without
-relying on the developer checkout, micromamba state, or cached packages.
-
-## 6. Bound resource use and audit retention
-
-Relevant files: `src/duo/adapters.py`, `src/duo/storage.py`,
-`src/duo/cli.py`, `tests/test_acceptance.py`.
-
-- [ ] Add configurable limits for captured output and per-run storage. Proposed
-  starting defaults are 32 MiB per stdout/stderr stream and 256 MiB per run.
-  Validate them against representative workloads, then document the final values
-  and units.
-- [ ] Enforce capture limits while the child process runs, not only when parsing
-  its finished output. Count logs and caches created by the backend toward the
-  run-storage limit. If enforcement is sampled, document possible overshoot. Do
-  not promise a hard disk quota without an underlying quota mechanism.
-- [ ] When a limit is exceeded, stop the process group, keep the last accepted
-  plan, return a non-success status, and record a bounded, sanitized failure.
-- [ ] Bound the size of tasks, criteria, plans, and responses before expensive
-  processing. Publish these limits and make oversized input fail clearly. Test
-  parsing and credential scanning with adversarial inputs within the limits.
-- [ ] Add explicit audit cleanup with age/size selection and dry-run output. Keep
-  automatic deletion opt-in. Cleanup must never delete active runs, traverse
-  symlinks, follow paths outside the configured audit root, or remove project
-  plans.
-- [ ] Document audit ownership, access permissions, sensitive raw content, backup
-  policy, and retention. Verify permissions on newly created artifacts.
-- [ ] Test disk-full failures, interrupted cleanup, oversized output, and child
-  processes that keep writing output while being terminated.
-
-Acceptance: recurring runs have documented storage bounds and cleanup procedures.
-A resource failure cannot publish a partial plan or report agreement.
-
-## 7. Verify unattended operation and release evidence
-
-Relevant files: `src/duo/workflow.py`, `src/duo/storage.py`,
-`src/duo/cli.py`, `tests/test_acceptance.py`, `README.md`.
-
-- [ ] Recheck behavior on timeout, Ctrl-C, and termination by a scheduler. The
-  code currently has no SIGTERM handler: test SIGTERM explicitly and implement
-  cleanup so it cannot leave reviewer processes running or produce a success
-  result.
-- [ ] Verify that concurrent runs on the same repository are excluded even when
-  they use different `--state-dir` values. The current lock lives in the state
-  directory. Close any gap in the lock's scope before supporting concurrent
-  scheduled runs that target the same plan.
-- [ ] Verify that external edits are detected before publication. Document the
-  remaining race with writers that do not cooperate. Unattended operation must
-  not assume exclusive access just because other Duo processes honor the lock.
-- [ ] Make sure setup, model, validation, storage, interruption, and limit failures
-  each produce a useful non-success outcome. Keep run IDs, backend/model metadata,
-  experimental-version flags, accepted revisions, and stop reasons available in
-  machine-readable output.
-- [ ] Write a runbook covering:
-  - authentication renewal;
-  - CLI upgrades and drift reports (section 3);
-  - rejected policies;
-  - disk pressure;
-  - interrupted runs and preserved plans;
-  - rollback.
-
-  State that reviewer agreement still needs human assessment for consequential
-  use.
-- [ ] Collect a release report linking the exact artifact and revision to:
-  - CI results;
-  - installation tests;
-  - fixture and drift results;
-  - live compatibility results;
-  - isolation evidence, where isolation is claimed;
-  - outstanding limitations.
-
-Acceptance: an operator can detect a failed run, find the last accepted plan,
-understand why the run stopped, and restart or roll back without manually editing
-internal state.
-
-## Execution order and release gate
-
-1. Define the deployment contract and set up offline CI (sections 1 and 5, CI part).
-2. Implement the version policy, real-CLI fixtures, and drift job (section 3).
-3. Implement the claimed security boundary and resource controls (sections 2 and 6).
-4. Complete the unattended-operation checks (section 7) and installed-artifact
-   testing (section 5).
-5. Run the authenticated matrix against the resulting release candidate
-   (section 4), and record its CLI versions in the compatibility matrix.
-6. Review the evidence, resolve release-blocking findings, and get explicit
-   approval before publishing or deploying the release.
-
-The release gate requires all of the following:
-- passing offline, fixture, and installation tests;
-- a version policy that rejects untested CLIs by default;
-- live evidence for every claimed backend combination;
-- documented and tested security boundaries;
-- verified cleanup and resource-limit behavior;
-- reproducible artifacts;
-- an operator runbook.
-
-Any change that affects these guarantees, including adopting a new CLI version,
-invalidates the related evidence, and those checks must run again.
-
-The following are outside this release's scope:
+Outside the scope of this plan:
 - persistent graph checkpoint recovery;
 - distributed or multi-user orchestration;
 - automatic implementation of the generated plan;
-- additional reviewer backends.
-
-None of these replaces completing the release gates above.
+- additional reviewer backends;
+- Windows support.
