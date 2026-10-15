@@ -4,4 +4,5 @@ include scripts/*.py
 include constraints.txt
 include CHANGELOG.md
 include examples/*.md
+include examples/*.sh
 global-exclude __pycache__ *.py[cod] .DS_Store

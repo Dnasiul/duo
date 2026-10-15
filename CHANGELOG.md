@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `examples/review_codebase.sh`: review a codebase for bugs in one run with
+  native CLIs.
+
 ## 0.4.1 (2026-10-14)
 
 ### Fixed
