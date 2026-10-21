@@ -10,10 +10,18 @@
   from a clean clone, and a tag-triggered workflow attaches them with
   build-provenance attestations to a draft release.
 
+### Changed
+
+- Codex CLI 0.163.x is tested and accepted (0.162.1 to 0.163.x). Its new
+  features are all under development and off by default.
+
 ### Fixed
 
 - `constraints.txt` pins `certifi` 2026.10.19, which fixes PYSEC-2026-4320, and
   the newest releases of the other dependencies (LangGraph 1.2.16).
+- `scripts/record_fixtures.py` lists Codex MCP servers with an empty
+  `CODEX_HOME`, as preflight does, so servers in your own Codex configuration no
+  longer end up in fixtures.
 
 ## 0.4.1 (2026-10-14)
 

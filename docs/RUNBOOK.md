@@ -76,10 +76,10 @@ logged in`, or `Agent authentication is unauthorized`. Duo does not retry these.
 ## CLI upgrades and drift reports
 
 Duo runs only tested CLI versions (see the README's compatibility table). After
-a CLI updates itself, setup may fail with a message such as `codex 0.163.0 is
+a CLI updates itself, setup may fail with a message such as `codex 0.164.0 is
 outside the tested range (...)`. Options:
 
-1. Install a tested version again, for example `npm install -g @openai/codex@0.162.1`.
+1. Install a tested version again, for example `npm install -g @openai/codex@0.163.0`.
 2. Run once with `--allow-untested-cli`. The run is marked experimental in its
    summary and audit files; all control probes still apply.
 3. Verify the new version and extend the tested range, as described under

@@ -98,7 +98,7 @@ def claude_options(settings: Path) -> list[str]:
 # each run. Codex is 0.x, where a minor bump may break compatibility, so no range
 # spans minor versions. Widen a range only with probe and live-run evidence.
 TESTED_VERSIONS = {
-    "codex": ((0, 162, 1), (0, 163, 0)),
+    "codex": ((0, 162, 1), (0, 164, 0)),
     "claude": ((2, 1, 296), (2, 2, 0)),
     "copilot": ((1, 0, 95), (1, 1, 0)),
 }
