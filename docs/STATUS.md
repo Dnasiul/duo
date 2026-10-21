@@ -280,6 +280,19 @@ and native Codex + Copilot Claude each agreed in 3 turns and 3 attempts, no toke
 in any file, `calc.py` unchanged, read-only tools only, the version recorded as
 tested.
 
+0.4.2 release candidate (2026-10-21, Linux; codex-cli 0.163.0, Claude Code
+2.1.306, Copilot CLI 1.0.96): `scripts/release.py` passed on the release commit,
+167 tests from each installed artifact. Live runs used the `duo` installed from
+the 0.4.2 wheel with the new `constraints.txt` (LangGraph 1.2.16). Native/native
+agreed in 3 turns and 3 attempts. Copilot now refuses `gpt-5.4`, `gpt-6-astra`,
+and `claude-opus-5.5` for this account ("Model ... from --model flag is not
+available"); Duo stopped after one attempt without retrying, as intended. With
+`claude-sonnet-5.5` in both roles, the Copilot pair agreed in 3 turns and 3
+attempts. No token in any file, `calc.py` unchanged, read-only tools only, no
+Copilot runtime left behind; the policy recorded `web: false`, 9 variables per
+native CLI (`LC_ALL` is set by `micromamba run`, not used here) and 19 for
+Copilot.
+
 Tools seen in the attempts:
 
 - Copilot: only `glob`, `view`, and `rg` (its name for `grep`); all built-in MCP
