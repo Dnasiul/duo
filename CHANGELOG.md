@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `examples/improve_codebase.sh`: plan improvements to a codebase in one run
+  with native CLIs, starting from `review_codebase.sh`'s findings when present.
+
 ## 0.4.2 (2026-10-21)
 
 ### Added
