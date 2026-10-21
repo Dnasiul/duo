@@ -126,7 +126,8 @@ checks and `.github/workflows/release.yml` for the published files.
    byte-reproducible, so the published checksums are the workflow's, not step
    3's.
 
-Run the release workflow by hand on any branch for a dry run: the same checks
+A push to main that changes the release tooling, or a manual run of the release
+workflow on any branch, is a dry run: the same checks
 and build, without attestations or a release.
 
 Notes: macOS CI jobs can wait for a runner and be cancelled without running;

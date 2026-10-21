@@ -2,12 +2,19 @@ name: Release
 
 # A v* tag builds and checks the release files with scripts/release.py and
 # attaches them, with build-provenance attestations, to a draft release. The
-# owner fills in the notes and publishes the draft. Run it by hand on any ref
-# for a dry run: the same checks and build, without attestations or a release.
+# owner fills in the notes and publishes the draft. A push to main that changes
+# the release tooling, or a manual run on any ref, is a dry run: the same checks
+# and build, without attestations or a release.
 
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    # Path filters apply to the branch push only; GitHub ignores them for tags.
+    paths:
+      - scripts/release.py
+      - scripts/build-requirements.txt
+      - .github/workflows/release.yml
   workflow_dispatch:
 
 permissions:
