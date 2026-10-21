@@ -103,23 +103,38 @@ only the mode's document was written.
 
 ## Releasing
 
-How 0.1.0 was released; repeat for later versions.
+From 0.4.2, releases use the repository's own tools: `scripts/release.py` for the
+checks and `.github/workflows/release.yml` for the published files.
 
-1. Date the version in `CHANGELOG.md` and commit; that commit is the release target.
+1. Date the version in `CHANGELOG.md`, bump `pyproject.toml`, and commit; that
+   commit is the release target.
 2. Rerun the live backend matrix and `scripts/check_drift.py` on it when code
    changed since the last evidence, and record the results here.
-3. Build the wheel and sdist from a clean clone of that commit; install each into
-   a fresh environment with its `constraints.txt` and run the tests from the
-   installed package; write `SHA256SUMS` for the wheel, sdist, and constraints.
+3. Run `python3 scripts/release.py <commit>` (Python 3.11 or newer). From a clean
+   clone it builds the wheel and sdist with the pinned tools in
+   `scripts/build-requirements.txt`, installs each into a fresh environment with
+   `constraints.txt`, runs the tests strictly from the installed package, checks
+   the version and that the wheel matches the commit, and writes the files,
+   `SHA256SUMS`, and a notes template to `dist/release-<version>/`.
 4. Push, wait for all CI jobs to pass on that commit, then push an annotated tag
-   and create the GitHub release with the notes (the release report) and the four
-   files. Check the published files against `SHA256SUMS` after download.
+   `v<version>`. The release workflow refuses a tag that does not match the
+   package version or whose commit has no passing CI, runs the same script,
+   attests the files' build provenance, and creates a **draft** release with
+   them and the notes template.
+5. Fill in the draft's notes (the release report), then publish it. Check the
+   published files against `SHA256SUMS` after download. Builds are not
+   byte-reproducible, so the published checksums are the workflow's, not step
+   3's.
+
+Run the release workflow by hand on any branch for a dry run: the same checks
+and build, without attestations or a release.
 
 Notes: macOS CI jobs can wait for a runner and be cancelled without running;
 rerun the failed jobs instead of pushing a new commit, which would change the
-release target. Creating a release needs a token with Contents read and write (on the macOS
-machine, `gh` is logged in: `gh release create vX.Y.Z --verify-tag --notes-file ...`);
-rerunning jobs also needs Actions read and write. The per-job API sometimes
+release target. Publishing the draft needs the release page on GitHub or a
+token with Contents read and write (on the macOS machine, `gh` is logged in:
+`gh release edit vX.Y.Z --draft=false --latest`); rerunning jobs also needs
+Actions read and write. The per-job API sometimes
 returns HTTP 502; the run's overall conclusion is enough, since any failed or
 cancelled job makes it a failure. A live run that stops at the turn limit is not
 necessarily a regression: compare the prompts in its attempt logs with the

@@ -38,24 +38,24 @@ publishing a release, distributing credentials, or making model calls.
 Relevant files: new `scripts/release.py`, new `.github/workflows/release.yml`,
 `docs/STATUS.md` ("Releasing").
 
-- [ ] Add `scripts/release.py` that, for a given commit:
+- [x] Add `scripts/release.py` that, for a given commit:
   - builds the wheel and sdist from a clean clone with a pinned build environment;
   - installs each into a fresh environment with `constraints.txt`, runs the test
     suite from the installed package, and runs `duo --help` and `duo-clean --help`;
   - checks that the wheel's package files match the commit;
   - writes `SHA256SUMS` and a release-notes template with the checksums filled in.
-- [ ] Add a release workflow triggered by a `v*` tag that builds the files with
+- [x] Add a release workflow triggered by a `v*` tag that builds the files with
   the same steps, writes `SHA256SUMS`, and attaches them with build-provenance
   attestations to a draft release. Builds are not byte-reproducible, so the
   published files are the workflow's, not a local build's. Give only this job
   `contents: write`, `attestations: write`, and `id-token: write`; never run it on
   pull requests. The OIDC permission is required by
   [GitHub's artifact-attestation workflow](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
-- [ ] Reject tags whose version does not match the package metadata. Before
+- [x] Reject tags whose version does not match the package metadata. Before
   publication, require successful results from all required CI jobs for the
   exact commit the tag resolves to, and verify the release assets' checksums and
   provenance against that commit.
-- [ ] Keep live runs, the drift check, and publishing the draft as manual steps
+- [x] Keep live runs, the drift check, and publishing the draft as manual steps
   that need the owner's approval. Update "Releasing" in `docs/STATUS.md`.
 
 Acceptance: on either machine, `scripts/release.py` runs the pre-release checks
