@@ -214,7 +214,8 @@ For how the modes fit together across a research project, from observations and
 hypotheses to a paper with confirmed references, see
 [examples/scientific_research_pipeline.md](examples/scientific_research_pipeline.md).
 To review a codebase for bugs in one run with native CLIs (trusted repositories
-only), see [examples/review_codebase.sh](examples/review_codebase.sh).
+only), see [examples/review_codebase.sh](examples/review_codebase.sh); to plan
+improvements from it, see [examples/improve_codebase.sh](examples/improve_codebase.sh).
 
 `--output` takes a path relative to `--repo` whose directory already exists; it
 must stay inside the repository and outside `.git`. Reviewers are told that this
