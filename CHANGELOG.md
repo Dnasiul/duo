@@ -6,6 +6,9 @@
 
 - `examples/review_codebase.sh`: review a codebase for bugs in one run with
   native CLIs.
+- Release tooling: `scripts/release.py` builds and checks the release files
+  from a clean clone, and a tag-triggered workflow attaches them with
+  build-provenance attestations to a draft release.
 
 ## 0.4.1 (2026-10-14)
 
