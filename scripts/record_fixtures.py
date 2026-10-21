@@ -105,7 +105,12 @@ def record_probes(args) -> None:
             write(target, "version.txt", version)
             write(target, "exec-help.txt", run([args.codex_bin, "exec", "--help"]))
             write(target, "features.txt", run([args.codex_bin, *codex_options(), "features", "list"]))
-            write(target, "mcp-list.json", run([args.codex_bin, *codex_options(), "mcp", "list", "--json"]))
+            # As preflight does: an empty CODEX_HOME loads what a review loads, so
+            # the user's own MCP servers (ignored by reviews) stay out of fixtures.
+            home = scratch / "codex-home"
+            home.mkdir()
+            write(target, "mcp-list.json", run([args.codex_bin, *codex_options(), "mcp", "list", "--json"],
+                                               env={**os.environ, "CODEX_HOME": str(home)}))
         if "claude" in args.cli:
             settings = scratch / "claude-settings.json"
             settings.write_text(json.dumps(CLAUDE_SETTINGS))

@@ -88,7 +88,7 @@ sys.stdout.write(outputs[key])
                 self.assertEqual(result["changes"], {})
 
     def test_new_release_with_working_controls_is_untested(self):
-        for agent, version in (("codex", "0.163.0"), ("claude", "2.2.0"), ("copilot", "1.1.0")):
+        for agent, version in (("codex", "0.164.0"), ("claude", "2.2.0"), ("copilot", "1.1.0")):
             with self.subTest(agent=agent):
                 result = self.check(agent, version=version)
                 self.assertEqual(result["status"], "untested-version", result)

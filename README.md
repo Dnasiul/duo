@@ -69,7 +69,7 @@ best-effort.
 | Operating system | macOS on Apple silicon (live runs and CI); Ubuntu 22.04 on x86-64 (live runs); Ubuntu (CI) | Other Linux distributions: CI only; Windows is unsupported |
 | Python | 3.10, 3.11, 3.12, 3.13, 3.14 (CI on both systems) | Older versions are unsupported |
 | Dependencies | `constraints.txt` | Newest versions within `pyproject.toml` ranges (CI checks them, untested for release) |
-| Codex CLI | 0.162.x from 0.162.1 | Other versions, only with `--allow-untested-cli` |
+| Codex CLI | 0.162.1 to 0.163.x | Other versions, only with `--allow-untested-cli` |
 | Claude Code | 2.1.x from 2.1.296 | Other versions, only with `--allow-untested-cli` |
 | Copilot CLI | 1.0.x from 1.0.95 | Other versions, only with `--allow-untested-cli` |
 | Backends | All four native/Copilot combinations (live runs on Linux and macOS) | — |

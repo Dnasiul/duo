@@ -267,6 +267,19 @@ every run's path, so native/native and Copilot/Copilot were rerun on the
 attempt. The policy recorded `web: false`, 10 variables for each native CLI, and
 20 for Copilot. `check_drift.py`: all compatible.
 
+Codex 0.163.0 (2026-10-21, Linux; Claude Code 2.1.306, Copilot CLI 1.0.96;
+drift issue #1): its eight new features (`async_compaction`, `credential_masking`,
+`retain_client_tool_outputs`, and others) are all under development and off by
+default; `exec --help` is unchanged and the MCP list with an empty `CODEX_HOME`
+is empty, with an MCP server in the user's own Codex configuration.
+`smoke_inspection.py --confinement --search-confinement` (native pair): no hook
+or MCP sentinel ran; native Codex read all three outside files, as documented,
+and declined the search test for lack of search tools; Claude's reads and
+searches outside were denied. Live Duo runs on the `calc.py` task: native/native
+and native Codex + Copilot Claude each agreed in 3 turns and 3 attempts, no token
+in any file, `calc.py` unchanged, read-only tools only, the version recorded as
+tested.
+
 Tools seen in the attempts:
 
 - Copilot: only `glob`, `view`, and `rg` (its name for `grep`); all built-in MCP
