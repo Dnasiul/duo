@@ -15,6 +15,15 @@
   probe and response fixtures; control checks replay every recorded Codex minor
   version. Live verification on macOS remains pending.
 
+### Fixed
+
+- Copilot CLI 1.0.103 and later work again. They replaced `--no-remote` and
+  `--no-remote-export` with `--sync-session`, so Duo refused them as lacking
+  required options; it now passes `--sync-session=off` when the installed CLI
+  offers it, and the old flags otherwise. `reviewer-policy.json` records which.
+- Copilot's required options are matched as whole names in its help, so one
+  option can no longer be satisfied by a longer one (`--mode` by `--model`).
+
 ## 0.4.2 (2026-10-21)
 
 ### Added

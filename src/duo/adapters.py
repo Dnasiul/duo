@@ -247,6 +247,7 @@ class CLIAdapter:
         self.policy_verified = False
         self.untested: dict[str, str] = {}
         self.settings_path = self.store.path / "claude-settings.json"
+        self.copilot_session: list[str] = []  # set by preflight for the installed Copilot
 
     def environment(self, cli: str) -> dict[str, str]:
         return reviewer_environment(cli, self.config.pass_env)
@@ -308,6 +309,7 @@ class CLIAdapter:
         if len(native) < 2:
             directory = Path(tempfile.mkdtemp(prefix="copilot-preflight-", dir=self.store.path))
             versions["copilot"], policy["copilot"] = copilot.preflight(self.config, directory)
+            self.copilot_session = policy["copilot"]["session_flags"]
             if policy["copilot"].get("version_status") == "untested":
                 untested.append("copilot")
         policy["reviewers"] = {
@@ -335,7 +337,7 @@ class CLIAdapter:
         if agent not in ("codex", "claude"):
             raise ValueError("Unknown agent")
         if getattr(config, f"{agent}_backend") == "copilot":
-            return copilot.command(config, agent, directory)
+            return copilot.command(config, agent, directory, self.copilot_session)
         if agent == "codex":
             argv = [config.codex_bin, "--no-daemon", "exec", "--sandbox", "read-only",
                     "--ignore-user-config", "--ignore-rules", "--strict-config",

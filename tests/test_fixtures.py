@@ -67,12 +67,20 @@ class RecordedProbeTests(unittest.TestCase):
                 self.assertEqual(policy["codex"]["verified_mcp_servers"], [])
 
     def test_copilot_help_and_config_match_required_controls(self):
-        help_text = text("copilot", "help.txt")
-        for flag in (*copilot.FLAGS, "--reasoning-effort", "--available-tools", "--deny-tool"):
-            with self.subTest(flag=flag):
-                self.assertIn(flag, help_text)
-        config = json.loads(text("copilot", "config.json"))
-        self.assertTrue(all(config.get(k) == v for k, v in copilot.SETTINGS.items()))
+        # 1.0.103 replaced --no-remote and --no-remote-export with --sync-session.
+        expected = {"copilot-1.0.95": ["--no-remote", "--no-remote-export"],
+                    "copilot-1.0.105": ["--sync-session=off"]}
+        directories = sorted(FIXTURES.glob("copilot-*"))
+        self.assertEqual({d.name for d in directories}, set(expected))
+        for directory in directories:
+            with self.subTest(version=directory.name):
+                help_text = (directory / "help.txt").read_text()
+                available = copilot.options(help_text)
+                for flag in (*copilot.FLAGS, "--reasoning-effort", "--available-tools", "--deny-tool"):
+                    self.assertIn(flag, available)
+                self.assertEqual(copilot.session_flags(help_text), expected[directory.name])
+                config = json.loads((directory / "config.json").read_text())
+                self.assertTrue(all(config.get(k) == v for k, v in copilot.SETTINGS.items()))
 
     def test_fixtures_contain_no_credentials_or_home_paths(self):
         for path in FIXTURES.rglob("*"):
