@@ -3,7 +3,7 @@
 Where Duo's production readiness stands, and how to continue on a Linux machine.
 Written 2026-10-13 at commit `c5886a7`; Linux live results and the 0.1.0, 0.2.0,
 0.2.1, and 0.3.0 releases added the same day; 0.3.1, 0.4.0, and 0.4.1 on
-2026-10-14; 0.4.2 on 2026-10-21. `plan.md` is the improvement plan after 0.4.1; the production plan
+2026-10-14; 0.4.2 on 2026-10-21; 0.4.3 on 2026-10-28. `plan.md` is the improvement plan after 0.4.1; the production plan
 it replaced is `git show 918d2c5:plan.md`. This page records progress.
 
 ## Done
@@ -32,6 +32,7 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 | Release 0.3.1 (2026-10-14): Copilot receives `GH_HOST` again; tag `v0.3.1` on `b531f68`, same files and release report; built and install-tested on Linux, published through the API, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.3.1 |
 | Release 0.4.0 (2026-10-14): `--allow-web` (experimental), the research pipeline example, the full Copilot environment record; tag `v0.4.0` on `a7571ad`, same files and release report; built and install-tested on Linux, published through the API, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.4.0 |
 | Release 0.4.1 (2026-10-14): cleanup no longer follows a `copilot-cache` symbolic link out of the audit directory, reviewers are stopped when monitoring fails, input files must be regular and are read with a 1 MiB bound; tag `v0.4.1` on `d63b188`, same files and release report; built and install-tested on Linux, published through the API, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.4.1 |
+| Release 0.4.3 (2026-10-28): Copilot CLI 1.0.103+ supported (`--sync-session=off` chosen from the installed CLI's help), Codex CLI 0.164.x, and the codebase-improvement example; tag `v0.4.3` on `16a08c1`; built, attested, and drafted by the release workflow; downloaded files install-tested on Linux and verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.4.3 |
 | Release 0.4.2 (2026-10-21): Codex CLI 0.163.x supported, `certifi` 2026.10.19 (PYSEC-2026-4320) with the newest dependencies, the release tooling, and the codebase-review example; tag `v0.4.2` on `3461739`; the first release built, attested, and drafted by `.github/workflows/release.yml`; downloaded files install-tested on Linux and verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.4.2 |
 | `--allow-web` (experimental, released in 0.4.0; `b98dd5c`): reviewers may search and fetch web pages (Copilot: fetch only). Owner decision (2026-10-14): allowed with native Codex too, with a warning and documentation rather than a refusal | "Web access live verification" below; `docs/SECURITY.md` |
 
