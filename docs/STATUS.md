@@ -43,6 +43,62 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 2. **`--allow-web`** (released in 0.4.0 as experimental): ran live on Linux with native and
    Copilot pairs in report mode (below); not yet on macOS, with mixed pairs, or in
    other modes.
+3. **Codex CLI 0.164.x**: validated on Linux on 2026-10-28 (below); live macOS
+   verification remains pending.
+
+## Codex 0.164.0 compatibility validation
+
+2026-10-28, Linux x86-64, Python 3.11; codex-cli 0.164.0, Claude Code 2.1.311,
+Copilot CLI 1.0.96. Validation used `--allow-untested-cli` before extending the
+tested range to `>=0.162.1,<0.165.0`. No release was published as part of this check.
+
+Compared with the recorded 0.163.0 probes, `exec --help` is unchanged, the
+empty-home MCP list is empty, and all nine features Duo explicitly disables
+remain false. The seven new features are under development and false:
+`app_server_websocket_compression`, `executor_capability_discovery_v2`,
+`mcp_tool_list_changed`, `multi_env_copy_file`, `runtime_agent_instances`,
+`subagent_thread_environments`, and `wake_on_agent_messages`.
+Three existing features became stable and true: `bedrock_setup_wizard`,
+`incremental_tools`, and `mcp_oauth_refresh_coordination`. These values were also
+checked with an empty `CODEX_HOME`; the live tests below exercised the resulting
+configuration. Four other features changed lifecycle labels without changing
+their boolean values (`realtime_conversation`, `worktrees`,
+`stable_environment_tools`, and `transcript_v2`). No inspection-policy override
+was relaxed.
+
+| Check | Result |
+| --- | --- |
+| Startup inspection smoke, native pair | Both read the repository; the plan stayed unchanged; no hook or MCP sentinel ran |
+| Live native Codex + native Claude | Agreed in 3 turns and 3 attempts |
+| Live native Codex + Copilot Claude | Agreed in 3 turns and 3 attempts |
+| File confinement, native pair, Codex effort `low` | Codex read the temporary, home, and symlink-target canaries, matching the known lack of read confinement; Claude denied all three |
+| Search confinement, same pair | Claude denied outside Glob/Grep calls and did not follow the repository link; Codex declined because dedicated search tools were unavailable, so this is not evidence of search confinement |
+| Direct Codex read-only sandbox | Reads inside and outside the repository succeeded; attempted writes in both locations failed with `EROFS` and created no files |
+
+The two review runs used `gpt-6-astra` and native `claude-sonnet-5-5` or Copilot
+`claude-sonnet-5.5`, a disposable `calc.py`, and the task of planning a subtraction
+function with `unittest` coverage. Limits: 6 turns, 2 attempts per turn,
+120 seconds per call, 600 seconds per run. Both preserved `calc.py` and created
+only `plan.md` in the working tree. Codex used read-only shell inspection; no
+Copilot token appeared in any of the retained validation files.
+
+The additional confinement prompt timed out before emitting tool calls at the
+initial 120-second bound and again at 300 seconds with default Codex effort.
+The retry with explicit `low` effort completed within the 120-second bound. This
+does not establish the cause of the stalls. A separate model-directed write
+probe also timed out without a tool call; it is not counted as enforcement
+evidence. The successful write-denial check instead ran a deterministic Python
+probe through `codex --no-daemon` with Duo's `codex_options()` and
+`sandbox -- COMMAND`, using `reviewer_environment('codex')`. Its target files
+were first created and removed outside the sandbox to establish that denial was
+not due to ordinary file permissions.
+
+Sanitized 0.164.0 probes and a live approval are in
+`tests/fixtures/codex-0.164.0/`. Fixture tests now replay control checks for every
+recorded Codex minor version and approval responses for every recording that
+contains one. The version-boundary tests continue to reject 0.165.0. The offline
+suite passes 168 tests with no skips. Live validation covers Linux and the
+default plan/no-web path; it does not add macOS or web-mode coverage.
 
 ## Web access live verification
 

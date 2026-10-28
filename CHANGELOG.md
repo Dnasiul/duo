@@ -6,6 +6,14 @@
 
 - `examples/improve_codebase.sh`: plan improvements to a codebase in one run
   with native CLIs, starting from `review_codebase.sh`'s findings when present.
+- `scripts/smoke_inspection.py --allow-untested-cli` validates a new CLI before
+  extending the supported version range.
+
+### Changed
+
+- Codex CLI 0.164.x is accepted after compatibility validation on Linux. Added
+  probe and response fixtures; control checks replay every recorded Codex minor
+  version. Live verification on macOS remains pending.
 
 ## 0.4.2 (2026-10-21)
 

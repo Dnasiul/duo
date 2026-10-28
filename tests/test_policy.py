@@ -50,12 +50,13 @@ class PolicyTests(unittest.TestCase):
 
     def test_versions_must_be_in_tested_ranges(self):
         for agent, version in [('codex', 'codex-cli 0.162.1'), ('codex', 'codex-cli 0.162.9'), ('codex', 'codex-cli 0.163.0'),
+                               ('codex', 'codex-cli 0.164.0'), ('codex', 'codex-cli 0.164.9'),
                                ('claude', '2.1.296 (Claude Code)'), ('claude', '2.1.400 (Claude Code)'),
                                ('copilot', 'GitHub Copilot CLI 1.0.95.'), ('copilot', 'GitHub Copilot CLI 1.0.120.')]:
             with self.subTest(agent=agent, version=version):
                 self.assertEqual(verify_version(agent, version), 'tested')
         # Codex 0.x minor releases may break compatibility; each needs evidence.
-        for agent, version in [('codex', '0.164.0'), ('codex', '0.162.0'), ('codex', '1.0.0'),
+        for agent, version in [('codex', '0.165.0'), ('codex', '0.162.0'), ('codex', '1.0.0'),
                                ('claude', '2.2.0'), ('claude', '2.1.295'), ('claude', '3.0.0'),
                                ('copilot', '1.1.0'), ('copilot', '1.0.94'), ('copilot', '2.0.0')]:
             with self.subTest(agent=agent, version=version):

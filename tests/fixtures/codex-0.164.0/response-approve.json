@@ -1,0 +1,5 @@
+{
+  "decision": "approve",
+  "plan": "",
+  "reason": "The plan fits the repository and satisfies all acceptance criteria: subtraction coverage includes positive, negative, and zero operands using unittest in test_calc.py; add stays unchanged; and no dependency or packaging changes are needed. Implementation order and verification are appropriate, with no unresolved decisions."
+}

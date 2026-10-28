@@ -41,6 +41,8 @@ def main() -> int:
     parser.add_argument('--codex-backend', choices=['native', 'copilot'], default='native')
     parser.add_argument('--claude-backend', choices=['native', 'copilot'], default='native')
     parser.add_argument('--copilot-bin', default='copilot')
+    parser.add_argument('--allow-untested-cli', action='store_true',
+                        help='validate a new CLI version before extending the tested range')
     parser.add_argument('--confinement', action='store_true',
                         help='also test whether reviewers can read files outside the repository')
     parser.add_argument('--search-confinement', action='store_true',
@@ -85,7 +87,7 @@ def main() -> int:
         config = Config(repo, args.codex_model, args.claude_model,
                         codex_bin=args.codex_bin, claude_bin=args.claude_bin,
                         codex_backend=args.codex_backend, claude_backend=args.claude_backend,
-                        copilot_bin=args.copilot_bin)
+                        copilot_bin=args.copilot_bin, allow_untested_cli=args.allow_untested_cli)
         store = RunStore(root / 'audit')
         adapter = CLIAdapter(config, store)
         versions = adapter.preflight()

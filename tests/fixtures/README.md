@@ -9,6 +9,7 @@ so hand-written fakes cannot drift from real formats unnoticed.
 | --- | --- |
 | `codex-0.162.1` | version, `exec --help`, effective `features list`, `mcp list --json`; JSON event stream and response of an approval |
 | `codex-0.163.0` | version, `exec --help`, effective `features list`, `mcp list --json` (with an empty `CODEX_HOME`, as preflight lists it) |
+| `codex-0.164.0` | version, unchanged `exec --help`, effective `features list`, empty-home `mcp list --json`; JSON event stream and response of a live approval on Linux |
 | `claude-2.1.296` | version, `--help`, `doctor`; success envelope; unrecognized-model envelope (`is_error: true` with `subtype: "success"`) and stderr |
 | `copilot-1.0.95` | version, `--help`, isolated `config --list --json`; event streams from GPT (`phase: "final_answer"`) and Claude (no `phase`) models; model-unavailable and authentication-failure stderr |
 

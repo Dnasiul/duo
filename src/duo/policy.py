@@ -95,10 +95,10 @@ def claude_options(settings: Path) -> list[str]:
 # Versions whose inspection controls and output formats were exercised with real
 # runs: [first tested, first untested). Later patch releases within a tested minor
 # version are accepted; the help and feature probes still verify every control on
-# each run. Codex is 0.x, where a minor bump may break compatibility, so no range
-# spans minor versions. Widen a range only with probe and live-run evidence.
+# each run. Codex is 0.x, where a minor bump may break compatibility: extend the
+# upper bound one minor version at a time, only with probe and live-run evidence.
 TESTED_VERSIONS = {
-    "codex": ((0, 162, 1), (0, 164, 0)),
+    "codex": ((0, 162, 1), (0, 165, 0)),
     "claude": ((2, 1, 296), (2, 2, 0)),
     "copilot": ((1, 0, 95), (1, 1, 0)),
 }
