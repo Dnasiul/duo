@@ -384,6 +384,14 @@ Copilot runtime left behind; the policy recorded `web: false`, 9 variables per
 native CLI (`LC_ALL` is set by `micromamba run`, not used here) and 19 for
 Copilot.
 
+0.4.3 release candidate (2026-10-28, Linux; codex-cli 0.164.0, Claude Code
+2.1.312, Copilot CLI 1.0.105 from a scratch install): `scripts/release.py` passed
+on the release commit, 171 tests from each installed artifact. From the `duo`
+installed from the 0.4.3 wheel: native/native and Copilot/Copilot
+(`claude-sonnet-5.5` in both roles, `--sync-session=off`) each agreed in 3 turns
+and 3 attempts, no CLI recorded as untested, no token in any file, `calc.py`
+unchanged, no Copilot runtime left behind.
+
 Tools seen in the attempts:
 
 - Copilot: only `glob`, `view`, and `rg` (its name for `grep`); all built-in MCP
