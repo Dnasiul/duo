@@ -54,6 +54,18 @@ class RecordedProbeTests(unittest.TestCase):
         self.assertEqual(policy["claude"]["managed_settings"],
                          verify_claude_remote(recorded["doctor"]))
 
+    def test_codex_controls_for_each_recorded_minor_version(self):
+        for directory in sorted(FIXTURES.glob("codex-*")):
+            def probe(argv, env=None):
+                name = ("exec-help.txt" if "exec" in argv else
+                        "features.txt" if "features" in argv else "mcp-list.json")
+                return (directory / name).read_text()
+
+            with self.subTest(version=directory.name):
+                policy = verify_controls("codex", "claude", Path("/unused/settings.json"),
+                                         probe, agents={"codex"})
+                self.assertEqual(policy["codex"]["verified_mcp_servers"], [])
+
     def test_copilot_help_and_config_match_required_controls(self):
         help_text = text("copilot", "help.txt")
         for flag in (*copilot.FLAGS, "--reasoning-effort", "--available-tools", "--deny-tool"):
@@ -94,12 +106,14 @@ sys.exit({code})
         return str(fixture_dir(agent) / name)
 
     def test_codex_event_stream_and_response(self):
-        events = self.path("codex", "events-approve.jsonl")
-        self.assertEqual(codex_error_text(Path(events)), "")
-        binary = self.replay("codex", stdout=events, response=self.path("codex", "response-approve.json"))
-        review = CLIAdapter(replace(self.config, codex_bin=binary), self.store)("codex", "Review", 5)
-        self.assertEqual(review["decision"], "approve")
-        validate_review(review, "# Plan\n")
+        for response in sorted(FIXTURES.glob("codex-*/response-approve.json")):
+            events = response.with_name("events-approve.jsonl")
+            with self.subTest(version=response.parent.name):
+                self.assertEqual(codex_error_text(events), "")
+                binary = self.replay("codex", stdout=str(events), response=str(response))
+                review = CLIAdapter(replace(self.config, codex_bin=binary), self.store)("codex", "Review", 5)
+                self.assertEqual(review["decision"], "approve")
+                validate_review(review, "# Plan\n")
 
     def test_claude_success_envelope(self):
         binary = self.replay("claude", stdout=self.path("claude", "result-approve.json"))

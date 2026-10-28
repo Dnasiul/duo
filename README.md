@@ -69,7 +69,7 @@ best-effort.
 | Operating system | macOS on Apple silicon (live runs and CI); Ubuntu 22.04 on x86-64 (live runs); Ubuntu (CI) | Other Linux distributions: CI only; Windows is unsupported |
 | Python | 3.10, 3.11, 3.12, 3.13, 3.14 (CI on both systems) | Older versions are unsupported |
 | Dependencies | `constraints.txt` | Newest versions within `pyproject.toml` ranges (CI checks them, untested for release) |
-| Codex CLI | 0.162.1 to 0.163.x | Other versions, only with `--allow-untested-cli` |
+| Codex CLI | 0.162.1 to 0.164.x (0.164.0 live on Linux) | 0.164.x live verification on macOS pending; other versions only with `--allow-untested-cli` |
 | Claude Code | 2.1.x from 2.1.296 | Other versions, only with `--allow-untested-cli` |
 | Copilot CLI | 1.0.x from 1.0.95 | Other versions, only with `--allow-untested-cli` |
 | Backends | All four native/Copilot combinations (live runs on Linux and macOS) | — |
@@ -534,7 +534,8 @@ review prompt.
   review the reported flag and feature changes. If everything passes, add the
   fixtures, extend `TESTED_VERSIONS` in `src/duo/policy.py` (for Codex, one
   minor version at a time), and update the versions near the top of this file
-  in a normal release.
+  in a normal release. Pass `--allow-untested-cli` to the smoke test while
+  validating a version that the current policy still rejects.
 - For `probe-failure`: keep the version rejected and note it as a known
   incompatibility. If a removed or changed control affects reviewer isolation,
   review the security boundary before supporting any version of that CLI again.
