@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 import subprocess
@@ -20,8 +21,27 @@ SETTINGS = {
 AUTH_VARIABLES = ('COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN')
 FLAGS = ('--no-auto-update', '--silent', '--stream', '--output-format', '--model',
          '--available-tools', '--deny-tool', '--disable-builtin-mcps',
-         '--disable-mcp-server', '--no-ask-user', '--no-custom-instructions', '--no-remote',
-         '--no-remote-export', '--disallow-temp-dir', '--no-experimental', '--mode', '--log-dir')
+         '--disable-mcp-server', '--no-ask-user', '--no-custom-instructions',
+         '--disallow-temp-dir', '--no-experimental', '--mode', '--log-dir')
+# Keeping the session off GitHub web and mobile: Copilot 1.0.103 replaced
+# --no-remote and --no-remote-export with --sync-session[=on|off].
+LEGACY_SESSION_FLAGS = ('--no-remote', '--no-remote-export')
+SESSION_FLAG = '--sync-session'
+
+
+def options(help_text: str) -> set[str]:
+    """Option names in help output, matched whole (``--mode`` is not ``--model``)."""
+    return set(re.findall(r'--[a-z][a-z0-9-]*', help_text))
+
+
+def session_flags(help_text: str) -> list[str]:
+    """The options that keep this Copilot's session from being shared or controlled."""
+    available = options(help_text)
+    if available.issuperset(LEGACY_SESSION_FLAGS):
+        return list(LEGACY_SESSION_FLAGS)
+    if SESSION_FLAG in available:
+        return [f'{SESSION_FLAG}=off']
+    raise RunError('Installed Copilot lacks required inspection options')
 
 
 def workspace_roots(repo: Path) -> list[Path]:
@@ -151,7 +171,8 @@ def tools(allow_web: bool = False) -> list[str]:
     return ['view', 'glob', 'grep', *(['web_fetch'] if allow_web else [])]
 
 
-def command(config: Config, agent: Agent, directory: Path) -> list[str]:
+def command(config: Config, agent: Agent, directory: Path, session: list[str]) -> list[str]:
+    """The review argv; ``session`` comes from preflight's ``session_flags``."""
     # With --allow-web, URL access is allowed rather than denied; it applies to
     # web_fetch and the shell, which stays denied.
     web = ['--allow-all-urls'] if config.allow_web else []
@@ -161,7 +182,7 @@ def command(config: Config, agent: Agent, directory: Path) -> list[str]:
             '--available-tools', *tools(config.allow_web),
             '--deny-tool', 'write', 'shell', *([] if config.allow_web else ['url']), *web,
             '--disable-builtin-mcps', '--no-ask-user',
-            '--no-custom-instructions', '--no-remote', '--no-remote-export',
+            '--no-custom-instructions', *session,
             '--disallow-temp-dir', '--no-experimental', '--mode', 'interactive',
             '--log-dir', str(directory / 'copilot-logs')]
     argv += [f'--disable-mcp-server={name}' for name in mcp_names(config.repo)]
@@ -197,13 +218,15 @@ def _preflight(config: Config, directory: Path) -> tuple[str, dict]:
     version = version_lines[0] if version_lines else ''
     status = verify_version('copilot', version, config.allow_untested_cli)
     help_text = probe(['--help'])
-    if any(flag not in help_text for flag in FLAGS):
+    available = options(help_text)
+    if not available.issuperset(FLAGS):
         raise RunError('Installed Copilot lacks required inspection options')
-    if config.allow_web and '--allow-all-urls' not in help_text:
+    session = session_flags(help_text)
+    if config.allow_web and '--allow-all-urls' not in available:
         raise RunError('Installed Copilot lacks the --allow-all-urls option needed for --allow-web')
     if any(getattr(config, f'{agent}_backend') == 'copilot' and
            getattr(config, f'{agent}_effort') is not None for agent in ('codex', 'claude')):
-        if '--reasoning-effort' not in help_text:
+        if '--reasoning-effort' not in available:
             raise RunError('Installed Copilot does not support reasoning effort')
     try:
         settings = json.loads(probe(['config', '--list', '--json']))
@@ -214,6 +237,7 @@ def _preflight(config: Config, directory: Path) -> tuple[str, dict]:
     return version, {
         'version_status': status,
         'settings': SETTINGS, 'tools': tools(config.allow_web), 'web': config.allow_web,
+        'session_flags': session,
         'configuration': 'fresh isolated home and cache per invocation',
         'authentication': 'environment token; values never included in audit metadata',
         'extensions': 'disabled; no inherited plugins, MCP servers or trusted folders',

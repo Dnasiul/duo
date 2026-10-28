@@ -45,6 +45,8 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
    other modes.
 3. **Codex CLI 0.164.x**: validated on Linux on 2026-10-28 (below); live macOS
    verification remains pending.
+4. **Copilot CLI 1.0.103+** (`--sync-session`): validated on Linux with 1.0.105
+   on 2026-10-28 (below); live macOS verification remains pending.
 
 ## Codex 0.164.0 compatibility validation
 
@@ -99,6 +101,38 @@ recorded Codex minor version and approval responses for every recording that
 contains one. The version-boundary tests continue to reject 0.165.0. The offline
 suite passes 168 tests with no skips. Live validation covers Linux and the
 default plan/no-web path; it does not add macOS or web-mode coverage.
+
+## Copilot 1.0.103+ compatibility
+
+2026-10-28, Linux x86-64; Copilot CLI 1.0.105 from a scratch npm install (the
+installed 1.0.96 was left alone), codex-cli 0.164.0, Claude Code 2.1.312. The
+weekly drift run of 2026-10-26 reported a probe failure for the newest Copilot on
+both platforms: Copilot 1.0.103 (1.0.99 was never published) removed `--remote`,
+`--no-remote`, `--remote-export`, and `--no-remote-export`, and added
+`--sync-session[=on|off]` ("read-only account history sync for this run only
+... does not enable incoming control"), `--trust-folder`,
+`--disable-client-telemetry`, and `--host-*` options. `copilot help config`
+lists no remote-control or sync setting, and the effective configuration in
+Duo's fresh home has none; Duo's other required settings still take effect.
+
+Duo now picks the session options from the installed CLI's help: the two
+`--no-remote` flags when both are listed, otherwise `--sync-session=off`, and a
+setup error when neither is. Option names are matched whole. Fixtures:
+`tests/fixtures/copilot-1.0.105/`.
+
+| Check (Copilot 1.0.105) | Result |
+| --- | --- |
+| `check_drift.py` | compatible (1.0.96 too, with the old flags) |
+| Startup inspection smoke, both reviewers through Copilot (`claude-sonnet-5.5`) | both inspected the repository; no hook or MCP sentinel ran |
+| File and search confinement, same pair | all 18 outside reads and searches denied ("no interactive user response was available"); the repository link was not followed |
+| Live Copilot + Copilot (`claude-sonnet-5.5` in both roles) | agreed in 4 turns and 4 attempts |
+| Live native Codex + Copilot Claude | agreed in 3 turns and 3 attempts |
+
+Every Copilot attempt ran with `--sync-session=off` and without the old flags;
+no token in any file, `calc.py` unchanged, no Copilot runtime left behind, and
+the policy records `session_flags`. Whether a session is synced is decided by
+GitHub's service; the evidence is the option Duo passes and the CLI's own
+description of it. macOS is not yet checked.
 
 ## Web access live verification
 

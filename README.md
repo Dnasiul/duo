@@ -71,7 +71,7 @@ best-effort.
 | Dependencies | `constraints.txt` | Newest versions within `pyproject.toml` ranges (CI checks them, untested for release) |
 | Codex CLI | 0.162.1 to 0.164.x (0.164.0 live on Linux) | 0.164.x live verification on macOS pending; other versions only with `--allow-untested-cli` |
 | Claude Code | 2.1.x from 2.1.296 | Other versions, only with `--allow-untested-cli` |
-| Copilot CLI | 1.0.x from 1.0.95 | Other versions, only with `--allow-untested-cli` |
+| Copilot CLI | 1.0.x from 1.0.95 (1.0.105 live on Linux) | Other versions, only with `--allow-untested-cli` |
 | Backends | All four native/Copilot combinations (live runs on Linux and macOS) | — |
 | Document modes | `report`, `description`, `review` (live runs on Linux, native and through Copilot; on macOS, native) | Copilot on macOS and mixed backend pairs: fake-CLI tests only |
 | Models used in live runs | Native: `gpt-6-astra`, `claude-opus-5-5`, `claude-sonnet-5-5`; Copilot: `gpt-5.4`, `claude-sonnet-5.5` | Any other model your account offers; unknown names stop the run without retrying |
@@ -391,7 +391,9 @@ Duo applies and audits inspection restrictions before starting reviews:
   exposed, confined to the repository. Shell, write, and URL permissions are
   denied. Built-in MCP servers and discovered repository MCP servers are
   explicitly disabled. Project extension opt-ins, custom provider environment
-  overrides, auto-update, remote control, and remote export are disabled.
+  overrides, and auto-update are disabled, and the session is kept off GitHub web
+  and mobile: `--no-remote --no-remote-export` before Copilot 1.0.103,
+  `--sync-session=off` from 1.0.103, chosen from the installed CLI's help.
   Conflicting repository settings and local managed policy cause a setup error;
   repository settings that require inspection must be plain JSON. Configurations
   and organization policy must remain stable during the run.

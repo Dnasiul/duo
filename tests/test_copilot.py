@@ -40,7 +40,7 @@ assert os.environ['GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS'] == 'false'
 if '--version' in sys.argv:
     print('GitHub Copilot CLI 1.0.95.'); sys.exit(0)
 if '--help' in sys.argv:
-    print({' '.join(copilot.FLAGS) + ' --reasoning-effort'!r}); sys.exit(0)
+    print({' '.join((*copilot.FLAGS, *copilot.LEGACY_SESSION_FLAGS)) + ' --reasoning-effort'!r}); sys.exit(0)
 if 'config' in sys.argv:
     print((pathlib.Path(os.environ['COPILOT_HOME']) / 'settings.json').read_text()); sys.exit(0)
 assert sys.argv[sys.argv.index('--output-format') + 1] == 'json'
@@ -223,11 +223,50 @@ else:
 
     def test_workspace_mcp_servers_explicitly_disabled(self):
         (self.repo / '.mcp.json').write_text(json.dumps({'mcpServers': {'sample': {'command': 'bad'}}}))
-        argv = copilot.command(self.copilot_config('copilot'), 'codex', self.store.attempt_dir())
+        argv = copilot.command(self.copilot_config('copilot'), 'codex', self.store.attempt_dir(), [])
         self.assertIn('--disable-mcp-server=sample', argv)
         (self.repo / '.mcp.json').write_text('invalid')
         with self.assertRaises(RunError):
-            copilot.command(self.copilot_config('copilot'), 'codex', self.store.attempt_dir())
+            copilot.command(self.copilot_config('copilot'), 'codex', self.store.attempt_dir(), [])
+
+    def test_session_flags_follow_the_installed_copilot(self):
+        legacy = '--no-remote\n    Disable remote control\n--no-remote-export\n    Disable export'
+        current = '--sync-session[=<on|off>]\n    Enable or disable read-only account history sync'
+        self.assertEqual(copilot.session_flags(legacy), ['--no-remote', '--no-remote-export'])
+        self.assertEqual(copilot.session_flags(current), ['--sync-session=off'])
+        # --no-remote-export alone does not supply --no-remote, and the enabling
+        # options alone disable nothing.
+        for text in ('', '--no-remote-export', '--remote --remote-export'):
+            with self.subTest(text=text), self.assertRaisesRegex(RunError, 'lacks required inspection options'):
+                copilot.session_flags(text)
+
+    def test_help_options_match_whole_names(self):
+        self.assertNotIn('--mode', copilot.options('--model <model>'))
+        self.assertIn('--sync-session', copilot.options('--sync-session[=<on|off>]'))
+
+    def test_review_uses_the_session_flags_of_the_installed_copilot(self):
+        binary = self.fake('''
+assert '--sync-session=off' in sys.argv, sys.argv
+assert not {'--no-remote', '--no-remote-export'} & set(sys.argv), sys.argv
+sys.stdin.read()
+reply({'decision': 'approve', 'plan': '', 'reason': 'Ready'})
+''')
+        path = Path(binary)
+        text = path.read_text()
+        self.assertEqual(text.count('--no-remote --no-remote-export'), 1)
+        # Copilot 1.0.103 and later list --sync-session instead of the two flags.
+        path.write_text(text.replace('--no-remote --no-remote-export', '--sync-session[=<on|off>]'))
+        (self.repo / 'plan.md').write_text('# Plan\n')
+        args = ['--repo', str(self.repo), '--state-dir', str(self.audit), '--task', 'Task',
+                '--codex-model', 'gpt-5.4', '--claude-model', 'claude-sonnet-5.5',
+                '--codex-backend', 'copilot', '--claude-backend', 'copilot',
+                '--copilot-bin', binary, '--skip-git-repo-check', '--json']
+        output = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(io.StringIO()):
+            self.assertEqual(main(args), 0, output.getvalue())
+        run = Path(json.loads(output.getvalue())['run_dir'])
+        policy = json.loads((run / 'reviewer-policy.json').read_text())
+        self.assertEqual(policy['copilot']['session_flags'], ['--sync-session=off'])
 
     def test_untested_copilot_version_is_opt_in_and_reported(self):
         binary = self.fake("sys.stdin.read()\nreply({'decision':'approve','plan':'','reason':'Ready'})\n")
