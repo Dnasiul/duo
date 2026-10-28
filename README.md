@@ -7,6 +7,36 @@ With `--mode`, the same read-only loop produces an analysis report, a folder
 description, or a critical review instead (see
 [Other documents](#other-documents-experimental)).
 
+## Compared with one-pass cross-model reviews
+
+A common alternative is a command or skill in one agent that asks the other
+model for a single review, for example a Claude Code command that runs
+`codex review`, or a Codex skill that runs `claude -p` with read-only tools, and
+then has the host agent check the findings.
+
+| | One-pass review command or skill | Duo |
+| --- | --- | --- |
+| Shape | The other model reviews once; the host agent keeps or discards each finding | Both reviewers take turns revising one document until both approve the same version |
+| Who decides | The host model alone | Neither model; every revision must be approved again by the other |
+| Output | A chat message | A file in the repository (plan, report, description, or review) that the next run starts from |
+| Scope | Code changes | Any document: plans, code reviews, analysis reports, descriptions, reference checks |
+| Running | Inside an interactive session | A standalone command with exit codes and a JSON summary, suited to scripts and unattended runs |
+| Restrictions | Whatever flags the command passes, unchecked; the reviewer usually gets your full environment and configuration | Checked before every run and refused if missing; allowlisted environment variables; tested CLI versions only (see [Reviewer inspection policy](#reviewer-inspection-policy)) |
+| Record | The conversation | Every prompt, attempt, response, CLI version, and the restrictions in force, per run |
+| Cost | One model call plus the host's checking | Usually three or more model calls |
+
+A one-pass review is faster and fits interactive work: it can build the diff
+itself (`codex review --base main`), and the host agent can fix confirmed
+findings straight away. Duo writes only its document, and Claude and Copilot
+reviewers cannot run `git`, so save a diff into the repository for them to read.
+
+Use a one-pass review for a quick check of uncommitted changes. Use Duo when you
+want a document both models agree on (a plan before implementing, a code review,
+an improvement plan, a report), runs without a supervising session, or locked-down
+runs with a record. They combine: agree on a plan or review with Duo, then run a
+one-pass review on the code you change from it. Agreement between two models is
+a strong filter, not proof; check findings before acting on them.
+
 ## Install
 
 Requires **Python 3.10 to 3.14**, macOS or Linux, and authentication for the
