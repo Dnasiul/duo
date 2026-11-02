@@ -1,0 +1,5 @@
+{
+  "decision": "approve",
+  "plan": "",
+  "reason": "The plan matches the repository’s simple calc.py implementation and fulfills the task. It specifies subtraction behavior, meaningful unit tests, and a standard-library test command without adding dependencies. No substantive issues or unresolved decisions remain."
+}

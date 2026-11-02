@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Codex CLI 0.165.x is tested and accepted (0.162.1 to 0.165.x). `exec --help`
+  is unchanged; of its new features only `prediction_preserve_parent_tools` is on
+  by default, and `reasoning_effort_override` became stable and on.
+
 ## 0.4.3 (2026-10-28)
 
 ### Added
