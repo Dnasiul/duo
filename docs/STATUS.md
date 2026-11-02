@@ -453,6 +453,13 @@ installed from the 0.4.3 wheel: native/native and Copilot/Copilot
 and 3 attempts, no CLI recorded as untested, no token in any file, `calc.py`
 unchanged, no Copilot runtime left behind.
 
+0.4.4 release candidate (2026-11-02, Linux; Claude Code 2.1.316, Copilot CLI
+1.0.96): `scripts/release.py` passed on the release commit, 171 tests from each
+installed artifact. From the `duo` installed from the 0.4.4 wheel: native/native
+with codex-cli 0.166.0 and native Codex 0.165.0 + Copilot Claude each agreed in
+3 turns and 3 attempts, no CLI recorded as untested, no token in any file,
+`calc.py` unchanged.
+
 Tools seen in the attempts:
 
 - Copilot: only `glob`, `view`, and `rg` (its name for `grep`); all built-in MCP
