@@ -44,10 +44,39 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 2. **`--allow-web`** (released in 0.4.0 as experimental): ran live on Linux with native and
    Copilot pairs in report mode (below); not yet on macOS, with mixed pairs, or in
    other modes.
-3. **Codex CLI 0.164.x**: validated on Linux on 2026-10-28 (below); live macOS
-   verification remains pending.
+3. **Codex CLI 0.164.x and 0.165.x**: validated on Linux on 2026-10-28 and
+   2026-11-02 (below); live macOS verification remains pending.
 4. **Copilot CLI 1.0.103+** (`--sync-session`): validated on Linux with 1.0.105
    on 2026-10-28 (below); live macOS verification remains pending.
+
+## Codex 0.165.0 compatibility validation
+
+2026-11-02, Linux x86-64; codex-cli 0.165.0 (installed by Codex's own update),
+Claude Code 2.1.316, Copilot CLI 1.0.96. `check_drift.py` reported
+`untested-version` with every control verified.
+
+Compared with 0.164.0, `exec --help` is unchanged and the empty-home MCP list is
+empty. With Duo's options and an empty `CODEX_HOME`, all nine features Duo
+disables are false. New features: `guardian_recorded_items`, `guardianv3`, and
+`tui_multi_backend` (under development, false) and
+`prediction_preserve_parent_tools` (stable, true); `reasoning_effort_override`
+became stable and true. Neither enabled feature adds a tool, a configuration
+source, or network access; no inspection-policy override was relaxed.
+
+| Check | Result |
+| --- | --- |
+| Startup inspection smoke, native pair | both read the repository; no hook or MCP sentinel ran |
+| File confinement, native pair | Codex read the temporary, home, and symlink-target canaries, matching the known lack of read confinement; Claude denied all three |
+| Search confinement, same pair | Claude denied outside `Glob` and `Grep` and did not follow the link; Codex declined for lack of search tools (not evidence of search confinement) |
+| Codex read-only sandbox, deterministic probe | writes inside and outside the repository failed with "Read-only file system" and created no files |
+| Live native Codex + native Claude | agreed in 3 turns and 3 attempts |
+| Live native Codex + Copilot Claude | agreed in 3 turns and 4 attempts |
+
+The extra attempt in the mixed run was Codex starting its turn and then emitting
+nothing until Duo's 300-second call limit; the retry succeeded. The 0.164.0
+validation saw the same kind of stall, so it is a pattern to watch, not yet
+explained. No token in any file, `calc.py` unchanged, read-only commands only.
+Fixtures: `tests/fixtures/codex-0.165.0/`, including a live approval.
 
 ## Codex 0.164.0 compatibility validation
 
