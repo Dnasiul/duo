@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `examples/search_literature.sh`: find the most relevant literature on a
+  subject (reviews, foundational and recent papers, books) with `--allow-web`,
+  confirmed against DOI, arXiv, or ISBN records, with BibTeX for confirmed
+  entries. Native CLIs by default; `BACKEND=copilot` keeps reviewers inside the
+  folder. Its companion `search_literature_instructions.txt` replaces report
+  mode's repository-evidence checklist with one for web sources, and each subject
+  gets its own report, named from the subject and its hash.
+
 ## 0.4.4 (2026-11-02)
 
 ### Changed

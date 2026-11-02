@@ -1,0 +1,12 @@
+Review the literature report against the original task and acceptance criteria.
+Web sources are valid evidence even when the repository has no bibliography or
+notes; repository files are optional context. Support factual claims with
+scholarly records and web pages actually inspected, and cite their URLs.
+Check relevance, coverage, grouping, and ranking for the requested subject.
+Confirm authors, title, year, venue or publisher, and DOI, arXiv ID, or ISBN
+against the cited records. Mark entries without a confirming record as
+unconfirmed. Check citation counts against their named source and date when
+available, and distinguish preprints from peer-reviewed work. Check any reported
+retractions or corrections against their sources. Ensure BibTeX matches the
+confirmed records and that the report states its search strategy, date, gaps,
+and suggested next searches. Do not invent references, identifiers, or evidence.

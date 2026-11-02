@@ -5,4 +5,5 @@ include constraints.txt
 include CHANGELOG.md
 include examples/*.md
 include examples/*.sh
+include examples/*.txt
 global-exclude __pycache__ *.py[cod] .DS_Store
