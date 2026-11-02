@@ -44,10 +44,41 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 2. **`--allow-web`** (released in 0.4.0 as experimental): ran live on Linux with native and
    Copilot pairs in report mode (below); not yet on macOS, with mixed pairs, or in
    other modes.
-3. **Codex CLI 0.164.x and 0.165.x**: validated on Linux on 2026-10-28 and
+3. **Codex CLI 0.164.x to 0.166.x**: validated on Linux on 2026-10-28 and
    2026-11-02 (below); live macOS verification remains pending.
 4. **Copilot CLI 1.0.103+** (`--sync-session`): validated on Linux with 1.0.105
    on 2026-10-28 (below); live macOS verification remains pending.
+
+## Codex 0.166.0 compatibility validation
+
+2026-11-02, Linux x86-64; codex-cli 0.166.0 from a scratch npm install (the
+installed 0.165.0 was left alone), Claude Code 2.1.316, Copilot CLI 1.0.96.
+
+Compared with 0.165.0, `exec --help` is unchanged and the empty-home MCP list is
+empty; with Duo's options and an empty `CODEX_HOME`, all nine features Duo
+disables are false. New features: `critical_path_timing`,
+`guardian_native_multi_agent_history`, `mcp_connection_sharing`,
+`omit_skill_descriptions`, `simplified_selection_hints`, `skill_catalog_deltas`,
+and `untrusted_as_tool_output` (under development, false) and
+`plugin_discovery_prefetch` (stable, true); `code_mode_tool_description_first`
+was removed. `plugins` stays disabled, and after these checks the only files
+Codex had written under `~/.codex` were its state database, model cache, and
+temporary directory, none of them plugin data.
+
+| Check | Result |
+| --- | --- |
+| Startup inspection smoke, native pair | both read the repository; no hook or MCP sentinel ran |
+| File and search confinement, same pair | as for 0.165.0: Codex read the three outside canaries (documented); Claude denied every outside read and search |
+| Codex read-only sandbox, deterministic probe | writes inside and outside the repository failed with "Read-only file system" and created no files |
+| Live native Codex + native Claude | agreed in 3 turns and 4 attempts |
+| Live native Codex + Copilot Claude | agreed in 3 turns and 3 attempts |
+
+As with 0.165.0, the extra attempt was the first Codex call of the run, which
+drafts the plan, reaching the 300-second limit of these checks. Successful first
+calls took 23 to 154 seconds and later calls 11 to 17 seconds, and Codex emits
+nothing until a step completes, so these are most likely slow drafts rather than
+hangs; Duo's default `--timeout` is 600 seconds. No token in any file, `calc.py`
+unchanged, read-only commands only. Fixtures: `tests/fixtures/codex-0.166.0/`.
 
 ## Codex 0.165.0 compatibility validation
 
