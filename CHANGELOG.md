@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+
+- Codex CLI 0.167.x is tested and accepted (0.162.1 to 0.167.x), validated on
+  macOS. `exec --help` is unchanged; its new features are all off by default, and
+  `deferred_tool_world_state` became stable and on.
+
 ### Fixed
 
 - On macOS 27, Duo refused native Claude Code and Copilot reviewers with
