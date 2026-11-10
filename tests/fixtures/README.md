@@ -12,6 +12,7 @@ so hand-written fakes cannot drift from real formats unnoticed.
 | `codex-0.164.0` | version, unchanged `exec --help`, effective `features list`, empty-home `mcp list --json`; JSON event stream and response of a live approval on Linux |
 | `codex-0.165.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on Linux |
 | `codex-0.166.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on Linux |
+| `codex-0.167.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on macOS |
 | `claude-2.1.296` | version, `--help`, `doctor`; success envelope; unrecognized-model envelope (`is_error: true` with `subtype: "success"`) and stderr |
 | `copilot-1.0.95` | version, `--help`, isolated `config --list --json`; event streams from GPT (`phase: "final_answer"`) and Claude (no `phase`) models; model-unavailable and authentication-failure stderr |
 | `copilot-1.0.105` | version, `--help` (`--sync-session` in place of `--no-remote` and `--no-remote-export`, from 1.0.103), isolated `config --list --json` |

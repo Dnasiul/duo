@@ -1,0 +1,5 @@
+{
+  "decision": "approve",
+  "plan": "",
+  "reason": "The plan matches calc.py’s existing style, adds subtraction tests that verify operand order, and uses standard-library unittest without new dependencies. Implementation order and validation are appropriate; no substantive issues or unresolved decisions remain."
+}

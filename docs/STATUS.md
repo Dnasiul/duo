@@ -46,9 +46,38 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
    Copilot pairs in report mode (below); not yet on macOS, with mixed pairs, or in
    other modes.
 3. **Codex CLI 0.164.x to 0.166.x**: validated on Linux on 2026-10-28 and
-   2026-11-02 (below); live macOS verification remains pending.
+   2026-11-02 (below); live macOS verification remains pending. 0.167.x was
+   validated on macOS on 2026-11-10 (below); live Linux verification pending.
 4. **Copilot CLI 1.0.103+** (`--sync-session`): validated on Linux with 1.0.105
    on 2026-10-28 (below); live macOS verification remains pending.
+
+## Codex 0.167.0 compatibility validation
+
+2026-11-10, macOS 27.2 arm64; codex-cli 0.167.0 (installed by Codex's own
+update), Claude Code 2.1.322, Copilot CLI 1.0.95. The drift check had opened
+issue #2 for it as `untested-version`.
+
+Compared with 0.166.0, `exec --help` is unchanged and the empty-home MCP list is
+empty; with Duo's options and an empty `CODEX_HOME`, all nine features Duo
+disables are false. New features, all false: `apps_early_resource_discovery`,
+`code_mode_host_output_truncation`, `incremental_exec_tools`,
+`interrupt_on_cancel`, and `tui_extensions_statusline` (under development),
+`gcp_setup_wizard` and `suppress_model_change_announcements` (stable).
+`respect_system_proxy` moved to experimental (false); `deferred_tool_world_state`
+became stable and true, which no Duo control depends on.
+
+| Check | Result |
+| --- | --- |
+| Startup inspection smoke, native pair | both read the repository; no hook or MCP sentinel ran |
+| File confinement, same pair | Codex read the three outside canaries (documented); Claude's `Read` was denied for all three |
+| Search confinement, same pair | Claude's `Glob` and `Grep` were denied outside the repository; Codex declined, having no dedicated search tools |
+| Codex read-only sandbox, deterministic probe (`codex sandbox` with Duo's options) | writes inside the repository, outside it, and in the home directory failed with "Operation not permitted" (the macOS sandbox's wording) and created no files |
+| Live native Codex + native Claude | agreed in 3 turns and 3 attempts |
+| Live native Codex + Copilot Claude | agreed in 3 turns and 3 attempts, no token in any file |
+
+These runs also exercised the macOS 27 fix for preferences-domain detection:
+native Claude and Copilot passed preflight unpatched. `calc.py` unchanged,
+read-only commands only. Fixtures: `tests/fixtures/codex-0.167.0/`.
 
 ## Codex 0.166.0 compatibility validation
 
