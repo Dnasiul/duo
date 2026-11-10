@@ -2,25 +2,35 @@
 
 ## Goal and scope
 
-Improve Duo after 0.4.1 without weakening what it already guarantees: two
+Improve Duo from 0.4.5 without weakening what it already guarantees: two
 read-only reviewers, a run that succeeds only when both approve the same
 document hash, a restricted reviewer environment, and an audit record of every
 attempt. Agreement does not prove a document is correct.
 
 This plan replaces the production-readiness plan, most of which shipped in
 0.1.0–0.4.1; that plan is in Git history (`git show 918d2c5:plan.md`), and
-`docs/STATUS.md` records what was done. Writing this plan does not authorize
+`docs/STATUS.md` records what was done. Written after 0.4.1; updated on
+2026-11-10 after 0.4.5. Writing this plan does not authorize
 publishing a release, distributing credentials, or making model calls.
 
 ## Starting point
 
-- 0.4.1 is released; CI runs 165 offline tests on Ubuntu and macOS, Python
-  3.10–3.14, and a scheduled job checks the installed CLIs for drift.
+- 0.4.5 is released; CI runs 182 offline tests on Ubuntu and macOS, Python
+  3.10–3.14. Releases are built, attested, and drafted by the repository's own
+  release workflow (section 1). A weekly job checks the newest CLIs for drift.
+- Tested CLI ranges: Codex 0.162.1–0.167.x, Claude Code 2.1.x, Copilot 1.0.x.
+  Live evidence is uneven across platforms: Codex 0.164–0.166 and Copilot
+  1.0.103+ ran live on Linux only, Codex 0.167 on macOS only.
 - All four backend combinations have run live on Linux and macOS. Document modes
   have not run through Copilot on macOS or with mixed pairs; `--allow-web` has run
   only on Linux, in report mode, with native and Copilot pairs.
+- Since 0.4.2, Copilot refuses `gpt-5.4` and `gpt-6-astra` for the owner's
+  account, so live Copilot pairs have used `claude-sonnet-5.5` in both roles: the
+  Copilot backend currently gives Duo no second model family.
 - Native Codex can read any file the user can read. There is no isolation
-  profile, so Duo is supported only on trusted repositories.
+  profile, so Duo is supported only on trusted repositories. Codex runs its
+  commands in a login shell, which can reintroduce variables that Duo's
+  restricted environment dropped.
 - Native Claude runs with `--output-format json`: the audit record has its final
   answer but not its tool calls. Token usage is present in the recorded fixture;
   the web-search and web-fetch counters stayed at zero in the documented live
@@ -30,10 +40,12 @@ publishing a release, distributing credentials, or making model calls.
   read saved test results. Claude and Copilot have no shell but can read logs
   inside the repository. Context files would give both reviewers the same
   captured evidence, including files outside their accessible directory.
-- Each release so far was built and published with scripts kept outside the
-  repository; `docs/STATUS.md` describes the steps but not the tools.
+- Setup depends on the exact wording of OS and CLI messages. macOS 27 changed
+  `defaults read`'s message for a missing domain, which made Duo refuse native
+  Claude and Copilot until 0.4.5.
+- Python 3.10 reached end of life in October 2026; Duo still supports it.
 
-## 1. Release tooling in the repository
+## 1. Release tooling in the repository (done in 0.4.2)
 
 Relevant files: new `scripts/release.py`, new `.github/workflows/release.yml`,
 `docs/STATUS.md` ("Releasing").
@@ -109,10 +121,18 @@ Relevant files: `src/duo/cli.py`, `src/duo/storage.py`, `src/duo/prompts.py`,
   file and the kind of credential without printing it. Saved logs and test
   output are where tokens usually appear, and the response filter runs only
   after the material has reached both providers.
-- [ ] Enforce a 1 MiB aggregate limit on the supplied context-file bytes, in
-  addition to the existing separate task, criteria, and document limits. Reject
-  a context file that is the document under review. Test aggregate overflow and
-  source-file changes after capture.
+- [ ] Enforce an aggregate limit on the supplied context-file bytes, in
+  addition to the existing separate task, criteria, and document limits. Context
+  is sent in every prompt of every turn and retry, so choose the limit from
+  cost, not only from safety: 1 MiB is roughly 250,000 tokens per call. Start
+  well below that (for example 256 KiB) and state the per-call cost in the
+  README. Reject a context file that is the document under review. Test
+  aggregate overflow and source-file changes after capture.
+- [ ] Add a per-call prompt budget: before each call, check the total size of the
+  instructions, task, criteria, document, history, and context against a
+  documented limit, and stop with a clear error instead of sending a prompt the
+  model cannot accept. The separate 1 MiB limits allow a combined prompt far
+  larger than any model's context window.
 - [ ] Document that context files go to the model providers like the task, and
   add a code-review example (diff and test output as context, `--mode review`).
 
@@ -170,7 +190,35 @@ unsupported combinations never fall back to ordinary execution. Document the
 remaining provider and web exposure before any separate decision to expand the
 supported deployment contract.
 
-## 5. Smaller improvements
+## 5. Reviewer model diversity
+
+Duo's value is two different models checking each other. Through Copilot that
+currently fails silently, because both reviewers run the same model.
+
+- [ ] Find which GPT models the owner's Copilot plan offers (Copilot has no
+  model-listing command; check its interactive `/model` and GitHub's model
+  documentation), and verify one live in the Codex role on both platforms.
+- [ ] Warn, in the summary and `--json` output, when both reviewers use the same
+  model, or models from the same family, so a single-model "agreement" is
+  visible. Do not refuse such runs: they can still be useful.
+- [ ] Update the model lists in `README.md` and `docs/STATUS.md` (they still name
+  `gpt-5.4` for Copilot), and add Claude Fable (`claude-fable-5-1`, alias
+  `fable`), which completed a live native review on 2026-11-10.
+
+## 6. Dependence on message wording
+
+- [ ] List every place Duo decides by matching OS or CLI message text: the
+  managed-preferences checks (`defaults read`), `claude doctor`'s remote-policy
+  states, failure classification (`classify_failure`), and Copilot's error
+  messages. For each, record where the wording comes from and what happens if it
+  changes: a refusal is safe but blocks users, an acceptance could weaken a
+  control.
+- [ ] Prefer structured signals (exit codes, JSON fields) where the tool offers
+  them. Where text must be matched, keep recorded real output per OS and CLI
+  version in `tests/fixtures/`, and have the drift check report a change in
+  wording, not only in flags.
+
+## 7. Smaller improvements
 
 - [ ] Add `--answer TEXT` with an explicit source-run selector for a run that
   stopped with exit code 3. Require a blocked source run and validate its
@@ -179,15 +227,26 @@ supported deployment contract.
   in a new run's audit record and prompts. Review the current document with fresh
   approvals; do not resume a graph checkpoint or restore old approvals. Test
   multiple blocked runs, mismatched sources, and changed document contents.
+- [ ] Investigate Codex's `shell_environment_policy` (for example `inherit` and
+  `exclude` settings passed with `-c`) so its commands cannot reintroduce dropped
+  variables through the login shell. Verify with a deterministic probe that runs
+  `env` under Duo's options; update `docs/SECURITY.md` with the result.
+- [ ] Decide when to drop Python 3.10, now past end of life: when a pinned
+  dependency drops it, or at the next minor release. Update `requires-python`,
+  the classifiers, the CI matrix, and the README together.
 - [ ] Investigate whether Copilot can enable only the search tools of its
   built-in GitHub MCP server, without the tools that write to repositories. Enable
   web search through Copilot only if that can be enforced and tested.
 - [ ] Publish to PyPI through trusted publishing from the release workflow, if
   the package name is available and the owner agrees.
 
-## 6. Open verification on macOS
+## 8. Open live verification
 
-- [ ] Document modes through Copilot and with mixed backend pairs.
+- [ ] Codex 0.164.x to 0.166.x on macOS, and 0.167.x on Linux.
+- [ ] Copilot CLI 1.0.103 and later (`--sync-session`) on macOS; this Mac still
+  runs 1.0.95.
+- [ ] Claude Fable through Copilot, once Copilot offers it.
+- [ ] Document modes through Copilot on macOS, and with mixed backend pairs.
 - [ ] `--allow-web` on macOS, with mixed pairs, and in plan, description, and
   review modes.
 
@@ -195,16 +254,21 @@ Record results in `docs/STATUS.md`.
 
 ## Execution order
 
-1. Release tooling (section 1). The scripts used for every release so far exist
-   only in a temporary session directory and would be lost.
+1. ~~Release tooling (section 1).~~ Done in 0.4.2.
 2. A Duo self-review of the security claims against the code (`--mode review` on
-   a worktree of the latest tag); confirmed findings may change the order below.
-3. Context files (section 3) or the Claude audit record (section 2), depending on
-   whether code reviews or `--allow-web` are used more.
-4. The isolation profile (section 4) as a separate milestone, starting with its
+   a worktree of the latest tag, checking `docs/SECURITY.md`); confirmed findings
+   may change the order below.
+3. Reviewer model diversity (section 5): cheap, and it restores Duo's main
+   property for Copilot users.
+4. The owner chooses between context files (section 3) and the Claude audit
+   record (section 2), by whether code reviews or `--allow-web` matter more.
+5. Message-wording dependencies (section 6), before the next OS or CLI change
+   breaks setup again.
+6. The isolation profile (section 4) as a separate milestone, starting with its
    feasibility gate. Keep the existing supported deployment contract until
    evidence and an explicit decision justify changing it.
-5. Sections 5 and 6 as time allows; section 6 whenever the Mac is available.
+7. Sections 7 and 8 as time allows; section 8 whenever the relevant machine is
+   available.
 
 Each change that affects a documented guarantee needs a test that fails without
 it, and live evidence before release, as for 0.4.1.
