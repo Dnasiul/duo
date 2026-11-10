@@ -125,6 +125,17 @@ def verify_version(agent: str, version: str, allow_untested: bool = False) -> st
                    "--allow-untested-cli to run it as experimental")
 
 
+def preferences_domain_absent(result: subprocess.CompletedProcess, domain: str) -> bool:
+    """Whether `defaults read DOMAIN` reported that the preferences domain does not exist.
+
+    macOS 26 and earlier print "Domain DOMAIN does not exist"; macOS 27 prints
+    "Error: Domain 'DOMAIN' not found." Any other result may be a policy, so it is
+    not treated as absence.
+    """
+    pattern = rf"Domain '?{re.escape(domain)}'? (?:does not exist|not found)"
+    return result.returncode == 1 and re.search(pattern, result.stderr) is not None
+
+
 def check_claude_managed_files() -> None:
     """Reject local policies before starting a CLI that might run policy helpers.
 
@@ -158,8 +169,7 @@ def check_claude_managed_files() -> None:
                 )
             except (OSError, UnicodeError, subprocess.TimeoutExpired) as exc:
                 raise RunError("Cannot verify Claude managed preferences") from exc
-            if (preferences.returncode != 1 or
-                    "Domain com.anthropic.claudecode does not exist" not in preferences.stderr):
+            if not preferences_domain_absent(preferences, "com.anthropic.claudecode"):
                 raise RunError("Claude preferences policy detected or unreadable; "
                                "Duo requires an unmanaged installation")
         root = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))

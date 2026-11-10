@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 from .models import Agent, Config, RunError
-from .policy import reviewer_environment, verify_version
+from .policy import preferences_domain_absent, reviewer_environment, verify_version
 from .storage import atomic_write
 
 SETTINGS = {
@@ -73,7 +73,7 @@ def check_sources(repo: Path) -> None:
                                     capture_output=True, text=True, timeout=15)
         except (OSError, UnicodeError, subprocess.TimeoutExpired) as exc:
             raise RunError('Cannot verify Copilot managed preferences') from exc
-        if result.returncode != 1 or 'Domain com.github.copilot does not exist' not in result.stderr:
+        if not preferences_domain_absent(result, 'com.github.copilot'):
             raise RunError('Copilot managed preferences detected or unreadable')
     # An isolated home is never trusted, and prompt-mode extensions are off.
     # Still reject configuration that could override our hook/plugin policy.

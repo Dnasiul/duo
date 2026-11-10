@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+
+- On macOS 27, Duo refused native Claude Code and Copilot reviewers with
+  "preferences policy detected or unreadable": `defaults read` now reports a
+  missing domain as `Domain '…' not found.` instead of `Domain … does not
+  exist`. Both wordings are accepted; any other result still stops setup.
+
 ### Added
 
 - `examples/search_literature.sh`: find the most relevant literature on a

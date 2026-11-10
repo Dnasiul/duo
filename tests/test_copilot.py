@@ -317,6 +317,25 @@ class CopilotSourceTests(unittest.TestCase):
             with self.assertRaisesRegex(RunError, 'managed settings or policy hooks'):
                 check_copilot_sources(Path('/unused'))
 
+    def test_mac_preferences_must_be_absent(self):
+        import subprocess
+        import tempfile
+        cases = ((1, 'Domain com.github.copilot does not exist', True),
+                 (1, "Error: Domain 'com.github.copilot' not found.", True),  # macOS 27
+                 (0, '', False), (1, 'Permission denied', False),
+                 (1, "Error: Domain 'com.github.other' not found.", False))
+        with tempfile.TemporaryDirectory() as directory:
+            for code, stderr, valid in cases:
+                result = subprocess.CompletedProcess([], code, '', stderr)
+                with self.subTest(stderr=stderr, code=code), patch('duo.copilot.sys.platform', 'darwin'), \
+                        patch.object(Path, 'lstat', side_effect=FileNotFoundError), \
+                        patch('duo.copilot.subprocess.run', return_value=result):
+                    if valid:
+                        check_copilot_sources(Path(directory))
+                    else:
+                        with self.assertRaisesRegex(RunError, 'managed preferences'):
+                            check_copilot_sources(Path(directory))
+
     def test_repository_overrides_cannot_reenable_hooks_or_plugins(self):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
