@@ -157,7 +157,11 @@ class PolicyTests(unittest.TestCase):
 
     def test_mac_preferences_must_be_absent(self):
         for code, stderr, valid in ((0, '', False), (1, 'Permission denied', False),
-                                    (1, 'Domain com.anthropic.claudecode does not exist', True)):
+                                    (1, 'Domain com.anthropic.claudecode does not exist', True),
+                                    # macOS 27 wording
+                                    (1, "Error: Domain 'com.anthropic.claudecode' not found.", True),
+                                    (0, "Error: Domain 'com.anthropic.claudecode' not found.", False),
+                                    (1, "Error: Domain 'com.anthropic.other' not found.", False)):
             with self.subTest(code=code, stderr=stderr), patch('duo.policy.sys.platform', 'darwin'), patch.object(Path, 'lstat', side_effect=FileNotFoundError), patch.object(Path, 'read_bytes', side_effect=FileNotFoundError), patch('duo.policy.subprocess.run', return_value=subprocess.CompletedProcess([], code, '', stderr)):
                 if valid:
                     check_claude_managed_files()
