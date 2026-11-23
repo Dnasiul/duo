@@ -160,6 +160,34 @@ def claude_error_text(envelope: object) -> str:
     return "\n".join(fields)
 
 
+# Python 3.14's JSON parser can accept nesting that formerly raised RecursionError.
+# Claude events nest well under 20 levels; 128 leaves ample room while bounding depth.
+CLAUDE_MAX_JSON_DEPTH = 128
+
+
+def check_claude_json_depth(text: str) -> None:
+    """Bound container nesting before parsing; leave JSON syntax validation to loads."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > CLAUDE_MAX_JSON_DEPTH:
+                raise AgentError("Claude returned missing or invalid stream data")
+        elif char in "]}":
+            depth -= 1
+
+
 def claude_result(path: Path, metadata: dict, *, max_output_mb: int) -> dict:
     """Read a complete JSONL stream, never an intermediate assistant answer.
 
@@ -179,6 +207,7 @@ def claude_result(path: Path, metadata: dict, *, max_output_mb: int) -> dict:
             for line in lines:
                 if not line.strip():
                     continue
+                check_claude_json_depth(line)
                 event = parse_json(line)
                 if not isinstance(event, dict) or not isinstance(event.get("type"), str):
                     raise AgentError("Claude returned an invalid stream event")
