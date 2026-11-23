@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Offline HTML agreement reports from stored audit records, including Duo 0.5.0
+  runs: reviewer roster, outcomes, approval hashes, full review timeline with
+  collapsible revision diffs, and context metadata. Render with
+  `duo --render-report RUN_DIR [--report-output PATH]`, without task or model
+  arguments. Reports are deterministic, escape record text, and use embedded
+  CSS with no JavaScript, links, or external assets.
+- Best-effort automatic `report.html` on terminal results and CLI error or
+  interruption paths when a run manifest exists, even before the first turn
+  completes. Report failures warn without changing
+  review outcomes or existing artifacts; missing snapshots are noted, and
+  unfinished stored states are labeled interrupted. Agreement semantics unchanged.
+
 ## 0.5.0 (2026-11-23)
 
 ### Changed

@@ -14,6 +14,7 @@ from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLA
                      DOCUMENT_MODES, DEFAULT_MAX_PROMPT_BYTES, MAX_TEXT_BYTES, Config, RunError,
                      State, Terminated, Turn)
 from .prompts import plan_diff
+from .report import write_report
 from .storage import PlanFile, RunStore, capture_context, read_input, run_lock, timestamp
 from .workflow import Reviewer, build_graph, initial_state
 
@@ -22,7 +23,9 @@ EXIT_CODES = {"agreed": 0, "error": 1, "blocked": 3, "limit_reached": 4}
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="Alternate Codex and Claude reviews of plan.md "
-                                                 "or another document (--mode)")
+                                                 "or another document (--mode)",
+                                     epilog="Stored runs: duo --render-report RUN_DIR "
+                                            "[--report-output PATH] (no task or models required)")
     result.add_argument("--repo", type=Path, default=Path.cwd(), help="Target repository")
     task = result.add_mutually_exclusive_group(required=True)
     task.add_argument("--task", help="Original task to plan")
@@ -179,6 +182,19 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def run(argv: list[str] | None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if any(arg == "--render-report" or arg.startswith("--render-report=") for arg in argv):
+        report_parser = argparse.ArgumentParser(description="Render a stored Duo run as offline HTML")
+        report_parser.add_argument("--render-report", type=Path, required=True, metavar="RUN_DIR")
+        report_parser.add_argument("--report-output", type=Path, metavar="PATH",
+                                   help="Destination (default: RUN_DIR/report.html)")
+        args = report_parser.parse_args(argv)
+        try:
+            print(write_report(args.render_report, args.report_output))
+            return 0
+        except (OSError, ValueError, RunError) as exc:
+            print(f"Could not render report: {exc}", file=sys.stderr)
+            return 1
     args = parser().parse_args(argv)
     holder: list[RunStore] = []
     try:
@@ -186,7 +202,14 @@ def run(argv: list[str] | None) -> int:
     finally:
         # Release the run-directory lock once every audit file is written.
         for store in holder:
-            store.close()
+            try:
+                if (store.path / "manifest.json").exists():
+                    write_report(store.path)
+            except BaseException as exc:
+                # Reporting must never replace the review outcome or its artifacts.
+                print(f"Warning: could not write HTML report: {exc}", file=sys.stderr)
+            finally:
+                store.close()
 
 
 def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
