@@ -254,7 +254,7 @@ class ReportTests(Fixture):
                                  capture_output=True, text=True, timeout=30)
         self.assertEqual(process.returncode, 0, process.stderr)
         path = self.run / 'report.html'
-        self.assertEqual(process.stdout.strip(), str(path))
+        self.assertEqual(process.stdout.strip(), str(path.resolve()))
         self.assertIn('<dd>agreed</dd>', path.read_text())
         destination = self.root / 'custom.html'
         code, output, errors = self.invoke(f'--render-report={self.run}', '--report-output', str(destination))
