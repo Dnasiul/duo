@@ -162,7 +162,7 @@ def build_graph(reviewer: Reviewer):
     try:
         from langgraph.graph import END, START, StateGraph
     except ImportError as exc:
-        raise RunError("LangGraph is unavailable. Install duo-plan with Python 3.10 or newer") from exc
+        raise RunError("LangGraph is unavailable. Install duo-plan with Python 3.11 or newer") from exc
     builder = StateGraph(State)
     builder.add_node("review", reviewer)
     builder.add_edge(START, "review")

@@ -39,7 +39,7 @@ a strong filter, not proof; check findings before acting on them.
 
 ## Install
 
-Requires **Python 3.10 to 3.14**, macOS or Linux, and authentication for the
+Requires **Python 3.11 to 3.14**, macOS or Linux, and authentication for the
 selected reviewer backends. By default these are the `codex` and `claude` CLIs;
 either reviewer can instead use GitHub Copilot CLI. See
 [Supported deployment](#supported-deployment) for tested versions.
@@ -98,7 +98,7 @@ allowlisted with explicit additions, and the credential check is best-effort.
 | Area | Tested | Experimental or unsupported |
 | --- | --- | --- |
 | Operating system | macOS on Apple silicon (live runs and CI); Ubuntu 22.04 on x86-64 (live runs); Ubuntu (CI) | Other Linux distributions: CI only; Windows is unsupported |
-| Python | 3.10, 3.11, 3.12, 3.13, 3.14 (CI on both systems) | Older versions are unsupported |
+| Python | 3.11, 3.12, 3.13, 3.14 (CI on both systems) | Older versions are unsupported |
 | Dependencies | `constraints.txt` | Newest versions within `pyproject.toml` ranges (CI checks them, untested for release) |
 | Codex CLI | 0.162.1 to 0.167.x (0.164.0, 0.165.0, and 0.166.0 live on Linux; 0.167.0 live on macOS) | 0.164.x to 0.166.x live on macOS and 0.167.x live on Linux pending; other versions only with `--allow-untested-cli` |
 | Claude Code | 2.1.x from 2.1.296 | Other versions, only with `--allow-untested-cli` |
@@ -703,7 +703,7 @@ Recorded, sanitized output from the tested CLI versions lives in
 checks, so the fake CLIs cannot drift from real formats unnoticed. See
 `tests/fixtures/README.md` for refreshing it with `scripts/record_fixtures.py`.
 
-CI (`.github/workflows/ci.yml`) runs on Ubuntu and macOS with Python 3.10 to
+CI (`.github/workflows/ci.yml`) runs on Ubuntu and macOS with Python 3.11 to
 3.14. It builds the wheel and the source distribution, installs each into a
 clean environment with `constraints.txt`, and runs the suite against the
 installed package with `scripts/run_tests.py`. CI already invoked the runner
@@ -716,7 +716,7 @@ To update the pinned versions, regenerate them with one interpreter per
 supported Python version, then let CI test them and review the audit:
 
 ```sh
-python scripts/update_constraints.py python3.10 python3.11 python3.12 python3.13 python3.14
+python scripts/update_constraints.py python3.11 python3.12 python3.13 python3.14
 ```
 
 The optional real-CLI smoke test creates a disposable Git repository containing

@@ -11,7 +11,8 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 | Area | Where |
 | --- | --- |
 | Real end-to-end runs: native Codex + native Claude, and both reviewers via Copilot (macOS) | README compatibility table |
-| CI: Ubuntu and macOS, Python 3.10–3.14, wheel and sdist installed with `constraints.txt`, strict runner (no skips), newest-dependency job, `pip-audit` | `.github/workflows/ci.yml` |
+| CI: Ubuntu and macOS, Python 3.11–3.14, wheel and sdist installed with `constraints.txt`, strict runner (no skips), newest-dependency job, `pip-audit` | `.github/workflows/ci.yml` |
+| Python 3.10 retired in 0.5.0 (owner decision, 2026-11-23; plan §7.3): supported range is Python 3.11–3.14 in package metadata, CI, and regenerated `constraints.txt` | `pyproject.toml`, `.github/workflows/ci.yml`, `constraints.txt` |
 | Version policy: only tested CLI ranges; `--allow-untested-cli` runs others as experimental | `src/duo/policy.py` (`TESTED_VERSIONS`) |
 | Sanitized real-CLI fixtures replayed through the parsers | `tests/fixtures/`, `scripts/record_fixtures.py` |
 | Weekly CLI drift check, with an issue opened when action is needed | `.github/workflows/drift.yml`, `scripts/check_drift.py` |
