@@ -1,5 +1,7 @@
 # Duo 0.4.5 security review
 
+> Findings F1–F6 remediated in Duo 0.4.6; see plan.md §9 and the 0.4.6 CHANGELOG entry.
+
 Reviewed HEAD `a11516c`. The difference from `v0.4.5` contains only `docs/STATUS.md` and `plan.md`; the implementation is unchanged. This review evaluates the supported single-user, trusted-repository, unmanaged-CLI baseline.
 
 The implementation supports many of Duo’s stated protections. One reproducible availability defect contradicts the credential scanner’s performance claim. Other findings concern inaccurate assurance levels, inconsistencies in recorded evidence, and evidence-reproduction tooling. No sandbox escape or live credential disclosure was demonstrated.
