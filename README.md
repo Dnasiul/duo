@@ -709,7 +709,10 @@ The answer records your decision on the question; it is not approval of the
 document. Reviewers receive it in a labeled `user_clarification` prompt section,
 covered by `--max-prompt-bytes`. Empty answers, answers over 1 MiB in UTF-8, and
 recognized credentials in the answer or blocked question absent from the task,
-criteria, and current document are refused before reviewer calls.
+criteria, and current document are refused before reviewer calls. Source records
+are read with bounds (16 MiB for the manifest and result, at most 256 document
+snapshots); a blocked run recorded with an extreme `--max-turns` can exceed the
+snapshot bound and be refused as unanswerable.
 
 The new `manifest.json` has an `answer` object recording `source_run` (the resolved
 directory), `source_run_id` (its name), `question`, `blocked_document_sha256`,

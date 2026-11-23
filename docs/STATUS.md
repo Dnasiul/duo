@@ -894,6 +894,19 @@ changes, credential/budget limits, unchanged default prompts, and ordinary agree
 verdict output. This does not restore checkpoints or implement section 12 recovery.
 The package version and structured verdict contract are unchanged.
 
+Live verification (2026-11-23, Linux; recorded by the implementation coordinator
+after the section 7.1 loop approved): a native-pair run (codex-cli 0.171.0,
+untested, `--allow-untested-cli`; Claude Code 2.1.330; `gpt-6-astra` /
+`claude-opus-5-5`, high effort) with instructions requiring the user's launch-date
+decision blocked on turn 1 (exit 3, `run-5y60g5eh`; question: the public beta
+launch date). Answering it with `--answer 'The public beta launch date is
+2027-03-01.' --source-run run-5y60g5eh` agreed in 3 turns (`run-xsqeo16c`); the
+new manifest's `answer` object records the source identity, the exact question,
+both document hashes (equal here — the document was unchanged), and the answer;
+the approved document uses the answered date, the new run's `verdict.json`
+validates as agreed, and the source run's records are untouched. The
+changed-document path is covered by the offline tests, not by this live pair.
+
 ## Structured verdicts
 
 Plan section 11 is implemented in the working tree (Unreleased). Every reviewer
