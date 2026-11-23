@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Correct the `--max-prompt-bytes` help text, which still described the
+  524,288-byte default as an interim value pending an owner decision; the
+  default was ratified by the owner on 2026-11-23 (see the 0.5.0 entry).
+
 ## 0.5.1 (2026-11-23)
 
 ### Added
