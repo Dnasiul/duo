@@ -13,6 +13,9 @@
 
 ### Fixed
 
+- Native fixture probes now use production preflight's restricted environment,
+  including the temporary Codex home, and match Claude managed-configuration
+  check ordering. Document permitted authentication and existing fixture provenance.
 - Credential checking avoids repeated suffix scans for OpenAI- and JWT-shaped
   near-matches and repeated document searches for known credentials, including
   distinct values.
