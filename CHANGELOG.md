@@ -52,6 +52,18 @@
   `constraints.txt` was regenerated for 3.11–3.14. Python 3.10 reached end of
   life in October 2026; package metadata now refuses installation on it.
 
+### Fixed
+
+- Bound Claude stream JSON nesting before parsing: each stream line's
+  container depth is checked iteratively (string- and escape-aware) against a
+  128-level limit and rejected as invalid stream data before `json.loads`
+  runs. Python 3.14's parser no longer raises `RecursionError` for the deeply
+  nested line that rejection previously relied on, so on 3.14 such a line
+  surfaced as a non-terminal event instead of an invalid stream; the explicit
+  bound restores the rejection on every supported Python, with the
+  `RecursionError` catch retained as a backstop. Three tests added (253 pass
+  overall).
+
 ## 0.4.6 (2026-11-23)
 
 ### Changed
