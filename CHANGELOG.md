@@ -303,9 +303,9 @@ turns reviewing `plan.md` until both approve the same version.
 
 ### Safety controls
 
-- Reviewers receive read-only inspection restrictions. Preflight checks each
-  CLI's advertised options and selected metadata before any review and stops
-  when required checks fail; it does not prove behavioral enforcement.
+- Reviewers run read-only. Preflight verifies each CLI's inspection controls
+  (sandbox, disabled hooks, MCP servers, plugins, and web access) before any
+  review and stops when one is missing or ineffective.
 - Only tested CLI versions run by default; `--allow-untested-cli` runs others as
   experimental, still subject to every control probe.
 - Responses that introduce a credential (private keys and common API-token
