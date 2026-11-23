@@ -10,6 +10,7 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 
 | Area | Where |
 | --- | --- |
+| HTML agreement reports (Unreleased): offline rendering of stored runs, standalone CLI, best-effort automatic output, escaped text and collapsible diffs | `src/duo/report.py`, `src/duo/cli.py`, `tests/test_report.py`; "HTML agreement reports" below |
 | Real end-to-end runs: native Codex + native Claude, and both reviewers via Copilot (macOS) | README compatibility table |
 | CI: Ubuntu and macOS, Python 3.11–3.14, wheel and sdist installed with `constraints.txt`, strict runner (no skips), newest-dependency job, `pip-audit` | `.github/workflows/ci.yml` |
 | Python 3.10 retired in 0.5.0 (owner decision, 2026-11-23; plan §7.3): supported range is Python 3.11–3.14 in package metadata, CI, and regenerated `constraints.txt` | `pyproject.toml`, `.github/workflows/ci.yml`, `constraints.txt` |
@@ -71,6 +72,43 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 7. **F4: native Claude tool audit** (plan §2): implemented in the working tree;
    see the stream evidence below. Document snapshots archive the reviewed
    document only; emitted tool logs do not guarantee complete file/page archives.
+
+## HTML agreement reports (Unreleased, 2026-11-23)
+
+Implemented `duo --render-report RUN_DIR [--report-output PATH]` and best-effort
+automatic `report.html` for terminal results and CLI error/interruption paths
+with a run manifest, even before the first turn completes. The report reads
+structured audit records only, including the 0.5.0 layout; it does not read
+original document/context sources or raw logs.
+It includes reviewer configuration and CLI versions (untested marked
+experimental), task/criteria, context metadata, counts, outcomes, full review
+reasons, snapshot/hash-derived collapsible diffs, and shared approval hashes.
+Missing snapshots are noted; a running state without a result is interrupted.
+Without saved state, the report shows interrupted, zero completed turns, attempts
+as "Not recorded", task/criteria from the manifest, the initial document from
+`plan-000.md` (or an empty document with a note if unavailable), and the recorded
+error message.
+
+The single HTML file is deterministic and escapes all record-derived text.
+It has embedded CSS, no JavaScript, links, or external assets. Reports remain
+sensitive audit material. Automatic failures warn without changing review
+outcomes or existing artifacts, including on a second signal during report
+writing; setup failures before a run manifest exists may have no report.
+Review semantics and the package version remain unchanged.
+
+Offline coverage in `tests/test_report.py` uses synthetic records and the
+existing workflow harness: hostile markup, deterministic output, legacy CLI
+rendering, all terminal outcomes, interruption, report-write failures, sparse or
+missing snapshots, exact newline hashing, context metadata, and symlink refusal.
+
+Validation on Linux: `PYTHONPATH=src /home/hatch/.venvs/duo/bin/python
+scripts/run_tests.py`, with `TMPDIR` under this checkout's `build/tmp`, passed
+**274 tests, no skips** (253 existing plus 21 report tests). Standalone rendering
+also succeeded for the supplied `run-1q3qeibv` and `run-si8ey3j6` records: each
+showed agreement in three turns, available revision diffs, and byte-identical
+output on rerender. Outputs were written under this checkout's ignored `build/`
+directory; the original audit directories were unchanged. These are offline
+rendering checks, not new reviewer/model runs.
 
 ## Captured context and prompt budget (Unreleased, 2026-11-23)
 

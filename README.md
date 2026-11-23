@@ -510,6 +510,7 @@ Each run has a private directory containing:
   Copilot attempts also contain an isolated `copilot-home/`, cache, and CLI logs.
 - `state.json`: the last audited review state.
 - `result.json` or `error.json`: final outcome.
+- `report.html`: an offline agreement report, generated best-effort when the run finishes.
 
 A proposal snapshot may exist even when publishing it to `plan.md` failed.
 Audit files contain task and repository-derived content. They are local records,
@@ -529,6 +530,45 @@ archive: tool results can be excerpts or summaries, and do not guarantee complet
 file/page contents or every internally accessed resource. See
 [STATUS](docs/STATUS.md#native-claude-audit-stream-unreleased-2026-11-23) and
 [SECURITY](docs/SECURITY.md) for evidence and limitations.
+
+### HTML agreement reports
+
+Open a run's `report.html` in a browser to see its outcome, reviewer models,
+backends, requested efforts and CLI versions, task and criteria, and every
+completed review's full explanation. Revisions have collapsible unified diffs;
+approvals and blocked turns explicitly leave the document unchanged. Agreed
+runs show the final document's SHA-256 and the shared hash bound by both
+approvals. Context captures are listed by label, byte size, and hash only.
+
+Render or regenerate a report from a stored run, including Duo 0.5.0 records:
+
+```sh
+duo --render-report ~/.local/state/duo/runs/run-XXXXXXXX
+duo --render-report ~/.local/state/duo/runs/run-XXXXXXXX --report-output /path/to/agreement.html
+```
+
+These commands require no task, models, reviewer CLIs, or provider access. They
+print the output path and exit 0 on success, 1 on an invalid run or write failure
+(2 for invalid arguments). The destination directory must already exist.
+
+The report uses only structured records and document snapshots in the run
+directory; it never reads the original document or context source files. It is
+a single deterministic HTML file with embedded CSS, escaped text, no JavaScript,
+links, or external assets. Opening it makes no network requests. It still
+contains task and repository-derived material; treat it as sensitive like the
+other audit files. Reports are written atomically with private permissions.
+
+Reports are emitted automatically for agreed, blocked, limit, and error results,
+and on the CLI's error/interruption path when a run manifest exists. Generation
+failure only warns on stderr and preserves the review exit code and artifacts.
+An interrupted record without `result.json` uses the last `state.json`; if that
+state still says `running`, the report labels it `interrupted`. Before any state
+is saved, the report shows `interrupted`, zero completed turns, attempts as
+`Not recorded`, task and criteria from the manifest, the initial document from
+`plan-000.md` (or an empty document with a note if unavailable), and any recorded
+error message. Missing snapshots leave an unavailable note. Attempts that never
+completed a review are not conversation turns. Setup failures before a run
+manifest exists may have no report.
 
 ### Captured context files
 
