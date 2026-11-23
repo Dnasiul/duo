@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from test_duo import Fixture, response
 from duo.adapters import CLIAdapter, claude_result
+from duo.adapters import CLAUDE_MAX_JSON_DEPTH
 from duo.models import AgentError, AgentTimeout, Terminated
 from duo.storage import PlanFile
 from duo.workflow import Reviewer, initial_state
@@ -209,3 +210,38 @@ class ClaudeStreamTests(Fixture):
         self.assertEqual(result['turns'], 0)
         self.assertEqual(result['history'], [])
         self.assertEqual((self.repo / 'plan.md').read_text(), 'Original')
+
+    def test_json_depth_boundary(self):
+        path = self.root / 'boundary.jsonl'
+        for opening, closing in (('[', ']'), ('{"nested":', '}')):
+            for depth in (CLAUDE_MAX_JSON_DEPTH - 1, CLAUDE_MAX_JSON_DEPTH):
+                raw = ('{"type":"assistant","data":' + opening * (depth - 1)
+                       + '0' + closing * (depth - 1) + '}\n' + stream(terminal()))
+                path.write_text(raw)
+                metadata = {}
+                with self.subTest(opening=opening, depth=depth):
+                    self.assertEqual(claude_result(path, metadata, max_output_mb=1), terminal())
+                    self.assertEqual(metadata['completion'], 'success')
+
+    def test_excessive_json_depth_is_rejected_before_parsing(self):
+        path = self.root / 'too-deep.jsonl'
+        for opening, closing in (('[', ']'), ('{"nested":', '}')):
+            raw = ('{"type":"assistant","data":' + opening * CLAUDE_MAX_JSON_DEPTH
+                   + '0' + closing * CLAUDE_MAX_JSON_DEPTH + '}\n')
+            path.write_text(raw)
+            metadata = {}
+            with self.subTest(opening=opening), patch('duo.adapters.parse_json') as parse:
+                with self.assertRaisesRegex(AgentError, 'invalid stream'):
+                    claude_result(path, metadata, max_output_mb=1)
+                parse.assert_not_called()
+                self.assertEqual(metadata['completion'], 'invalid')
+
+    def test_json_depth_ignores_brackets_and_escapes_in_strings(self):
+        path = self.root / 'strings.jsonl'
+        for text in ('[{' * CLAUDE_MAX_JSON_DEPTH, ']}' * CLAUDE_MAX_JSON_DEPTH,
+                     'escaped " quote ' + '[' * CLAUDE_MAX_JSON_DEPTH,
+                     '\\"' + '{' * CLAUDE_MAX_JSON_DEPTH + '\\\\'):
+            raw = stream({'type': 'assistant', text: text, 'after': {'value': 0}}, terminal())
+            path.write_text(raw)
+            with self.subTest(text=text):
+                self.assertEqual(claude_result(path, {}, max_output_mb=1), terminal())
