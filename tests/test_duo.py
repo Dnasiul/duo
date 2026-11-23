@@ -5,6 +5,7 @@ from dataclasses import replace
 import importlib.util
 import io
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -540,15 +541,28 @@ print(json.dumps([result, time.perf_counter() - started]))
                 self.assertEqual(len(text.encode()), size)
                 self.assertLessEqual(len(known.encode()), size)
                 with self.subTest(case=case, size=size):
+                    # Extra repetitions reduce additive scheduling noise.
                     measurements.append(min(self.measure_credential_scan(text, known)
-                                            for _ in range(3)))
-            # Compare an eightfold size increase: quadratic work grows 64x.
-            # Allow scheduling/allocator noise while rejecting that growth.
-            self.assertLess(measurements[-1], measurements[-4] * 20 + 0.02,
+                                            for _ in range(5)))
+            # Fit log-log growth across all four largest sizes so no single
+            # small-size timing serves as the baseline. Linear work has slope
+            # 1, quadratic work 2; 1.6 allows moderate cache/allocator effects
+            # while remaining below the observed pre-fix slopes of 1.79–1.91.
+            log_sizes = [math.log2(size) for size in case_sizes[-4:]]
+            log_times = [math.log2(elapsed) for elapsed in measurements[-4:]]
+            mean_size = sum(log_sizes) / len(log_sizes)
+            mean_time = sum(log_times) / len(log_times)
+            slope = (sum((size - mean_size) * (elapsed - mean_time)
+                         for size, elapsed in zip(log_sizes, log_times))
+                     / sum((size - mean_size) ** 2 for size in log_sizes))
+            self.assertLess(slope, 1.6,
+                            (case, slope, list(zip(case_sizes, measurements))))
+            # An additional pooled check dilutes isolated timing spikes. These
+            # pairs are fourfold apart: linear work grows 4x, quadratic 16x.
+            # The fitted slope above is the main growth regression detector.
+            self.assertLess(sum(measurements[-2:]),
+                            sum(measurements[-4:-2]) * 10 + 0.02,
                             (case, list(zip(case_sizes, measurements))))
-            for small, large in zip(measurements[-4:], measurements[-3:]):
-                self.assertLess(large, small * 3.5 + 0.01,
-                                (case, list(zip(case_sizes, measurements))))
 
     def test_whitespace_is_preserved(self):
         text = "  code  \r\nValue\u00a0"
