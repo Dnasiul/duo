@@ -6,7 +6,7 @@ import secrets
 import textwrap
 
 from .models import AgentError, SCHEMA, State
-from .storage import ContextFile
+from .storage import ContextFile, content_hash
 
 INSTRUCTIONS = """Review the plan against the original task, acceptance criteria, and
 repository. Check requirements, feasibility, dependencies, implementation order,
@@ -88,6 +88,22 @@ def instructions(mode: str = "plan", guidance: str = "", output: str = "",
     return text + "\n\n" + textwrap.fill(WEB, 80) if web else text
 
 
+FINDINGS_PROTOCOL = (
+    "Report substantive issues as findings with severity info, low, medium, high, or critical. "
+    "Duo assigns the IDs shown in open_findings. Only you can close your own findings, "
+    "via finding_updates with id, status resolved/dismissed, a nonempty reason, and "
+    "subject_hash equal to the subject SHA-256 shown in subject. Omission never closes "
+    "a finding. You cannot close the other reviewer's findings. Before approving, "
+    "reconcile all your open findings against the current subject. Findings in a revise "
+    "response describe the document you inspected, before your revision. Use a lines "
+    "location with start_line/end_line (1-based, inclusive), a section location with "
+    "section equal to an exact heading line in the inspected subject, or a subject location with "
+    "a nonempty explanation. Titles and descriptions must be nonempty; titles are limited to "
+    "512 UTF-8 bytes. Duo records the path and subject_sha256. Updates may include a new location. Always "
+    "return findings and finding_updates arrays, empty when there is nothing to report or update."
+)
+
+
 def build_prompt(state: State, history_limit: int = 6, feedback: str = "",
                  mode: str = "plan", guidance: str = "", output: str = "",
                  web: bool = False, context: tuple[ContextFile, ...] = (),
@@ -99,6 +115,14 @@ def build_prompt(state: State, history_limit: int = 6, feedback: str = "",
     ][-history_limit:]
     sections = [
         ("instructions", instructions(mode, guidance, output, web)),
+        ("subject", f"Path: {output or mode + '.md'}\nSHA-256: {content_hash(state['plan'])}"
+         f"\nYour reviewer role: {state['next_agent']}"),
+        ("findings_protocol", FINDINGS_PROTOCOL),
+        ("open_findings", "\n".join(
+            f"{f['id']} | {f['severity']} | {f['reported_by']} | {json.dumps(f['title'], ensure_ascii=True)} | "
+            f"{json.dumps(f['location'], ensure_ascii=True)} | "
+            f"first-seen SHA-256: {f['first_seen_subject_hash']}"
+            for f in state.get("findings", []) if f["status"] == "open") or "(none)"),
         ("task", state["task"]),
         ("acceptance_criteria", state["criteria"] or "(No additional criteria.)"),
         ("current_plan", state["plan"] if state["plan"].strip() else

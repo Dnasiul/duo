@@ -112,6 +112,13 @@ class ModeTests(Fixture):
         self.assertEqual(list((self.root / 'elsewhere').iterdir()), [])
         self.assertEqual(list((self.repo / '.git').iterdir()), [])
 
+    def test_output_backslash_is_rejected_at_startup(self):
+        code, summary, prompts = self.run_main('--output', 'docs\\proposal.md')
+        self.assertEqual(code, 1)
+        self.assertIn('backslash', summary['message'])
+        self.assertEqual(prompts, [])
+        self.assertFalse((self.repo / 'docs\\proposal.md').exists())
+
     def test_inputs_must_not_be_the_document_under_review(self):
         (self.repo / 'report.md').write_text('# Report\n')
         for option in ('--task-file', '--criteria-file', '--instructions-file'):

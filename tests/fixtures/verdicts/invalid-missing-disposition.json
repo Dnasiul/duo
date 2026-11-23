@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "run_id": "run-example",
+  "started_at": "2026-11-23T00:00:00+00:00",
+  "mode": "plan",
+  "completion": "agreed",
+  "complete": true,
+  "subject": {
+    "kind": "document",
+    "path": "plan.md",
+    "sha256": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81",
+    "bytes": 4
+  },
+  "fixed_inputs": {
+    "task_sha256": "fcfd2c90c99943783f109b5df9e3af2697dc12a6102030512f15e79b6db4383e",
+    "criteria_sha256": "93b9a9f3e634b7aa80af3d0331e0b7e50c505e6a27125979321781a3d754295f",
+    "context": []
+  },
+  "agreement": {
+    "rule": "both-reviewers-approve-same-subject",
+    "roster": [
+      {
+        "role": "codex",
+        "backend": "native",
+        "model": "example",
+        "cli_version": null
+      },
+      {
+        "role": "claude",
+        "backend": "native",
+        "model": "example",
+        "cli_version": null
+      }
+    ]
+  },
+  "decisions": [
+    {
+      "role": "codex",
+      "decision": "approve",
+      "subject_sha256": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81",
+      "turn": 1,
+      "timestamp": "2026-11-23T00:00:00+00:00"
+    },
+    {
+      "role": "claude",
+      "decision": "approve",
+      "subject_sha256": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81",
+      "turn": 2,
+      "timestamp": "2026-11-23T00:00:00+00:00"
+    }
+  ],
+  "approved_subject_sha256": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "title": "Recovery missing",
+      "description": "Specify rollback.",
+      "location": {
+        "kind": "lines",
+        "path": "plan.md",
+        "start_line": 1,
+        "end_line": 1,
+        "subject_sha256": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81"
+      },
+      "status": "resolved",
+      "reported_by": "codex",
+      "reported_turn": 1,
+      "reported_attempt": 1,
+      "first_seen_subject_hash": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81",
+      "last_seen_subject_hash": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81",
+      "location_history": [],
+      "disposition": null
+    }
+  ],
+  "summary": {
+    "turns": 2,
+    "attempts": 2,
+    "open_findings": 1,
+    "open_by_severity": {
+      "info": 0,
+      "low": 0,
+      "medium": 0,
+      "high": 1,
+      "critical": 0
+    }
+  },
+  "audit": {
+    "manifest": "manifest.json",
+    "result": "result.json",
+    "state": "state.json",
+    "events": "events.jsonl",
+    "report": "report.html",
+    "verdict": "verdict.json"
+  }
+}

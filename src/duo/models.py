@@ -12,22 +12,63 @@ AGENTS = {"codex", "claude"}
 CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_CLAUDE_MAX_TURNS = 20
-# Task, criteria, plan, and reason size limit (UTF-8 bytes), checked before any CLI call.
+# Input and response text-field size limit (UTF-8 bytes).
 MAX_TEXT_BYTES = 1024 * 1024
 MAX_CONTEXT_BYTES = 64 * 1024
 # Interim pending the owner decision: any finite ceiling narrows 0.4.6 compatibility.
 DEFAULT_MAX_PROMPT_BYTES = 512 * 1024
 # Kinds of document the reviewers can produce; each has its own checklist (prompts.py).
 DOCUMENT_MODES = ("plan", "report", "description", "review")
+SEVERITIES = ("info", "low", "medium", "high", "critical")
+DECISIONS = ("approve", "revise", "blocked")
+FINDING_STATUSES = ("open", "resolved", "dismissed")
+MAX_FINDINGS_PER_RESPONSE = 50
+MAX_FINDING_TITLE_BYTES = 512
+
+
+def severity_rank(severity: str) -> int:
+    return SEVERITIES.index(severity)
+
+
+def object_schema(properties: dict) -> dict:
+    return {"type": "object", "properties": properties,
+            "required": list(properties),
+            "additionalProperties": False}
+
+
+LOCATION_SCHEMA = {"anyOf": [
+    object_schema({"kind": {"const": "lines", "type": "string"},
+                   "start_line": {"type": "integer", "minimum": 1},
+                   "end_line": {"type": "integer", "minimum": 1}}),
+    object_schema({"kind": {"const": "subject", "type": "string"},
+                   "explanation": {"type": "string"}}),
+    object_schema({"kind": {"const": "section", "type": "string"},
+                   "section": {"type": "string"}}),
+]}
+FINDING_REPORT_SCHEMA = object_schema({
+    "severity": {"type": "string", "enum": list(SEVERITIES)},
+    "title": {"type": "string"}, "description": {"type": "string"},
+    "location": LOCATION_SCHEMA,
+})
+# Separate exact variants keep every property required for strict CLI schemas.
+_UPDATE_FIELDS = {"id": {"type": "string"},
+                  "status": {"type": "string", "enum": ["resolved", "dismissed"]},
+                  "reason": {"type": "string"}, "subject_hash": {"type": "string"}}
+FINDING_UPDATE_SCHEMA = {"anyOf": [object_schema(_UPDATE_FIELDS),
+    object_schema({**_UPDATE_FIELDS, "location": LOCATION_SCHEMA})]}
 COPILOT_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 SCHEMA = {
     "type": "object",
     "properties": {
-        "decision": {"type": "string", "enum": ["approve", "revise", "blocked"]},
+        "decision": {"type": "string", "enum": list(DECISIONS)},
         "plan": {"type": "string"},
         "reason": {"type": "string"},
+        "findings": {"type": "array", "items": FINDING_REPORT_SCHEMA,
+                     "maxItems": MAX_FINDINGS_PER_RESPONSE},
+        "finding_updates": {"type": "array", "items": FINDING_UPDATE_SCHEMA,
+                            "maxItems": MAX_FINDINGS_PER_RESPONSE},
     },
-    "required": ["decision", "plan", "reason"],
+    "required": ["decision", "plan", "reason", "findings", "finding_updates"],
     "additionalProperties": False,
 }
 
@@ -72,7 +113,24 @@ class Turn(TypedDict):
     model: str
 
 
+class Finding(TypedDict):
+    id: str
+    severity: str
+    title: str
+    description: str
+    location: dict
+    status: str
+    reported_by: str
+    reported_turn: int
+    reported_attempt: int
+    first_seen_subject_hash: str
+    last_seen_subject_hash: str
+    location_history: list[dict]
+    disposition: dict | None
+
+
 class State(TypedDict):
+    findings: list[Finding]
     task: str
     criteria: str
     plan: str
@@ -163,14 +221,67 @@ def normalize(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def validate_payload(value: object) -> dict[str, str]:
-    # This is the complete validation of the small, fixed SCHEMA above.
+def validate_location(value: object, *, recorded: bool = False) -> dict:
+    if not isinstance(value, dict):
+        raise AgentError("Finding location must be an object")
+    fields = ({"kind", "start_line", "end_line"} if value.get("kind") == "lines"
+              else {"kind", "section"} if value.get("kind") == "section"
+              else {"kind", "explanation"})
+    if recorded:
+        fields.update(("path", "subject_sha256"))
+    if set(value) != fields or value.get("kind") not in ("lines", "subject", "section"):
+        raise AgentError("Malformed finding location")
+    if recorded and not isinstance(value["path"], str):
+        raise AgentError("Finding location path must be a string")
+    if recorded and (not isinstance(value["subject_sha256"], str)
+                     or not re.fullmatch(r"[0-9a-f]{64}", value["subject_sha256"])):
+        raise AgentError("Finding location subject_sha256 must be a SHA-256 hex digest")
+    if value["kind"] == "lines":
+        if (any(type(value[k]) is not int or value[k] < 1 for k in ("start_line", "end_line"))
+                or value["end_line"] < value["start_line"]):
+            raise AgentError("Finding location requires positive line integers and end >= start")
+    else:
+        field = "section" if value["kind"] == "section" else "explanation"
+        _finding_text(value[field], field)
+    return value
+
+
+def _finding_text(value: object, field: str) -> None:
+    if not isinstance(value, str):
+        raise AgentError(f"Finding {field} must be a string")
+    limit = MAX_FINDING_TITLE_BYTES if field == "title" else MAX_TEXT_BYTES
+    if len(value.encode("utf-8")) > limit:
+        raise AgentError(f"Finding {field} exceeds the {limit} byte limit")
+
+
+def validate_payload(value: object) -> dict:
     if not isinstance(value, dict) or set(value) != set(SCHEMA["required"]):
-        raise AgentError("Response must contain only decision, plan, and reason")
-    if any(not isinstance(item, str) for item in value.values()):
-        raise AgentError("Response fields must all be strings")
+        raise AgentError("Response must contain only decision, plan, reason, findings, and finding_updates")
+    if any(not isinstance(value[k], str) for k in ("decision", "plan", "reason")):
+        raise AgentError("Response decision, plan, and reason fields must all be strings")
     if value["decision"] not in SCHEMA["properties"]["decision"]["enum"]:
         raise AgentError("Decision must be approve, revise, or blocked")
+    for field in ("findings", "finding_updates"):
+        if not isinstance(value[field], list) or len(value[field]) > MAX_FINDINGS_PER_RESPONSE:
+            raise AgentError(f"{field} must be an array of at most {MAX_FINDINGS_PER_RESPONSE} items")
+        for item in value[field]:
+            required = ({"severity", "title", "description", "location"} if field == "findings"
+                        else {"id", "status", "reason", "subject_hash"})
+            if not isinstance(item, dict) or (set(item) != required and not (
+                    field == "finding_updates" and set(item) == required | {"location"})):
+                raise AgentError(f"Malformed {field} object")
+            if field == "findings":
+                if item["severity"] not in SEVERITIES:
+                    raise AgentError("Unknown finding severity")
+                for key in ("title", "description"):
+                    _finding_text(item[key], key)
+            else:
+                if item["status"] not in ("resolved", "dismissed"):
+                    raise AgentError("Finding update status must be resolved or dismissed")
+                for key in ("id", "reason", "subject_hash"):
+                    _finding_text(item[key], key)
+            if "location" in item:
+                validate_location(item["location"])
     return value
 
 
@@ -334,7 +445,7 @@ def new_secret(text: str, known: str) -> str | None:
     return None
 
 
-def validate_review(value: object, plan: str) -> dict[str, str]:
+def validate_review(value: object, plan: str) -> dict:
     result = dict(validate_payload(value))
     if not result["reason"].strip():
         raise AgentError("Response must explain its decision")
@@ -349,9 +460,22 @@ def validate_review(value: object, plan: str) -> dict[str, str]:
     known = normalize(plan)
     kind = (new_secret(normalize(result["plan"]), known) or
             new_secret(normalize(result["reason"]), known))
+    for item in result["findings"] + result["finding_updates"]:
+        for field in ("title", "description"):
+            if field in item and not item[field].strip():
+                raise AgentError(f"Finding {field} must be nonempty")
+        for field in ("title", "description", "reason", "id", "subject_hash"):
+            if field in item:
+                kind = kind or new_secret(normalize(item[field]), known)
+        location = item.get("location", {})
+        for field in ("explanation", "section"):
+            if field in location:
+                if not location[field].strip():
+                    raise AgentError(f"Finding {field} must be nonempty")
+                kind = kind or new_secret(normalize(location[field]), known)
     if kind:
         raise AgentError(f"Response appears to contain a credential ({kind}); "
-                         "remove it and never copy secrets into the plan or reason")
+                         "remove it and never copy secrets into response fields")
     if result["decision"] == "revise":
         updated = normalize(result["plan"])
         if not updated.strip():

@@ -16,6 +16,7 @@ from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLA
 from .prompts import plan_diff
 from .report import write_report
 from .storage import PlanFile, RunStore, capture_context, read_input, run_lock, timestamp
+from .verdicts import write_verdict
 from .workflow import Reviewer, build_graph, initial_state
 
 EXIT_CODES = {"agreed": 0, "error": 1, "blocked": 3, "limit_reached": 4}
@@ -145,6 +146,8 @@ def output_path(output: Path | None, mode: str, repo: Path) -> Path:
     """The document path: <mode>.md, or --output, which must stay inside the repository."""
     if output is None:
         return repo / f"{mode}.md"
+    if "\\" in str(output):
+        raise RunError("--output must not contain a backslash; use forward slashes for repository-relative paths")
     if output.is_absolute() or not output.name:
         raise RunError("--output must be a file path relative to --repo")
     path = repo / output
@@ -299,6 +302,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             result = graph.invoke(state, config={"recursion_limit": config.max_turns + 5})
             plan.check()
             store.json("result.json", {**result, "untested_cli": adapter.untested})
+            write_verdict(store.path)
         emit({**outcome(result, args.mode), "untested_cli": adapter.untested,
               "plan_path": str(plan.path), "run_dir": str(store.path)}, args.json)
         return EXIT_CODES[result["status"]]
@@ -320,5 +324,9 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             store.json("error.json", summary)
         except OSError:
             pass
+        try:
+            write_verdict(store.path)
+        except BaseException:
+            pass  # Best effort, like report writing; preserve the original failure.
     emit(summary, args.json)
     return code

@@ -29,7 +29,8 @@ class AcceptanceTests(Fixture):
         for decision in SCHEMA['properties']['decision']['enum']:
             self.assertEqual(validate_payload(response(decision))['decision'], decision)
         for key in valid:
-            for value in (None, 1, False, [], {}):
+            for value in ((None, 1, False, "", {}) if isinstance(valid[key], list)
+                          else (None, 1, False, [], {})):
                 with self.subTest(key=key, value=value), self.assertRaises(AgentError):
                     validate_payload({**valid, key: value})
             with self.assertRaises(AgentError):
@@ -209,7 +210,7 @@ path = pathlib.Path(sys.argv[sys.argv.index('-o')+1])
 assert path.is_absolute()
 assert path.parent != pathlib.Path.cwd()
 if sys.stdin.read() == 'first':
-    path.write_text(json.dumps({'decision':'approve','plan':'','reason':'Ready'}))
+    path.write_text(json.dumps({'decision':'approve','plan':'','reason':'Ready', 'findings': [], 'finding_updates': []}))
 ''')
         adapter = CLIAdapter(replace(self.config, codex_bin=binary, claude_bin=binary), self.store)
         self.assertEqual(adapter('codex', 'first', 5)['decision'], 'approve')
@@ -221,7 +222,7 @@ if sys.stdin.read() == 'first':
 
     def test_nonzero_exit_rejects_valid_response(self):
         binary = self.executable('nonzero', '''import json, pathlib, sys
-pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(json.dumps({'decision':'approve','plan':'','reason':'Ready'}))
+pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(json.dumps({'decision':'approve','plan':'','reason':'Ready', 'findings': [], 'finding_updates': []}))
 sys.exit(1)
 ''')
         adapter = CLIAdapter(replace(self.config, codex_bin=binary, claude_bin=binary), self.store)
@@ -447,7 +448,7 @@ sys.stdin.read()
 runtime = pathlib.Path(os.environ['COPILOT_CACHE_HOME']) / 'pkg' / 'darwin-arm64'
 runtime.mkdir(parents=True)
 (runtime / 'runtime.bin').write_bytes(b"r" * (3 * 1024 * 1024))
-reply = {'decision': 'approve', 'plan': '', 'reason': 'Ready'}
+reply = {'decision': 'approve', 'plan': '', 'reason': 'Ready', 'findings': [], 'finding_updates': []}
 print(json.dumps({'type': 'assistant.message', 'data': {'content': json.dumps(reply),
                   'phase': 'final_answer', 'toolRequests': []}}))
 ''')

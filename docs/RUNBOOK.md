@@ -147,3 +147,35 @@ its GitHub release, check the wheel with `sha256sum --ignore-missing -c SHA256SU
 Plans and audit runs are plain files and stay compatible across versions; no
 migration is needed. If a reviewer CLI upgrade caused the problem, reinstall the
 CLI version listed as tested for that release.
+
+## Consuming verdicts in CI
+
+Use the `verdict.json` in the run directory returned by Duo's `--json` summary.
+Generate it in the trusted CI execution path, then run the standalone consumer:
+
+```sh
+python examples/check_verdict.py --verdict "$RUN_DIR/verdict.json" \
+  --document plan.md --task-file task.txt --criteria-file criteria.txt \
+  --threshold high
+```
+
+The gate exits 0 only for a complete `agreed` verdict under a supported 1.x schema,
+with the expected agreement rule, approvals bound to the document, matching current
+document/task/criteria hashes, and no open finding at or above the selected
+severity. Omit task/criteria options only when those bindings are not part of your
+policy. Severity order is `info < low < medium < high < critical`; the default
+threshold is `high`. `--rule` defaults to `both-reviewers-approve-same-subject`.
+
+Exit **2** means the gate failed, distinct from Duo's run exit codes 0/1/3/4.
+Failed checks go to stderr. Missing, malformed, incompatible, incomplete,
+interrupted, blocked, error, limit, or stale artifacts fail closed. Inspect the
+run's `report.html`, `events.jsonl`, and finding dispositions before retrying.
+An empty findings array is not evidence of agreement. A failed or interrupted run
+gets a best-effort verdict when its manifest is available; a missing artifact
+must still fail the gate.
+
+Hashes use UTF-8 text with CRLF and CR normalized to LF. They bind content, but
+are not signatures: someone who can rewrite both the artifact and its inputs can
+forge matching hashes. Protect the CI producer and artifacts accordingly. Verdict
+schema versions are independent of package releases; field meanings remain fixed
+within a major version and additive optional fields use minor versions.

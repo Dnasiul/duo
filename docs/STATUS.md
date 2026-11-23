@@ -10,6 +10,7 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 
 | Area | Where |
 | --- | --- |
+| Structured verdicts and findings (Unreleased, plan §11): versioned artifact, persistent role-owned findings, reference CI gate | `src/duo/verdicts.py`, `src/duo/schemas/`, `examples/check_verdict.py`, `tests/test_verdicts.py`; "Structured verdicts" below |
 | HTML agreement reports (Unreleased): offline rendering of stored runs, standalone CLI, best-effort automatic output, escaped text and collapsible diffs | `src/duo/report.py`, `src/duo/cli.py`, `tests/test_report.py`; "HTML agreement reports" below |
 | HTML report standalone-CLI test canonicalizes its expected output path (`8a1f705`, test-only): the CLI prints the resolved path (`write_report` resolves the run directory), but the test compared it with the unresolved temporary-directory path, which fails on macOS where the temp directory sits behind the `/var` → `/private/var` symlink; reproduced on Linux with `TMPDIR` pointed through a symlinked directory (failed before, passes after), full strict suite 275 tests green | `tests/test_report.py` |
 | Real end-to-end runs: native Codex + native Claude, and both reviewers via Copilot (macOS) | README compatibility table |
@@ -874,3 +875,25 @@ Each costs a few model calls. Keep runs bounded and in scratch repositories.
   directory; this discovery fix does not imply historical CI ran zero tests.
 - Live model IDs used so far: native `gpt-6-astra`, `claude-opus-5-5`,
   `claude-sonnet-5-5`; Copilot `gpt-5.4`, `claude-sonnet-5.5` (dotted names).
+
+## Structured verdicts
+
+Plan section 11 is implemented in the working tree (Unreleased). Every reviewer
+response now includes findings and finding_updates arrays. Findings retain stable
+run-scoped IDs, subject hashes, moved locations, and role-owned dispositions;
+approval requires explicit reconciliation of that role's open findings. Atomic
+`verdict.json` publication follows the saved result, with best-effort error and
+interruption artifacts. Schema 1.0, valid/invalid fixtures, and a stdlib CI gate
+cover agreement bindings, severity thresholds, stale subjects, and fail-closed
+consumption. Existing CLI summaries and exit codes remain unchanged. This work
+does not change the package version or implement §7.1 or build mode.
+
+Open live-verification item (plan §8 style): acceptance of the new response schema
+by native Codex, native Claude, and Copilot CLIs is unverified against real CLIs
+until live runs are recorded. Existing live results and recorded captures predate
+the required findings/finding_updates contract; modernized offline replay tests
+do not establish end-to-end live acceptance. Record CLI versions, models, run IDs,
+and outcomes for each adapter when completing this item.
+
+Recorded locations bind to their own subject SHA-256, including historical locations;
+document sections are supported. Diff old/new-side locations remain section 10 scope.

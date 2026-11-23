@@ -21,12 +21,13 @@ from duo.models import (MAX_TEXT_BYTES, SECRET_PATTERNS, AgentError, Config, Run
                         new_secret, validate_review)
 from duo.policy import CODEX_DISABLED
 from duo.prompts import build_prompt, revision_diff
-from duo.storage import PlanFile, RunStore, atomic_write, read_input, run_lock
+from duo.storage import content_hash, PlanFile, RunStore, atomic_write, read_input, run_lock
 from duo.workflow import Reviewer, build_graph, initial_state
 
 
-def response(decision, plan="", reason="Review complete"):
-    return {"decision": decision, "plan": plan, "reason": reason}
+def response(decision, plan="", reason="Review complete", *, findings=None, finding_updates=None):
+    return {"decision": decision, "plan": plan, "reason": reason,
+            "findings": findings or [], "finding_updates": finding_updates or []}
 
 
 class Fixture(unittest.TestCase):
@@ -704,7 +705,7 @@ assert sys.argv[sys.argv.index('--sandbox') + 1] == 'read-only'
 schema = pathlib.Path(sys.argv[sys.argv.index('--output-schema') + 1])
 assert json.loads(schema.read_text())['additionalProperties'] is False
 output = pathlib.Path(sys.argv[sys.argv.index('-o') + 1])
-output.write_text(json.dumps({'decision':'approve','plan':'','reason':'Ready'}))
+output.write_text(json.dumps({'decision':'approve','plan':'','reason':'Ready', 'findings': [], 'finding_updates': []}))
 print('Activity that is not JSON')
 ''')
         adapter = CLIAdapter(replace(self.config, codex_bin=binary), self.store)
@@ -719,7 +720,7 @@ assert '--effort' not in sys.argv
 assert sys.argv[sys.argv.index('--tools') + 1] == 'Read,Glob,Grep'
 assert json.loads(sys.argv[sys.argv.index('--json-schema') + 1])['type'] == 'object'
 sys.stdin.read()
-print(json.dumps({'type':'result','is_error':False,'subtype':'success','structured_output':{'decision':'approve','plan':'','reason':'Ready'}}))
+print(json.dumps({'type':'result','is_error':False,'subtype':'success','structured_output':{'decision':'approve','plan':'','reason':'Ready', 'findings': [], 'finding_updates': []}}))
 ''')
         adapter = CLIAdapter(replace(self.config, claude_bin=binary), self.store)
         self.assertEqual(adapter("claude", "Review", 5)["reason"], "Ready")
@@ -826,9 +827,9 @@ print(json.dumps({'type':'result','is_error':False,'subtype':'success','structur
         binary = self.executable("agent", '''import json, pathlib, sys
 prompt = sys.stdin.read()
 if '(No plan exists yet.' in prompt:
-    result = {'decision':'revise','plan':'# Draft\\n','reason':'Initial draft'}
+    result = {'decision':'revise','plan':'# Draft\\n','reason':'Initial draft', 'findings': [], 'finding_updates': []}
 else:
-    result = {'decision':'approve','plan':'','reason':'Ready'}
+    result = {'decision':'approve','plan':'','reason':'Ready', 'findings': [], 'finding_updates': []}
 if '-o' in sys.argv:
     pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(json.dumps(result))
 else:
@@ -889,7 +890,13 @@ class CLITests(Fixture):
             with self.subTest(status=status):
                 fake_graph = Mock()
                 result = initial_state("Task", "", "", self.config)
-                result.update(status=status, history=[{"reason": "Explanation"}], error="" if status != "error" else "Failed")
+                result.update(status=status, plan="Draft", turns=2, attempts=2,
+                              approved=["codex", "claude"] if status == "agreed" else [],
+                              history=[{"agent": role, "decision": "approve" if status == "agreed" else "blocked",
+                                        "reason": "Explanation", "plan_hash": content_hash("Draft"),
+                                        "timestamp": "2026-11-23T00:00:00+00:00"}
+                                       for role in ("codex", "claude")],
+                              error="" if status != "error" else "Failed")
                 fake_graph.invoke.return_value = result
                 out = io.StringIO()
                 with patch("duo.cli.build_graph", return_value=fake_graph), \
@@ -954,7 +961,7 @@ if '--version' in sys.argv:
     print('test CLI 1.0')
     sys.exit(0)
 sys.stdin.read()
-result = {'decision': 'approve', 'plan': '', 'reason': 'Ready'}
+result = {'decision': 'approve', 'plan': '', 'reason': 'Ready', 'findings': [], 'finding_updates': []}
 if 'exec' in sys.argv:
     assert sys.argv[sys.argv.index('-c') + 1] == 'model_reasoning_effort="xhigh"'
     pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
