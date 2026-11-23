@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from dataclasses import dataclass
 import errno
 import hashlib
 import json
@@ -10,7 +11,7 @@ from pathlib import Path
 import stat
 import tempfile
 
-from .models import MAX_TEXT_BYTES, RunError, normalize
+from .models import MAX_CONTEXT_BYTES, MAX_TEXT_BYTES, RunError, new_secret, normalize
 
 
 def timestamp() -> str:
@@ -48,6 +49,39 @@ def read_input(path: Path, label: str | None = None, *, follow_symlinks: bool = 
         return data
     finally:
         os.close(descriptor)
+
+
+@dataclass(frozen=True)
+class ContextFile:
+    label: str
+    source: str
+    data: bytes
+
+    @property
+    def text(self) -> str:
+        return self.data.decode("utf-8")
+
+
+def capture_context(paths: list[Path]) -> tuple[ContextFile, ...]:
+    """Capture and scan all sources before any contents can be saved or sent."""
+    captured = []
+    total = 0
+    for path in paths:
+        source = path.expanduser().absolute()
+        data = read_input(source, f"Context file {path}")
+        total += len(data)
+        if total > MAX_CONTEXT_BYTES:
+            raise RunError("Aggregate context exceeds the 64 KiB limit (--context-file)")
+        try:
+            text = data.decode("utf-8")
+        except UnicodeError as exc:
+            raise RunError(f"Context file {path} must be valid UTF-8") from exc
+        # No known-document exception, even for credentials in the current plan.
+        kind = new_secret(normalize(text), "")
+        if kind:
+            raise RunError(f"Context file {path}: recognized credential ({kind})")
+        captured.append(ContextFile(path.name, str(source), data))
+    return tuple(captured)
 
 
 def atomic_write(path: Path, data: bytes, mode: int = 0o600) -> None:
@@ -166,6 +200,16 @@ class RunStore:
 
     def snapshot(self, turn: int, text: str) -> None:
         atomic_write(self.path / f"plan-{turn:03d}.md", text.encode("utf-8"))
+
+    def context(self, captured: tuple[ContextFile, ...]) -> None:
+        entries = []
+        for order, item in enumerate(captured, 1):
+            artifact = f"context-{order:03d}.bin"
+            atomic_write(self.path / artifact, item.data)
+            entries.append({"order": order, "label": item.label, "source": item.source,
+                            "artifact": artifact, "bytes": len(item.data),
+                            "sha256": hashlib.sha256(item.data).hexdigest()})
+        self.json("context.json", entries)
 
     def event(self, value: dict) -> None:
         with (self.path / "events.jsonl").open("a", encoding="utf-8") as f:

@@ -4,6 +4,36 @@
 
 ### Changed
 
+- Add repeatable `--context-file`: one-time capture of regular UTF-8 files,
+  rejecting document aliases and recognized credentials before saving or calls.
+  Enforce a 64 KiB aggregate limit; store exact bytes, labels, source paths,
+  order, and hashes in private context audit artifacts. Both reviewers receive
+  labeled untrusted captures on every turn/retry; separately inspected files
+  remain mutable and are not snapshotted. Detection is best-effort.
+- Add `--max-prompt-bytes` with an **INTERIM 512 KiB (524,288-byte) default,
+  pending the owner's decision**. This finite ceiling is a compatibility
+  narrowing versus 0.4.6, which has no combined limit. Measurements on
+  2026-11-23 across seven recorded runs found a maximum of 150,232 bytes,
+  followed by 109,987 and 93,278; fixed inputs peaked around 79 KB. The interim
+  value accepts all measured cases with at least 3.4x margin, but rejects some
+  inputs 0.4.6 accepts. The owner must ratify or change it.
+  Check fixed inputs for both backends before startup calls and complete
+  prompts before every review call, including diffs, history, context, retry
+  feedback, delimiters, and Copilot's schema wrapper. Record overflow without
+  truncation or retry, retaining the last accepted document and snapshot.
+- Add a bounded saved-diff/test-output code-review example and context/budget
+  regression tests (250 tests pass overall). Bytes are not token counts or
+  guaranteed model capacity. Bounded synthetic native live attempts captured
+  identical context bytes/hashes, but Codex routing failed and Claude timed
+  out before a completed review in isolated CLI homes without logins. The
+  coordinator subsequently ran the shipped example with the installed package
+  and real CLI logins on Linux: `run-qr36s0ac` (2026-11-23) agreed in 3 turns,
+  with both context hashes matching their source files. Native reviewers were
+  Codex `gpt-6-astra` via codex-cli 0.171.0 and Claude `claude-sonnet-5-5` via
+  Claude Code 2.1.330; `--allow-untested-cli` records the out-of-range Codex
+  version as untested evidence, not range support. macOS remains unverified.
+  See `docs/STATUS.md` for versions, bounds, measurements, and outcomes.
+
 - Native Claude now emits `stream-json --verbose` into each attempt's raw audit
   log, retaining tool requests, inputs, emitted results and denials even on
   failure or interruption. Only an unambiguous successful terminal result at

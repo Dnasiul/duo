@@ -17,6 +17,7 @@ from .models import (Agent, AgentError, AgentTimeout, Config, DEFAULT_CLAUDE_MAX
                      SCHEMA, validate_payload)
 from .policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options, claude_tools,
                      codex_options, reviewer_environment, verify_controls, verify_version)
+from .prompts import backend_prefix, check_prompt_budget
 from .storage import RunStore, run_usage
 
 
@@ -442,9 +443,11 @@ class CLIAdapter:
         return None
 
     def __call__(self, agent: Agent, prompt: str, timeout: float) -> dict[str, str]:
+        backend = getattr(self.config, f"{agent}_backend")
+        check_prompt_budget(prompt, self.config.max_prompt_bytes, backend)
+        prompt = backend_prefix(backend) + prompt
         if not self.policy_verified:
             self.preflight()
-        backend = getattr(self.config, f"{agent}_backend")
         if agent == "claude" and backend == "native":
             check_claude_managed_files()
         directory = self.store.attempt_dir()
@@ -453,8 +456,6 @@ class CLIAdapter:
             copilot.check_sources(self.config.repo)
             env = copilot.environment(directory, self.config.pass_env)
             copilot.require_auth(env)
-            prompt = ("Return only one JSON object, without Markdown fences or narration, "
-                      "matching this schema: " + json.dumps(SCHEMA) + "\n\n" + prompt)
         schema = directory / "review.schema.json"
         schema.write_text(json.dumps(SCHEMA), encoding="utf-8")
         argv = self.command(agent, directory)

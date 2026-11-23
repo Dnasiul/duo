@@ -360,6 +360,8 @@ the latest successfully published plan; they never imply agreement.
 | `--claude-max-budget-usd` | Unset | Claude's per-invocation API budget |
 | `--pass-env` | None | Extra environment variable for reviewer CLIs (repeatable) |
 | `--allow-web` | Off | Experimental: reviewers may search and fetch web pages (Copilot: fetch only); see `docs/SECURITY.md` |
+| `--max-prompt-bytes` | 524288 (INTERIM; owner decision pending) | Full assembled UTF-8 prompt ceiling |
+| `--context-file PATH` | none | Repeatable captured context; 64 KiB aggregate |
 | `--max-output-mb` | 32 | MiB per captured CLI output stream (stdout, stderr) |
 | `--max-run-mb` | 256 | MiB per run audit directory, including CLI logs and caches |
 | `--start` | `codex` | First reviewer |
@@ -501,6 +503,7 @@ Each run has a private directory containing:
 - `reviewer-policy.json`: supplied inspection policy and option/metadata checks.
 - `claude-settings.json`: generated settings used for Claude review invocations.
 - `events.jsonl`: attempts, errors, and accepted reviews with plan hashes.
+- `context.json` and `context-*.bin`: ordered source metadata, hashes, and exact captured bytes.
 - `plan-000.md` and later snapshots: the initial plan and validated proposals.
 - `attempt-*/`: schema, command arguments, response, and raw CLI diagnostics.
   Native Claude attempts also contain `claude-stream.json` metadata.
@@ -527,6 +530,42 @@ file/page contents or every internally accessed resource. See
 [STATUS](docs/STATUS.md#native-claude-audit-stream-unreleased-2026-11-23) and
 [SECURITY](docs/SECURITY.md) for evidence and limitations.
 
+### Captured context files
+
+Repeat `--context-file PATH` to supply saved evidence, such as a diff and test
+output. Duo reads each regular UTF-8 file once at startup, rejects aliases or
+hard links to the document under review, and scans for recognized credentials
+before saving context or starting reviewer processes. Detection is best-effort,
+not clearance for sensitive material; do not supply secrets. There is no
+exception for credentials already present in the reviewed document.
+
+The aggregate limit is **64 KiB** across all supplied files (duplicates count).
+That is roughly 16,000 additional input tokens on every call at four bytes per
+token; actual tokenization varies. Both reviewers get the same captured text,
+in order, labeled as untrusted material inside collision-resistant delimiters.
+Edits or deletion of source files after capture do not change later prompts or
+retries. Separately inspected repository files remain mutable and are not
+snapshotted by this feature.
+
+`context.json` records each file's order, label (basename), absolute source path,
+byte length, SHA-256 hash, and artifact name. `context-001.bin` and later files
+preserve the exact supplied bytes, including Unicode, BOMs, and line endings,
+under the private run directory. Labels and context contents are both quoted;
+source paths are audit metadata. Audit write failure stops the run before calls.
+
+For a bounded code-review workflow, save evidence before starting Duo:
+
+```bash
+git diff -- src/ tests/ > change.diff
+python -m unittest discover -s tests > test-output.txt 2>&1
+bash examples/review_saved_change.sh /path/to/repo change.diff test-output.txt
+```
+
+Inspect the test command's exit status and saved output. The example reviews the
+saved change and writes `saved-change-review.md`, with at most four review turns,
+one attempt per turn, 120 seconds per call, and 480 seconds overall. It does not
+run tests on behalf of reviewers or imply the saved test output proves the diff.
+
 ### Restarting
 
 A rerun starts a new review of whatever `plan.md` (or the mode's document) holds,
@@ -545,6 +584,27 @@ accepted plan, and ends the run with an error (exit 1) without retrying. Tasks,
 criteria, custom instructions, the document under review, and each review's
 document and reason are limited to 1 MiB. Input files must be regular files; a
 named pipe or device is rejected rather than read.
+
+`--max-prompt-bytes` has an **INTERIM default of 512 KiB (524,288 bytes), pending
+the owner's decision**. This finite default is a compatibility narrowing versus
+0.4.6, which has no combined ceiling. Measurements on 2026-11-23 reconstructed
+prompts from seven recorded runs: the largest was 150,232 bytes (including a
+72,347-byte document and 70,208-byte revision diff); the next largest were
+109,987 and 93,278 bytes, and fixed inputs peaked around 79 KB. The interim
+ceiling accepts every measured case with at least 3.4x margin, but cannot accept
+every input that 0.4.6 accepts. The owner must ratify or change this default.
+
+Duo counts UTF-8 bytes of the complete assembled prompt, including instructions,
+task, criteria, current document, revision diff, selected history, captured
+context, retry feedback, delimiters, and Duo's backend wrappers (including
+Copilot's JSON schema prefix). Startup checks both reviewers' fixed inputs and
+wrappers before preflight; every review attempt checks the full prompt before
+calling the adapter, with another guard before subprocess launch. Overflow is a
+recorded error naming the largest sections, with no silent truncation or retry
+of that oversized prompt. The last accepted document and snapshot remain
+available; rerun with a larger value, for example `--max-prompt-bytes 1048576`.
+Bytes are not tokens or a guarantee against model context exhaustion: CLI-added
+instructions, tool results, and output reserve also consume model context.
 
 Copilot unpacks its own runtime (about 165 MiB) into each attempt's fresh cache.
 Duo deletes it after preflight and after every attempt and leaves it out of the
