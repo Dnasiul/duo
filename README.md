@@ -348,7 +348,8 @@ separately. JSON includes `message` and `latest_review` (reviewer, decision,
 reason, plan hash, and timestamp), with `latest_review: null` before any accepted
 turn. A turn-limit message therefore preserves the reviewer's explanation.
 
-For a blocked run, add your answer to the criteria and run the command again.
+For a blocked run, supply `--answer TEXT --source-run RUN_DIR` on a new run with
+the same task and criteria (see [Answering a blocked run](#answering-a-blocked-run)).
 The saved plan is reviewed with fresh approvals. Error and limit outcomes retain
 the latest successfully published plan; they never imply agreement.
 
@@ -682,6 +683,38 @@ A rerun starts a new review of whatever `plan.md` (or the mode's document) holds
 which is always the last accepted version: Duo saves a revision only after validating it. Approvals are not
 carried over, so both reviewers must approve again. Audit directories are
 records, not checkpoints; a run cannot be resumed from one.
+
+### Answering a blocked run
+
+A blocked run ends with exit code 3: the final review's `reason` is a question
+requiring your decision. Run the command again with both `--answer TEXT` and
+`--source-run PATH`, choosing the stored run directory explicitly:
+
+```sh
+duo --repo /path/to/repo --task 'Original task' --criteria 'Original criteria' \
+  --codex-model "$CODEX_MODEL" --claude-model "$CLAUDE_MODEL" \
+  --source-run ~/.local/state/duo/runs/run-EXAMPLE --answer 'Use SQLite.'
+```
+
+The source must have a completed blocked result and a matching document snapshot.
+Its repository, document path, mode, task, and criteria must match the new run;
+task and criteria are compared exactly. Duo never chooses the latest run for you
+and never modifies or resumes the source. The same source can be answered again.
+Blocked runs recorded by Duo versions before document modes cannot be answered:
+their manifests lack mode and document identity, so their identity cannot be validated.
+
+The current document may have changed since the blocked run. Both reviewers
+review it afresh, starting with no approvals, history, or findings from the source.
+The answer records your decision on the question; it is not approval of the
+document. Reviewers receive it in a labeled `user_clarification` prompt section,
+covered by `--max-prompt-bytes`. Empty answers, answers over 1 MiB in UTF-8, and
+recognized credentials in the answer or blocked question absent from the task,
+criteria, and current document are refused before reviewer calls.
+
+The new `manifest.json` has an `answer` object recording `source_run` (the resolved
+directory), `source_run_id` (its name), `question`, `blocked_document_sha256`,
+`current_document_sha256`, and `answer`. Different hashes explicitly record a
+changed document. Invalid sources fail before a new run directory is created.
 
 ### Resource limits
 

@@ -12,10 +12,11 @@ import threading
 from .adapters import CLIAdapter
 from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLAUDE_MAX_TURNS,
                      DOCUMENT_MODES, DEFAULT_MAX_PROMPT_BYTES, MAX_TEXT_BYTES, Config, RunError,
-                     State, Terminated, Turn)
+                     State, Terminated, Turn, new_secret, normalize)
 from .prompts import plan_diff
 from .report import write_report
-from .storage import PlanFile, RunStore, capture_context, read_input, run_lock, timestamp
+from .storage import (PlanFile, RunStore, capture_context, load_blocked_source, read_input,
+                      run_lock, timestamp)
 from .verdicts import write_verdict
 from .workflow import Reviewer, build_graph, initial_state
 
@@ -34,6 +35,9 @@ def parser() -> argparse.ArgumentParser:
     criteria = result.add_mutually_exclusive_group()
     criteria.add_argument("--criteria", default="", help="Fixed acceptance criteria")
     criteria.add_argument("--criteria-file", type=Path, help="UTF-8 acceptance criteria file")
+    result.add_argument("--answer", help="User decision on a blocked run's question (requires --source-run)")
+    result.add_argument("--source-run", type=Path,
+                        help="Explicit stored blocked run to answer (requires --answer)")
     result.add_argument("--mode", choices=DOCUMENT_MODES, default="plan",
                         help="Document the reviewers produce (default: plan)")
     result.add_argument("--instructions-file", type=Path,
@@ -226,6 +230,13 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             show_review(number, review, before, after, args.mode)
 
     try:
+        if (args.answer is None) != (args.source_run is None):
+            raise RunError("--answer and --source-run must be supplied together")
+        if args.answer is not None:
+            if not args.answer.strip():
+                raise RunError("--answer must not be empty")
+            if len(args.answer.encode("utf-8")) > MAX_TEXT_BYTES:
+                raise RunError(f"Answer exceeds the {MAX_TEXT_BYTES // 1024} KiB limit")
         if os.name != "posix":
             raise RunError("This version supports macOS and Linux")
         repo = args.repo.expanduser().resolve()
@@ -271,8 +282,28 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
         state_dir = (args.state_dir or default_state).expanduser().resolve()
         if state_dir == repo or repo in state_dir.parents:
             raise RunError("--state-dir must be outside the target repository")
-        with run_lock(repo):
+        clarification = None
+        if args.answer is not None:
             plan = PlanFile(document.parent, document.name)
+            clarification = load_blocked_source(
+                args.source_run, repo=repo, document=document, mode=config.mode,
+                task=task, criteria=criteria, current_plan=plan.initial, answer=args.answer)
+            source = Path(clarification.source_run)
+            if (document.is_relative_to(source) or state_dir.is_relative_to(source)
+                    or (state_dir / "runs").resolve().is_relative_to(source)):
+                raise RunError("Source run must not contain the current document or new audit output")
+            known = normalize(task) + "\n" + normalize(criteria) + "\n" + plan.initial
+            kind = new_secret(normalize(clarification.question), known)
+            if kind:
+                raise RunError(f"Source run blocked question appears to contain a credential ({kind}); remove it")
+            kind = new_secret(normalize(args.answer), known)
+            if kind:
+                raise RunError(f"Answer appears to contain a credential ({kind}); remove it")
+        with run_lock(repo):
+            if clarification is None:
+                plan = PlanFile(document.parent, document.name)
+            else:
+                plan.check()  # Bind the recorded current hash to the document at startup.
             store = RunStore(state_dir)
             holder.append(store)
             adapter = CLIAdapter(config, store)
@@ -280,12 +311,14 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             store.json("manifest.json", {
                 "started_at": timestamp(), "config": {**asdict(config), "repo": str(repo)},
                 "task": task, "criteria": criteria, "document": str(document),
+                **({"answer": asdict(clarification)} if clarification is not None else {}),
             })
             store.snapshot(0, plan.initial)
             store.context(context)
             reviewer = Reviewer(config, adapter, plan, store,
                                 progress=lambda message: print(message, file=sys.stderr, flush=True),
-                                on_review=completed, context=context)
+                                on_review=completed, context=context,
+                                user_clarification=clarification)
             reviewer.check_startup_budget(state)
             graph = build_graph(reviewer)
             versions = adapter.preflight()

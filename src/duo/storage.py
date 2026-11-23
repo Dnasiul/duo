@@ -8,10 +8,15 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import tempfile
 
 from .models import MAX_CONTEXT_BYTES, MAX_TEXT_BYTES, RunError, new_secret, normalize
+
+
+MAX_SOURCE_RECORD_BYTES = 16 * 1024 * 1024
+MAX_SOURCE_SNAPSHOTS = 256
 
 
 def timestamp() -> str:
@@ -22,7 +27,8 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def read_input(path: Path, label: str | None = None, *, follow_symlinks: bool = True) -> bytes:
+def read_input(path: Path, label: str | None = None, *, follow_symlinks: bool = True,
+              max_bytes: int = MAX_TEXT_BYTES) -> bytes:
     """Read a bounded regular input file, without blocking on a named pipe."""
     label = label or path.name
     flags = os.O_RDONLY | os.O_NONBLOCK
@@ -38,17 +44,103 @@ def read_input(path: Path, label: str | None = None, *, follow_symlinks: bool = 
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode):
             raise RunError(f"{label} must be a regular file")
-        message = f"{label} exceeds the {MAX_TEXT_BYTES // 1024} KiB limit"
-        if info.st_size > MAX_TEXT_BYTES:
+        message = f"{label} exceeds the {max_bytes // 1024} KiB limit"
+        if info.st_size > max_bytes:
             raise RunError(message)
         # Bound the read even if the file grows after fstat.
         with os.fdopen(descriptor, "rb", closefd=False) as stream:
-            data = stream.read(MAX_TEXT_BYTES + 1)
-        if len(data) > MAX_TEXT_BYTES:
+            data = stream.read(max_bytes + 1)
+        if len(data) > max_bytes:
             raise RunError(message)
         return data
     finally:
         os.close(descriptor)
+
+
+@dataclass(frozen=True)
+class UserClarification:
+    source_run: str
+    source_run_id: str
+    question: str
+    blocked_document_sha256: str
+    current_document_sha256: str
+    answer: str
+
+
+def load_blocked_source(path: Path, *, repo: Path, document: Path, mode: str,
+                        task: str, criteria: str, current_plan: str,
+                        answer: str) -> UserClarification:
+    """Validate a completed blocked record; read no paths supplied by its contents."""
+    source = path.expanduser().resolve()
+    if not source.is_dir():
+        raise RunError("Source run must be an existing directory")
+
+    def read(name: str, *, max_bytes: int = MAX_TEXT_BYTES) -> str:
+        try:
+            return read_input(source / name, f"Source run {name}",
+                              follow_symlinks=False, max_bytes=max_bytes).decode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise RunError(f"Could not read source run {name}: {exc}") from exc
+
+    def record(name: str) -> dict:
+        try:
+            value = json.loads(read(name, max_bytes=MAX_SOURCE_RECORD_BYTES))
+        except (ValueError, RecursionError) as exc:
+            raise RunError(f"Invalid source run {name}: {exc}") from exc
+        if not isinstance(value, dict):
+            raise RunError(f"Invalid source run {name}: must be a JSON object")
+        return value
+
+    manifest, result = record("manifest.json"), record("result.json")
+    if result.get("status") != "blocked":
+        raise RunError("Source run result.json status must be blocked")
+    history = result.get("history")
+    if not isinstance(history, list) or not history or not isinstance(history[-1], dict):
+        raise RunError("Source run history must have a final blocked turn")
+    turn = history[-1]
+    if turn.get("decision") != "blocked":
+        raise RunError("Source run last history turn must be blocked")
+    if any(not isinstance(item, dict) or item.get("decision") == "blocked"
+           for item in history[:-1]):
+        raise RunError("Source run history must end at its first blocked turn")
+    question, blocked_hash = turn.get("reason"), turn.get("plan_hash")
+    if not isinstance(question, str) or not question.strip():
+        raise RunError("Source run blocked question must be a nonempty string")
+    if not isinstance(blocked_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", blocked_hash):
+        raise RunError("Source run blocked document hash must be a SHA-256 string")
+    if not isinstance(result.get("plan"), str):
+        raise RunError("Source run result plan must be a string matching the blocked document hash")
+    try:
+        question.encode("utf-8")
+        result_hash = content_hash(result["plan"])
+    except UnicodeError as exc:
+        raise RunError("Source run result.json question and plan must be valid UTF-8") from exc
+    if result_hash != blocked_hash:
+        raise RunError("Source run result plan does not match the blocked document hash")
+    try:
+        snapshots = [p.name for p in source.iterdir()
+                     if re.fullmatch(r"plan-[0-9]{3,}\.md", p.name)]
+    except OSError as exc:
+        raise RunError(f"Could not list source run snapshots: {exc}") from exc
+    if len(snapshots) > MAX_SOURCE_SNAPSHOTS:
+        raise RunError(f"Source run exceeds the {MAX_SOURCE_SNAPSHOTS} snapshot limit")
+    snapshots.sort(key=lambda name: int(name[5:-3]), reverse=True)
+    if not any(content_hash(read(name)) == blocked_hash for name in snapshots):
+        raise RunError("Source run blocked document hash matches no recorded snapshot")
+    config = manifest.get("config")
+    if not isinstance(config, dict):
+        raise RunError("Source run manifest.json config must be an object")
+    for label, recorded, current in (
+        ("repository", config.get("repo"), str(repo)),
+        ("document path", manifest.get("document"), str(document)),
+        ("mode", config.get("mode"), mode),
+        ("task", manifest.get("task"), task),
+        ("criteria", manifest.get("criteria"), criteria),
+    ):
+        if recorded != current:
+            raise RunError(f"Source run {label} does not match the current run")
+    return UserClarification(str(source), source.name, question, blocked_hash,
+                             content_hash(current_plan), answer)
 
 
 @dataclass(frozen=True)

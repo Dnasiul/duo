@@ -4,6 +4,10 @@
 
 ### Added
 
+- `--answer TEXT` paired with `--source-run PATH` to answer a completed blocked
+  run in a fresh review. Source identity, question, answer, and blocked/current
+  document hashes are recorded in the new manifest; task and criteria must match
+  exactly, both approvals start fresh, and the source is never modified.
 - Versioned `verdict.json` audit artifacts for external gates, with subject and
   fixed-input hashes, reviewer agreement bindings, and persistent structured
   findings with stable IDs, severity, locations, and role-owned dispositions.
