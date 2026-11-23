@@ -888,12 +888,20 @@ cover agreement bindings, severity thresholds, stale subjects, and fail-closed
 consumption. Existing CLI summaries and exit codes remain unchanged. This work
 does not change the package version or implement §7.1 or build mode.
 
-Open live-verification item (plan §8 style): acceptance of the new response schema
-by native Codex, native Claude, and Copilot CLIs is unverified against real CLIs
-until live runs are recorded. Existing live results and recorded captures predate
-the required findings/finding_updates contract; modernized offline replay tests
-do not establish end-to-end live acceptance. Record CLI versions, models, run IDs,
-and outcomes for each adapter when completing this item.
+Live verification (2026-11-23, Linux; recorded by the implementation coordinator
+after the section 11 loop approved): the new response schema is accepted by all
+three adapter paths end to end. Native pair (codex-cli 0.171.0, untested and run
+with `--allow-untested-cli`; Claude Code 2.1.330; `gpt-6-astra` / `claude-opus-5-5`,
+high effort): `run-p8gngkvr` agreed in 3 turns and 3 attempts; Codex reported
+finding F1 (medium, subject-level, on the empty initial document) and it was
+resolved before agreement. Copilot pair (Copilot CLI 1.0.114; `gpt-6-luna` in the
+Codex role, `claude-sonnet-5.5` in the Claude role, high effort): `run-ue2o3av6`
+agreed in 3 turns and 3 attempts; F1 (low, Codex role) resolved before agreement.
+Both runs' `verdict.json` artifacts validate with `validate_verdict`; the native
+run's also validates against the shipped JSON Schema (checked with the `jsonschema`
+library, development-only). The reference gate was exercised on the native run's
+real artifacts: pass (exit 0) on the agreed current document; exit 2 with an
+injected open `high` finding; exit 2 after the document changed (stale subject).
 
 Recorded locations bind to their own subject SHA-256, including historical locations;
 document sections are supported. Diff old/new-side locations remain section 10 scope.
