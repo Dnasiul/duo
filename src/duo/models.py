@@ -14,6 +14,9 @@ CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_CLAUDE_MAX_TURNS = 20
 # Task, criteria, plan, and reason size limit (UTF-8 bytes), checked before any CLI call.
 MAX_TEXT_BYTES = 1024 * 1024
+MAX_CONTEXT_BYTES = 64 * 1024
+# Interim pending the owner decision: any finite ceiling narrows 0.4.6 compatibility.
+DEFAULT_MAX_PROMPT_BYTES = 512 * 1024
 # Kinds of document the reviewers can produce; each has its own checklist (prompts.py).
 DOCUMENT_MODES = ("plan", "report", "description", "review")
 COPILOT_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
@@ -112,6 +115,7 @@ class Config:
     output: str = ""         # document path relative to repo; "" means <mode>.md
     pass_env: tuple[str, ...] = ()  # extra environment variable names for reviewer CLIs
     allow_web: bool = False  # give reviewers web search and page fetching
+    max_prompt_bytes: int = DEFAULT_MAX_PROMPT_BYTES
 
     def __post_init__(self):
         if self.start not in AGENTS:
@@ -143,7 +147,7 @@ class Config:
                 self.claude_max_budget_usd is not None or self.claude_max_turns is not None):
             raise ValueError("Claude internal-turn and dollar limits require --claude-backend native")
         for name in ("max_turns", "max_attempts", "history_limit", "claude_max_turns",
-                     "max_output_mb", "max_run_mb"):
+                     "max_output_mb", "max_run_mb", "max_prompt_bytes"):
             value = getattr(self, name)
             if name == "claude_max_turns" and value is None:
                 continue

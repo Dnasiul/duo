@@ -69,6 +69,98 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
    see the stream evidence below. Document snapshots archive the reviewed
    document only; emitted tool logs do not guarantee complete file/page archives.
 
+## Captured context and prompt budget (Unreleased, 2026-11-23)
+
+Section 3's context capture and budget mechanism is implemented. The credential
+scanner prerequisite was verified in `models.new_secret`: distinct candidates
+are passed to `_contains_all` for a single indexed scan of known text. Context
+uses no known-document exception. The default prompt ceiling remains **INTERIM
+512 KiB, pending the owner's decision**, as documented in README, SECURITY, and
+the Unreleased changelog; it narrows compatibility versus 0.4.6.
+
+Offline verification: **250 tests passed, no skips**, using
+`PYTHONPATH=src python scripts/run_tests.py`
+with temporary files under this checkout's `build/tmp`. This includes 18 new
+context tests and three new saved-change example tests (21 additions to the
+229-test section-2 baseline). They cover exact bytes/hashes, Unicode, file
+validation and document identities, credential rejection, aggregate limits,
+startup and diff/history/retry/wrapper overflows, preserved documents, overrides,
+unchanged captures, separately mutable files, and audit-write failures.
+
+Step 6 measurements (coordinator-measured 2026-11-23): per-turn prompts for
+all seven recorded runs under the Duo state directory were reconstructed with
+0.4.6's own `duo.prompts.build_prompt`, using each stored snapshot in turn as
+the document and the history and revision diff from the run record.
+
+| Run | Largest prompt (bytes) |
+| --- | ---: |
+| `run-1q3qeibv` | 150,232 |
+| `run-knhtl1zk` | 109,987 |
+| `run-0uuafp4m` | 93,278 |
+| `run-wp91fnm3` | 66,573 |
+| `run-9zoalswh` | 22,473 |
+| `run-6d6fk0q1` | 5,292 |
+| `run-9p0ghkni` | 4,998 |
+
+The largest prompt's components, in bytes: current document **72,347**;
+last-revision diff **70,208**; task **3,358**; criteria **2,448**; instructions
+about **1,045**; review history **385**. The largest fixed parts
+(instructions + task + criteria + document) were about **79 KB**. The other
+supported examples were not measured separately; their prompts are built by
+the same machinery. The new saved-change example's live run began with an
+initial prompt of **3,641 bytes**. The interim **512 KiB** default accepts the
+largest measured prompt with about **3.5x margin**; the owner's decision on
+the default remains pending.
+
+Earlier bounded live verification was attempted by the implementer on Linux using
+`examples/review_saved_change.sh` and a synthetic three-line integer addition
+function. The captured diff changes subtraction to addition; saved output from
+three real unittest cases (positive, negative, zero) reports success. No project
+source or private target material was supplied. Both captures were checked
+against their source bytes and SHA-256 hashes after each run:
+
+| Captured file | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `change.diff` | 172 | `3cc046e28ef3dfdf7ea32dc3934b40eaf5a85f69eeb9797d49c73a062a1ad5b0` |
+| `tests.txt` | 291 | `c6317e013afe12b361bccefeebd9c65cb3b5df996102669075cb800b07317f1e` |
+
+The full initial review prompt was **3,641 UTF-8 bytes**, below the interim
+ceiling. Native Codex **0.171.0**, model `gpt-6-astra`, and native Claude Code
+**2.1.330**, model `claude-sonnet-5-5`, passed preflight. Codex used the explicit
+`--allow-untested-cli` exception; no version range or control was weakened.
+The example bounded the run to four accepted turns, one attempt per turn,
+120 seconds per call, and 480 seconds overall. The native-pair attempt
+`run-cxas0p58` exited 1 on the first Codex call with **workspace routing discovery
+failed**, after transport retries; zero reviews were accepted. An earlier
+attempt (`run-o4blsyc9`) had failed to initialize Codex on the read-only home;
+subsequent runtime directories were placed under the checkout. These attempts
+used isolated CLI homes without logins.
+
+A final Claude-first attempt (`run-r34a13ip`), bounded further to 45 seconds per
+call and 180 seconds overall, exited 1 on timeout. Its emitted stream contains
+init and API-retry events, no terminal review; metadata records missing
+completion and unavailable usage. It also accepted zero reviews. No output
+document was created. Exact context captures and the empty initial snapshot
+survived both failures. Local synthetic inputs, results, and private audits are
+under ignored `build/context-live/` in the implementation checkout.
+
+Subsequent coordinator live verification: **`run-qr36s0ac`, 2026-11-23, Linux**.
+The shipped `examples/review_saved_change.sh` ran end-to-end with the installed
+package and real CLI logins against a synthetic subject repository, in review
+mode with output `saved-change-review.md` and two `--context-file` captures.
+The native reviewers were Codex `gpt-6-astra` via **codex-cli 0.171.0** and
+Claude `claude-sonnet-5-5` via **Claude Code 2.1.330**. The run used
+`--allow-untested-cli`: Codex 0.171.0 is outside the tested range, so this is
+untested evidence, not range support. Outcome: status **"agreed" in 3 turns**.
+
+The successful run's `context.json` records `context-001.bin` = `change.diff`,
+**172 bytes**, SHA-256
+`3cc046e28ef3dfdf7ea32dc3934b40eaf5a85f69eeb9797d49c73a062a1ad5b0`,
+and `context-002.bin` = `tests.txt`, **291 bytes**, SHA-256
+`c6317e013afe12b361bccefeebd9c65cb3b5df996102669075cb800b07317f1e`.
+Both hashes match the source files. Copilot and macOS context workflows remain
+unverified live.
+
 ## Native Claude audit stream (Unreleased, 2026-11-23)
 
 Native Claude now runs with `--output-format stream-json --verbose`. Raw stdout

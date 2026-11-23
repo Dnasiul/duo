@@ -142,3 +142,56 @@ class SearchLiteratureExampleTests(unittest.TestCase):
         for code in (1, 3, 4):
             with self.subTest(code=code):
                 self.invoke("quantum chemistry", DUO_EXAMPLE_EXIT=str(code))
+
+
+class SavedChangeExampleTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.repo = self.root / "code with spaces"
+        self.repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        self.diff = self.root / "saved change.diff"
+        self.diff.write_text("--- a/math.py\n+++ b/math.py\n@@ -1 +1 @@\n-return a-b\n+return a+b\n")
+        self.tests = self.root / "test output.txt"
+        self.tests.write_text("Ran 1 test\nOK\n")
+        self.duo = self.root / "mock duo"
+        self.duo.write_text(f"#!{sys.executable}\nimport json, os, sys\n"
+                            "print(json.dumps(sys.argv[1:]))\n"
+                            "sys.exit(int(os.environ.get('DUO_EXAMPLE_EXIT', '0')))\n")
+        self.duo.chmod(0o755)
+        self.script = SCRIPT.with_name("review_saved_change.sh")
+
+    def invoke(self, *args, code=0):
+        return subprocess.run(["bash", str(self.script), *map(str, args)], cwd=self.root,
+                              env={**os.environ, "DUO": str(self.duo),
+                                   "DUO_EXAMPLE_EXIT": str(code)},
+                              capture_output=True, text=True, timeout=10)
+
+    def test_saved_diff_and_test_output_are_context_in_supplied_order(self):
+        result = self.invoke(self.repo, self.diff, self.tests)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = parser().parse_args(json.loads(result.stdout))
+        self.assertEqual(args.context_file, [self.diff, self.tests])
+        self.assertEqual(args.mode, "review")
+        self.assertEqual(args.output, Path("saved-change-review.md"))
+        self.assertEqual(args.max_turns, 4)
+        self.assertEqual(args.max_attempts, 1)
+        self.assertEqual(args.max_seconds, 480)
+        self.assertEqual(args.max_prompt_bytes, 524288)
+        self.assertEqual(read_input(args.context_file[0]), self.diff.read_bytes())
+        self.assertEqual(read_input(args.context_file[1]), self.tests.read_bytes())
+
+    def test_usage_and_non_worktree_fail_without_output_files(self):
+        for args, code in (((self.repo,), 2), ((self.repo, self.diff, self.tests, "extra"), 2),
+                           ((self.repo / ".git", self.diff, self.tests), 1)):
+            with self.subTest(args=args):
+                result = self.invoke(*args)
+                self.assertEqual(result.returncode, code)
+                self.assertEqual(result.stdout, "")
+        self.assertFalse((self.repo / "saved-change-review.md").exists())
+
+    def test_exit_status_is_preserved(self):
+        for code in (1, 3, 4):
+            self.assertEqual(self.invoke(self.repo, self.diff, self.tests, code=code).returncode, code)

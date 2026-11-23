@@ -5,8 +5,8 @@ from typing import Callable
 
 from .models import (MAX_RETRY_AFTER, AgentError, AgentTimeout, Config, RunError, State, Turn,
                      validate_review)
-from .prompts import build_prompt, revision_diff
-from .storage import PlanFile, RunStore, content_hash, timestamp
+from .prompts import build_prompt, check_prompt_budget, revision_diff
+from .storage import ContextFile, PlanFile, RunStore, content_hash, timestamp
 
 
 def initial_state(task: str, criteria: str, plan: str, config: Config) -> State:
@@ -25,11 +25,27 @@ class Reviewer:
     def __init__(self, config: Config, adapter: Callable, plan: PlanFile, store: RunStore,
                  progress: Callable | None = None, clock: Callable = time.monotonic,
                  sleep: Callable = time.sleep,
-                 on_review: Callable[[int, Turn, str, str], None] | None = None):
+                 on_review: Callable[[int, Turn, str, str], None] | None = None,
+                 context: tuple[ContextFile, ...] = ()):
+        self.context = context
         self.config, self.adapter, self.plan_file, self.store = config, adapter, plan, store
         self.progress, self.clock, self.sleep = progress, clock, sleep
         self.on_review = on_review
         self.deadline = clock() + config.max_seconds
+
+    def prompt(self, state: State, feedback: str = "") -> tuple[str, dict[str, int]]:
+        sizes: dict[str, int] = {}
+        prompt = build_prompt(state, self.config.history_limit, feedback,
+                              self.config.mode, self.config.guidance, self.config.output,
+                              self.config.allow_web, self.context, sizes)
+        return prompt, sizes
+
+    def check_startup_budget(self, state: State) -> None:
+        # Both wrappers matter even when the smaller one belongs to the first role.
+        prompt, sizes = self.prompt(state)
+        for agent in ("codex", "claude"):
+            check_prompt_budget(prompt, self.config.max_prompt_bytes,
+                                getattr(self.config, f"{agent}_backend"), sizes)
 
     def __call__(self, state: State) -> State:
         current = dict(state)
@@ -55,20 +71,20 @@ class Reviewer:
                 state.update(status="limit_reached", error="Run time limit reached")
                 return
             self.plan_file.check()
-            state["attempts"] += 1
-            self.store.event({"event": "attempt", "agent": agent,
-                              "turn": state["turns"] + 1, "attempt": attempt})
-            if self.progress:
-                self.progress(f"Turn {state['turns'] + 1}: {agent}, attempt {attempt}")
+            called = False
             # A timeout shortened by the deadline means the run ran out, not the CLI.
             capped = remaining < self.config.timeout
             try:
-                payload = self.adapter(
-                    agent, build_prompt(state, self.config.history_limit, feedback,
-                                        self.config.mode, self.config.guidance,
-                                        self.config.output, self.config.allow_web),
-                    min(self.config.timeout, remaining),
-                )
+                prompt, sizes = self.prompt(state, feedback)
+                check_prompt_budget(prompt, self.config.max_prompt_bytes,
+                                    getattr(self.config, f"{agent}_backend"), sizes)
+                state["attempts"] += 1
+                called = True
+                self.store.event({"event": "attempt", "agent": agent,
+                                  "turn": state["turns"] + 1, "attempt": attempt})
+                if self.progress:
+                    self.progress(f"Turn {state['turns'] + 1}: {agent}, attempt {attempt}")
+                payload = self.adapter(agent, prompt, min(self.config.timeout, remaining))
                 self.plan_file.check()
                 if self.clock() >= self.deadline:
                     state.update(status="limit_reached", error="Run time limit reached")
@@ -80,7 +96,8 @@ class Reviewer:
                 break
             except AgentError as exc:
                 self.plan_file.check()
-                self.store.event({"event": "attempt_failed", "agent": agent,
+                self.store.event({"event": "attempt_failed" if called else "prompt_rejected",
+                                  "agent": agent,
                                   "attempt": attempt, "error": str(exc)})
                 remaining = self.deadline - self.clock()
                 if remaining <= 0 and capped and isinstance(exc, AgentTimeout):

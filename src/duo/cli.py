@@ -11,9 +11,10 @@ import threading
 
 from .adapters import CLIAdapter
 from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLAUDE_MAX_TURNS,
-                     DOCUMENT_MODES, MAX_TEXT_BYTES, Config, RunError, State, Terminated, Turn)
+                     DOCUMENT_MODES, DEFAULT_MAX_PROMPT_BYTES, MAX_TEXT_BYTES, Config, RunError,
+                     State, Terminated, Turn)
 from .prompts import plan_diff
-from .storage import PlanFile, RunStore, read_input, run_lock, timestamp
+from .storage import PlanFile, RunStore, capture_context, read_input, run_lock, timestamp
 from .workflow import Reviewer, build_graph, initial_state
 
 EXIT_CODES = {"agreed": 0, "error": 1, "blocked": 3, "limit_reached": 4}
@@ -34,6 +35,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--instructions-file", type=Path,
                         help="UTF-8 review checklist replacing the mode's own; the review "
                              "protocol itself stays fixed")
+    result.add_argument("--context-file", type=Path, action="append", default=[],
+                        help="Capture a UTF-8 context file (repeatable; 64 KiB aggregate)")
+    result.add_argument("--max-prompt-bytes", type=int, default=DEFAULT_MAX_PROMPT_BYTES,
+                        help="Full UTF-8 prompt ceiling (INTERIM default: 524288 bytes, "
+                             "pending owner decision)")
     result.add_argument("--output", type=Path,
                         help="Document path relative to --repo (default: <mode>.md)")
     result.add_argument("--codex-model", required=True, help="Explicit Codex model identifier")
@@ -201,7 +207,8 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             raise RunError("Target repository directory does not exist")
         document = output_path(args.output, args.mode, repo)
         for option, path in (("--task-file", args.task_file), ("--criteria-file", args.criteria_file),
-                             ("--instructions-file", args.instructions_file)):
+                             ("--instructions-file", args.instructions_file),
+                             *(("--context-file", path) for path in args.context_file)):
             if path is not None and is_plan_file(path, document):
                 # The review would then check the document against itself.
                 raise RunError(f"{option} must not be the {args.mode} under review ({document}); "
@@ -216,6 +223,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
         for name, text in (("Task", task), ("Criteria", criteria), ("Instructions", guidance)):
             if len(text.encode("utf-8")) > MAX_TEXT_BYTES:
                 raise RunError(f"{name} exceeds the {MAX_TEXT_BYTES // 1024} KiB limit")
+        context = capture_context(args.context_file)
         config = Config(
             repo=repo, codex_model=args.codex_model, claude_model=args.claude_model,
             codex_effort=args.codex_effort, claude_effort=args.claude_effort,
@@ -231,6 +239,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             codex_bin=args.codex_bin, claude_bin=args.claude_bin,
             mode=args.mode, guidance=guidance, output=str(document.relative_to(repo)),
             pass_env=tuple(args.pass_env), allow_web=args.allow_web,
+            max_prompt_bytes=args.max_prompt_bytes,
         )
         default_state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "duo"
         state_dir = (args.state_dir or default_state).expanduser().resolve()
@@ -247,9 +256,11 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
                 "task": task, "criteria": criteria, "document": str(document),
             })
             store.snapshot(0, plan.initial)
+            store.context(context)
             reviewer = Reviewer(config, adapter, plan, store,
                                 progress=lambda message: print(message, file=sys.stderr, flush=True),
-                                on_review=completed)
+                                on_review=completed, context=context)
+            reviewer.check_startup_budget(state)
             graph = build_graph(reviewer)
             versions = adapter.preflight()
             if adapter.untested:

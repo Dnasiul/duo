@@ -105,8 +105,8 @@ What it changes:
   steer a reviewer into encoding readable information in a query or fetched URL.
 - **Search queries reach search providers**, even when nothing goes wrong.
 - **File and web audit evidence can be incomplete.** Duo saves snapshots of the
-  document under review, not independent copies of every inspected repository
-  file or fetched page. Tool evidence depends on what each CLI emits. Recorded
+  document under review and explicitly supplied `--context-file` captures, not
+  independent copies of every inspected repository file or fetched page. Tool evidence depends on what each CLI emits. Recorded
   Codex logs contain command output and web search/open events; Copilot emits
   tool events and fetched URLs. Neither guarantees complete file/page contents
   or every internally accessed resource. Native Claude now uses
@@ -280,3 +280,41 @@ Until an isolation profile exists, for repositories you are less sure of:
 - Every run's `reviewer-policy.json` distinguishes supplied restrictions from
   advertised options and selected metadata checked by preflight; it does not
   certify per-run behavioral enforcement.
+
+
+## Captured context and combined prompt budget (Unreleased)
+
+`--context-file PATH` captures bounded regular UTF-8 files once at startup, with
+an aggregate 64 KiB limit. Aliases and hard links to the reviewed document are
+rejected. The repaired credential detector scans every capture before any
+context is saved or reviewer process starts, using no known-document exception.
+Rejection identifies only the file and credential kind. Detection is best-effort,
+not clearance for sensitive material: unrecognized secrets can still pass and
+would reach both model providers. Do not supply sensitive evidence.
+
+Both roles receive the same exact decoded text in labeled untrusted sections
+with collision-resistant delimiters on every turn and retry. Audit artifacts
+`context-*.bin` preserve exact bytes; `context.json` records labels, source paths,
+order, byte lengths, and SHA-256 hashes. They live in the private run directory
+and are not resumable checkpoints. Later source edits do not alter captures.
+Separately inspected repository files remain mutable and are not snapshotted.
+64 KiB is roughly 16,000 extra input tokens per call at four bytes per token,
+with variation by content and tokenizer.
+
+`--max-prompt-bytes` has an **INTERIM 512 KiB (524,288-byte) default pending the
+owner's decision**. A finite default is a compatibility narrowing versus 0.4.6,
+which has no combined ceiling. Measurements on 2026-11-23 reconstructed seven
+recorded runs: the maximum was 150,232 bytes, followed by 109,987 and 93,278;
+fixed inputs peaked around 79 KB. The interim default accepts every measured
+case with at least 3.4x margin. It still rejects some inputs accepted by 0.4.6;
+the owner must ratify or change it.
+
+The ceiling counts the full assembled UTF-8 prompt: instructions, task, criteria,
+document, diff, selected history, context, retry feedback, delimiters, and Duo's
+backend wrappers including Copilot's schema prefix. Both reviewers' fixed inputs
+are checked before startup preflight; full prompts are checked before adapter
+calls and subprocess launch. Overflow records the byte count and largest
+sections, stops without truncation or retry of that prompt, and preserves the
+last accepted document and snapshot for a rerun with a larger budget. These
+bytes are not exact tokens and cannot guarantee model context capacity;
+CLI-added instructions, tool results, and output reserve also consume context.
