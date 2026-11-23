@@ -13,6 +13,12 @@
 
 ### Fixed
 
+- The offline test runner discovers `tests/` relative to its own location from
+  any working directory and rejects zero discovered tests, while retaining
+  failure on errors, failures, skips, and missing LangGraph. Correct and align
+  the documented commands; checks still use the installed package without
+  adding `src/`. CI already used the correct `tests/` working directory, so this
+  fix does not imply historical CI ran zero tests.
 - Native fixture probes now use production preflight's restricted environment,
   including the temporary Codex home, and match Claude managed-configuration
   check ordering. Document permitted authentication and existing fixture provenance.
