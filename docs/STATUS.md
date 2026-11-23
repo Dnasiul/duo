@@ -74,9 +74,9 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 Section 3's context capture and budget mechanism is implemented. The credential
 scanner prerequisite was verified in `models.new_secret`: distinct candidates
 are passed to `_contains_all` for a single indexed scan of known text. Context
-uses no known-document exception. The default prompt ceiling remains **INTERIM
-512 KiB, pending the owner's decision**, as documented in README, SECURITY, and
-the Unreleased changelog; it narrows compatibility versus 0.4.6.
+uses no known-document exception. The default prompt ceiling is **512 KiB,
+ratified by the owner on 2026-11-23**, as documented in README, SECURITY, and
+the changelog; it narrows compatibility versus 0.4.6.
 
 Offline verification: **250 tests passed, no skips**, using
 `PYTHONPATH=src python scripts/run_tests.py`
@@ -108,9 +108,9 @@ about **1,045**; review history **385**. The largest fixed parts
 (instructions + task + criteria + document) were about **79 KB**. The other
 supported examples were not measured separately; their prompts are built by
 the same machinery. The new saved-change example's live run began with an
-initial prompt of **3,641 bytes**. The interim **512 KiB** default accepts the
-largest measured prompt with about **3.5x margin**; the owner's decision on
-the default remains pending.
+initial prompt of **3,641 bytes**. The **512 KiB** default, ratified by the
+owner on 2026-11-23, accepts the largest measured prompt with about **3.5x
+margin**.
 
 Earlier bounded live verification was attempted by the implementer on Linux using
 `examples/review_saved_change.sh` and a synthetic three-line integer addition
@@ -124,7 +124,7 @@ against their source bytes and SHA-256 hashes after each run:
 | `change.diff` | 172 | `3cc046e28ef3dfdf7ea32dc3934b40eaf5a85f69eeb9797d49c73a062a1ad5b0` |
 | `tests.txt` | 291 | `c6317e013afe12b361bccefeebd9c65cb3b5df996102669075cb800b07317f1e` |
 
-The full initial review prompt was **3,641 UTF-8 bytes**, below the interim
+The full initial review prompt was **3,641 UTF-8 bytes**, below the 512 KiB
 ceiling. Native Codex **0.171.0**, model `gpt-6-astra`, and native Claude Code
 **2.1.330**, model `claude-sonnet-5-5`, passed preflight. Codex used the explicit
 `--allow-untested-cli` exception; no version range or control was weakened.

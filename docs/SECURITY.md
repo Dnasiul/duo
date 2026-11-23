@@ -301,13 +301,13 @@ Separately inspected repository files remain mutable and are not snapshotted.
 64 KiB is roughly 16,000 extra input tokens per call at four bytes per token,
 with variation by content and tokenizer.
 
-`--max-prompt-bytes` has an **INTERIM 512 KiB (524,288-byte) default pending the
-owner's decision**. A finite default is a compatibility narrowing versus 0.4.6,
-which has no combined ceiling. Measurements on 2026-11-23 reconstructed seven
-recorded runs: the maximum was 150,232 bytes, followed by 109,987 and 93,278;
-fixed inputs peaked around 79 KB. The interim default accepts every measured
-case with at least 3.4x margin. It still rejects some inputs accepted by 0.4.6;
-the owner must ratify or change it.
+`--max-prompt-bytes` has a **512 KiB (524,288-byte) default, ratified by the
+owner on 2026-11-23**. A finite default is a compatibility narrowing versus
+0.4.6, which has no combined ceiling. Measurements on 2026-11-23 reconstructed
+seven recorded runs: the maximum was 150,232 bytes, followed by 109,987 and
+93,278; fixed inputs peaked around 79 KB. The ratified default accepts every
+measured case with at least 3.4x margin. It still rejects some inputs accepted
+by 0.4.6; the owner approved that narrowing when ratifying the default.
 
 The ceiling counts the full assembled UTF-8 prompt: instructions, task, criteria,
 document, diff, selected history, context, retry feedback, delimiters, and Duo's

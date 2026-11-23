@@ -360,7 +360,7 @@ the latest successfully published plan; they never imply agreement.
 | `--claude-max-budget-usd` | Unset | Claude's per-invocation API budget |
 | `--pass-env` | None | Extra environment variable for reviewer CLIs (repeatable) |
 | `--allow-web` | Off | Experimental: reviewers may search and fetch web pages (Copilot: fetch only); see `docs/SECURITY.md` |
-| `--max-prompt-bytes` | 524288 (INTERIM; owner decision pending) | Full assembled UTF-8 prompt ceiling |
+| `--max-prompt-bytes` | 524288 (owner-ratified 2026-11-23) | Full assembled UTF-8 prompt ceiling |
 | `--context-file PATH` | none | Repeatable captured context; 64 KiB aggregate |
 | `--max-output-mb` | 32 | MiB per captured CLI output stream (stdout, stderr) |
 | `--max-run-mb` | 256 | MiB per run audit directory, including CLI logs and caches |
@@ -585,14 +585,14 @@ criteria, custom instructions, the document under review, and each review's
 document and reason are limited to 1 MiB. Input files must be regular files; a
 named pipe or device is rejected rather than read.
 
-`--max-prompt-bytes` has an **INTERIM default of 512 KiB (524,288 bytes), pending
-the owner's decision**. This finite default is a compatibility narrowing versus
-0.4.6, which has no combined ceiling. Measurements on 2026-11-23 reconstructed
-prompts from seven recorded runs: the largest was 150,232 bytes (including a
-72,347-byte document and 70,208-byte revision diff); the next largest were
-109,987 and 93,278 bytes, and fixed inputs peaked around 79 KB. The interim
-ceiling accepts every measured case with at least 3.4x margin, but cannot accept
-every input that 0.4.6 accepts. The owner must ratify or change this default.
+`--max-prompt-bytes` has a **default of 512 KiB (524,288 bytes), ratified by
+the owner on 2026-11-23**. This finite default is a compatibility narrowing
+versus 0.4.6, which has no combined ceiling. Measurements on 2026-11-23
+reconstructed prompts from seven recorded runs: the largest was 150,232 bytes
+(including a 72,347-byte document and 70,208-byte revision diff); the next
+largest were 109,987 and 93,278 bytes, and fixed inputs peaked around 79 KB.
+The ratified ceiling accepts every measured case with at least 3.4x margin,
+but cannot accept every input that 0.4.6 accepts.
 
 Duo counts UTF-8 bytes of the complete assembled prompt, including instructions,
 task, criteria, current document, revision diff, selected history, captured
