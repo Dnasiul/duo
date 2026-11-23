@@ -109,12 +109,48 @@ What it changes:
   file or fetched page. Tool evidence depends on what each CLI emits. Recorded
   Codex logs contain command output and web search/open events; Copilot emits
   tool events and fetched URLs. Neither guarantees complete file/page contents
-  or every internally accessed resource. Native Claude's recorded JSON result
-  includes the answer, token usage, and permission denials, but no successful
-  file-read or web-tool transcript. Its web-search/fetch counters stayed zero in
-  the historical web check despite tool use. `WebFetch` returns a model-written
-  summary, not the page. Plan §2's Claude audit-stream improvement remains open;
-  even emitted tool events would not guarantee complete file or page archives.
+  or every internally accessed resource. Native Claude now uses
+  `--output-format stream-json --verbose`: each attempt's `stdout.log` retains
+  raw emitted events, including requests, inputs, available results, explicit
+  denials, and terminal output. Failed, timed-out, and interrupted attempts keep
+  their emitted bytes, including incomplete lines. Requests alone do not prove
+  access; ordinary tool errors are not necessarily permission denials.
+  Linux discovery captures from Claude Code 2.1.330 (`claude-opus-5-5`,
+  2026-11-23), sanitized through `scripts/record_fixtures.py`, cover successful
+  Read/Glob/Grep both with and without web, WebSearch/WebFetch with web, a missing
+  file, an outside-path denial, and a turn-limit failure. Every enabled tool has
+  a live capture in each configuration; macOS stream behavior is unverified.
+  Fixtures strip rate-limit account metadata while retaining event presence/type.
+  The terminal `usage.server_tool_use` web counters were zero despite successful
+  web calls: derive web activity from request/result events, never counters.
+  `WebFetch` returns a model-written summary, not the page. URLs, search results,
+  and emitted events do not guarantee complete file/page archives or enumerate
+  every internally accessed resource. See STATUS for provenance and fresh-run
+  limitations.
+
+Native Claude accepts a response only after exit zero and a well-formed stream
+ending in exactly one `result` with `subtype: success` and `is_error: false`.
+Only that event's `structured_output` enters `validate_payload`; assistant text
+and `StructuredOutput` tool requests cannot become reviews. Malformed/truncated
+events, missing or multiple results, unsuccessful envelopes (even at exit zero),
+and invalid response schemas fail closed. Existing output/storage limits remain
+in force; the stream parser uses the configured `--max-output-mb` cap (32 MiB by
+default). The logs are not truncated to hide an overrun. Failure messages use
+sanitized classification, not repository/tool text.
+
+Each native Claude attempt also writes `claude-stream.json`: `process_status`
+and `returncode` describe execution; `completion` is `missing`, `ambiguous`,
+`invalid`, `unsuccessful`, or `success`; `terminal_results` counts parsed result
+events. `usage_available` is true only when a valid, unambiguous terminal carries
+a usage object, which is copied to `usage`; otherwise it is false and `usage`
+is null. Reported zeros remain zeros. `payload_validated` records successful
+adapter schema validation, not workflow acceptance or reviewer agreement. A
+terminal success does not override a nonzero exit, interruption, deadline, or
+the workflow's remaining review checks. Like other audit artifacts, these files
+can contain sensitive output and are not resumable checkpoints.
+If writing stream metadata fails during an error or interruption, the original
+failure is preserved; the metadata file may be absent. A metadata write failure
+after an otherwise successful attempt prevents accepting its review.
 
 Tested (Linux, 2026-10-14; codex-cli 0.162.1, Claude Code 2.1.299, Copilot CLI
 1.0.96): a report-mode check of a three-entry `refs.bib` against DOI records,

@@ -106,6 +106,12 @@ sys.stdout.write(outputs[key])
             with self.subTest(agent=agent):
                 self.assertEqual(self.check(agent, fail=True)["status"], "probe-failure")
 
+    def test_claude_requires_stream_options_and_format_value(self):
+        for option in ('--output-format', '--verbose', '--json-schema', 'stream-json'):
+            with self.subTest(option=option):
+                result = self.check('claude', drop_flag=option)
+                self.assertEqual(result['status'], 'probe-failure', result)
+
     def test_flag_changes_are_reported(self):
         self.assertEqual(self.drift.compare({"--a", "--b"}, {"--b", "--c"}),
                          {"added": ["--c"], "removed": ["--a"]})

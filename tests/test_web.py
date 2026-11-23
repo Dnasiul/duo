@@ -18,7 +18,7 @@ from duo.workflow import initial_state
 
 HELP = ('--sandbox --ephemeral --json --output-schema --ignore-rules --ignore-user-config --strict-config '
         '--safe-mode --restricted --setting-sources --settings --strict-mcp-config '
-        '--no-chrome --disable-slash-commands --tools --allowedTools')
+        '--no-chrome --disable-slash-commands --tools --allowedTools --output-format stream-json --verbose --json-schema')
 
 
 def values(argv, flag):

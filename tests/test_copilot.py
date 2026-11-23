@@ -128,7 +128,7 @@ result = {'decision':'approve','plan':'','reason':'Native'}
 if 'exec' in sys.argv:
     pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
 else:
-    print(json.dumps({'is_error':False,'subtype':'success','structured_output':result}))
+    print(json.dumps({'type':'result','is_error':False,'subtype':'success','structured_output':result}))
 ''')
         copilot_binary = self.fake("sys.stdin.read()\nreply({'decision':'approve','plan':'','reason':'Copilot'})\n")
         for native_agent in ('codex', 'claude'):

@@ -183,14 +183,45 @@ def probe_reviewers(adapter: CLIAdapter, config: Config, store: RunStore, task: 
         if not all(phrase in result['reason'] for phrase in phrases.values()):
             print(f'  reason: {" ".join(result["reason"].split())[:600]}')
         for attempt in attempts:
-            try:
-                denials = json.loads((attempt / 'stdout.log').read_text()).get('permission_denials')
-            except (OSError, ValueError, AttributeError):
-                continue
-            for denial in denials or ():
+            for denial in claude_denials(attempt / 'stdout.log'):
                 print(f"  permission denied: {denial.get('tool_name')} {json.dumps(denial.get('tool_input'))}")
         for line in tool_calls(attempts, requested):
             print(f'  {line}')
+
+
+def claude_denials(path: Path) -> list[dict]:
+    """Explicit denials only, including interrupted streams with no result.
+
+    A tool request is not successful access, and an error result alone need not
+    be a denial. Correlate inputs and deduplicate terminal denial summaries.
+    """
+    requests, denials = {}, {}
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get('type') == 'assistant':
+            for block in event.get('message', {}).get('content', []):
+                if block.get('type') == 'tool_use':
+                    requests[block.get('id')] = block.get('input')
+        if event.get('type') == 'system' and event.get('subtype') == 'permission_denied':
+            denied = [event]
+        elif event.get('type') == 'result':
+            denied = event.get('permission_denials') or []
+        else:
+            denied = []
+        for denial in denied:
+            key = denial.get('tool_use_id')
+            denials[key or json.dumps(denial, sort_keys=True)] = {
+                **denial, 'tool_input': denial.get('tool_input', requests.get(key))}
+    return list(denials.values())
 
 
 def tool_calls(attempts: set[Path], paths) -> list[str]:

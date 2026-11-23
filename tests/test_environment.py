@@ -39,7 +39,7 @@ result = {{'decision': 'approve', 'plan': '', 'reason': 'Ready'}}
 if '-o' in sys.argv:
     pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
 else:
-    print(json.dumps({{'is_error': False, 'subtype': 'success', 'structured_output': result}}))
+    print(json.dumps({{'type':'result','is_error': False, 'subtype': 'success', 'structured_output': result}}))
 """)
         return binary, marker
 

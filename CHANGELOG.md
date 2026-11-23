@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Native Claude now emits `stream-json --verbose` into each attempt's raw audit
+  log, retaining tool requests, inputs, emitted results and denials even on
+  failure or interruption. Only an unambiguous successful terminal result at
+  exit zero supplies the validated review. Attempt metadata distinguishes
+  process outcome, completion, payload validation, and absent versus reported
+  usage; existing limits and sanitized failure classification remain enforced.
+- Require stream options in preflight/drift checks; update fixture sanitization
+  and smoke denial extraction. Add Linux Claude Code 2.1.330 discovery fixtures
+  covering Read, Glob, Grep, WebSearch, WebFetch, denials and turn-limit failure,
+  plus fresh restricted probes and timed-out adapter captures. Document exact
+  provenance and omissions: web counters are not tool evidence, and emitted
+  results do not constitute complete file/page archives.
+
 ## 0.4.6 (2026-11-23)
 
 ### Changed

@@ -361,7 +361,7 @@ sys.stdin.read()
 if 'exec' in sys.argv:
     pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
 else:
-    print(json.dumps({{'is_error':False,'subtype':'success','structured_output':result}}))
+    print(json.dumps({{'type':'result','is_error':False,'subtype':'success','structured_output':result}}))
 ''')
                 output = io.StringIO()
                 args = ['--repo', str(self.repo), '--state-dir', str(self.audit), '--task', 'Task',

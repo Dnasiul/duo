@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -152,3 +154,74 @@ class RecordFixtureTests(unittest.TestCase):
                 self.assertFalse((set(AUTH["codex"]) | set(AUTH["claude"])) & names)
         for call in self.run.call_args_list:
             self.assertEqual(call.args[0][1], "--no-auto-update")
+
+    def test_claude_sanitizer_preserves_correlations_inputs_and_terminal(self):
+        import json
+        convert = self.recorder.claude_events()
+        payload = {'decision': 'revise', 'plan': 'x' * 500, 'reason': 'Synthetic'}
+        request = convert({'type': 'assistant', 'session_id': 'private-session', 'message': {
+            'id': 'private-message', 'content': [
+                {'type': 'thinking', 'thinking': 'private reasoning', 'signature': 'opaque'},
+                {'type': 'tool_use', 'name': 'Read', 'id': 'private-tool',
+                 'input': {'file_path': '/home/user/' + 'a' * 500}}]},
+            'wire_tool_inputs': {'private-tool': 'x' * 500}})
+        denied = convert({'type': 'system', 'subtype': 'permission_denied',
+                          'tool_name': 'Read', 'tool_use_id': 'private-tool'})
+        result = convert({'type': 'user', 'message': {'content': [
+            {'type': 'tool_result', 'tool_use_id': 'private-tool', 'is_error': True,
+             'content': 'Denied ' + 'x' * 500}]}})
+        final = convert({'type': 'result', 'subtype': 'success', 'is_error': False,
+                         'structured_output': payload, 'usage': {'input_tokens': 0}})
+        tool = request['message']['content'][1]
+        self.assertEqual(request['wire_tool_inputs'], {tool['id']: 'x' * 500})
+        self.assertEqual(tool['id'], denied['tool_use_id'])
+        self.assertEqual(tool['id'], result['message']['content'][0]['tool_use_id'])
+        self.assertTrue(result['message']['content'][0]['is_error'])
+        self.assertTrue(tool['input']['file_path'].endswith('a' * 500))
+        self.assertEqual(final['structured_output'], payload)
+        self.assertEqual(final['usage'], {'input_tokens': 0})
+        text = json.dumps([request, denied, result, final])
+        for secret in ('private-session', 'private-message', 'private-tool', 'private reasoning', 'opaque'):
+            self.assertNotIn(secret, text)
+        self.assertIn('[trimmed]', text)
+        # Sanitization must not repair an invalid response by dropping extra keys.
+        invalid = convert({'type': 'result', 'structured_output': {**payload, 'thinking': 'extra'}})
+        self.assertIn('thinking', invalid['structured_output'])
+        error = convert({'type': 'result', 'is_error': True,
+                         'result': 'x' * 500 + ' invalid api key'})
+        self.assertTrue(error['result'].endswith('invalid api key'))
+
+    def test_claude_sanitizer_removes_rate_limit_account_metadata(self):
+        event = self.recorder.claude_events()({
+            'type': 'rate_limit_event', 'uuid': 'private-event',
+            'rate_limit_info': {'status': 'allowed', 'overageStatus': 'credit-state'}})
+        self.assertEqual(event, {'type': 'rate_limit_event', 'uuid': 'fixture-id-1'})
+
+    def test_import_truncated_final_line_records_omission(self):
+        for tail in (b'{"type":"assistant"', b'{"type":"assistant","text":"\xe2\x82'):
+            for existing in (None, {'process_status': 'timeout', 'completion': 'invalid'}):
+                with self.subTest(tail=tail, existing=existing), tempfile.TemporaryDirectory() as scratch:
+                    run = Path(scratch)
+                    attempt = run / 'attempt-001'
+                    attempt.mkdir()
+                    (run / 'versions.json').write_text('{"claude":"2.1.330"}')
+                    (attempt / 'stdout.log').write_bytes(b'{"type":"system","subtype":"init"}\n' + tail)
+                    if existing is not None:
+                        (attempt / 'claude-stream.json').write_text(json.dumps(existing))
+                    self.write.reset_mock()
+                    self.recorder.record_attempt(argparse.Namespace(
+                        cli='claude', attempt=attempt, name='truncated'))
+                    written = {call.args[1]: call.args[2] for call in self.write.call_args_list}
+                    self.assertEqual(json.loads(written['events-truncated.jsonl']),
+                                     {'type': 'system', 'subtype': 'init'})
+                    self.assertEqual(json.loads(written['metadata-truncated.json']),
+                                     {**(existing or {}),
+                                      'fixture_import': {'truncated_final_line': True}})
+
+    def test_import_rejects_malformed_complete_or_interior_lines(self):
+        for raw in ('{"type":\n', '{"type":\n{"type":"system"}\n'):
+            with self.subTest(raw=raw), tempfile.TemporaryDirectory() as scratch:
+                path = Path(scratch) / 'stdout.log'
+                path.write_text(raw)
+                with self.assertRaises(json.JSONDecodeError):
+                    self.recorder.jsonl(path, self.recorder.claude_events())

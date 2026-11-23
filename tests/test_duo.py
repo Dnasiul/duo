@@ -67,7 +67,7 @@ class Fixture(unittest.TestCase):
 if '--version' in sys.argv:
     print('test CLI 1.0'); sys.exit(0)
 if '--help' in sys.argv:
-    print('--sandbox --ephemeral --json --output-schema --ignore-rules --ignore-user-config --strict-config --safe-mode --restricted --setting-sources --settings --strict-mcp-config --no-chrome --disable-slash-commands --tools --allowedTools'); sys.exit(0)
+    print('--sandbox --ephemeral --json --output-schema --ignore-rules --ignore-user-config --strict-config --safe-mode --restricted --setting-sources --settings --strict-mcp-config --no-chrome --disable-slash-commands --tools --allowedTools --output-format stream-json --verbose --json-schema'); sys.exit(0)
 if 'features' in sys.argv:
     print({chr(10).join(name + ' stable false' for name in CODEX_DISABLED)!r}); sys.exit(0)
 if 'mcp' in sys.argv:
@@ -719,13 +719,13 @@ assert '--effort' not in sys.argv
 assert sys.argv[sys.argv.index('--tools') + 1] == 'Read,Glob,Grep'
 assert json.loads(sys.argv[sys.argv.index('--json-schema') + 1])['type'] == 'object'
 sys.stdin.read()
-print(json.dumps({'is_error':False,'subtype':'success','structured_output':{'decision':'approve','plan':'','reason':'Ready'}}))
+print(json.dumps({'type':'result','is_error':False,'subtype':'success','structured_output':{'decision':'approve','plan':'','reason':'Ready'}}))
 ''')
         adapter = CLIAdapter(replace(self.config, claude_bin=binary), self.store)
         self.assertEqual(adapter("claude", "Review", 5)["reason"], "Ready")
 
     def test_claude_error_metadata_even_with_zero_exit(self):
-        binary = self.executable("claude-error", "print('{\"is_error\": true, \"subtype\": \"error_max_turns\"}')\n")
+        binary = self.executable("claude-error", "print('{\"type\": \"result\", \"is_error\": true, \"subtype\": \"error_max_turns\"}')\n")
         adapter = CLIAdapter(replace(self.config, claude_bin=binary), self.store)
         with self.assertRaises(AgentError) as caught:
             adapter("claude", "Review", 5)
@@ -786,7 +786,7 @@ print(json.dumps({'is_error':False,'subtype':'success','structured_output':{'dec
         # Shape of Claude Code 2.1.296 output for --model opus-5-5.
         binary = self.executable("claude-model", "import json, sys\n"
                                  "print('[claude-code:unrecognized_model] {\"model\":\"opus-5-5\"}', file=sys.stderr)\n"
-                                 "print(json.dumps({'is_error': True, 'subtype': 'success', "
+                                 "print(json.dumps({'type':'result','is_error': True, 'subtype': 'success', "
                                  "'api_error_status': 404, 'result': \"There's an issue with the "
                                  "selected model (opus-5-5). It may not exist or you may not have access to it.\"}))\n"
                                  "raise SystemExit(1)\n")
@@ -799,7 +799,7 @@ print(json.dumps({'is_error':False,'subtype':'success','structured_output':{'dec
 
     def test_claude_nonzero_exit_classified_from_error_metadata(self):
         binary = self.executable("claude-auth", "import json\n"
-                                 "print(json.dumps({'is_error': True, 'subtype': 'success', "
+                                 "print(json.dumps({'type':'result','is_error': True, 'subtype': 'success', "
                                  "'result': 'Invalid API key · Please run /login'}))\n"
                                  "raise SystemExit(1)\n")
         adapter = CLIAdapter(replace(self.config, claude_bin=binary), self.store)
@@ -832,7 +832,7 @@ else:
 if '-o' in sys.argv:
     pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(json.dumps(result))
 else:
-    print(json.dumps({'is_error':False,'subtype':'success','structured_output':result}))
+    print(json.dumps({'type':'result','is_error':False,'subtype':'success','structured_output':result}))
 ''')
         config = replace(self.config, codex_bin=binary, claude_bin=binary)
         file = PlanFile(self.repo)
@@ -960,7 +960,7 @@ if 'exec' in sys.argv:
     pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
 else:
     assert sys.argv[sys.argv.index('--effort') + 1] == 'high'
-    print(json.dumps({'is_error': False, 'subtype': 'success', 'structured_output': result}))
+    print(json.dumps({'type':'result','is_error': False, 'subtype': 'success', 'structured_output': result}))
 ''')
         (self.repo / "plan.md").write_text("Existing plan")
         output = io.StringIO()

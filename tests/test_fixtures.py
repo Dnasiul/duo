@@ -15,7 +15,8 @@ from unittest.mock import patch
 
 from test_duo import Fixture
 from duo import copilot
-from duo.adapters import CLIAdapter, codex_error_text, copilot_reply
+from duo.adapters import (CLIAdapter, claude_error_text, classify_failure, codex_error_text,
+                          copilot_reply, read_json)
 from duo.models import SECRET_PATTERNS, AgentError, validate_review
 from duo.policy import TESTED_VERSIONS, verify_claude_remote, verify_controls, verify_version
 
@@ -92,6 +93,7 @@ class RecordedProbeTests(unittest.TestCase):
                     self.assertIsNone(pattern.search(content), kind)
                 # Uppercase names such as /Users/AGENTS.md are probed paths, not homes.
                 self.assertIsNone(re.search(r"/(?:Users|home)/(?!user\b)[a-z]", content))
+                self.assertNotIn('"rate_limit_info"', content)
 
 
 class RecordedResponseTests(Fixture):
@@ -124,20 +126,17 @@ sys.exit({code})
                 validate_review(review, "# Plan\n")
 
     def test_claude_success_envelope(self):
-        binary = self.replay("claude", stdout=self.path("claude", "result-approve.json"))
-        review = CLIAdapter(replace(self.config, claude_bin=binary), self.store)("claude", "Review", 5)
+        # Historical --output-format json evidence, not a stream recording.
+        envelope = read_json(Path(self.path("claude", "result-approve.json")))
+        review = validate_review(envelope['structured_output'], '# Plan\n')
         self.assertEqual(review["decision"], "approve")
 
     def test_claude_unrecognized_model(self):
         # Claude Code reports this with subtype "success" and is_error true.
-        for code in (0, 1):
-            binary = self.replay(f"claude-{code}", stdout=self.path("claude", "result-unrecognized-model.json"),
-                                 stderr=self.path("claude", "stderr-unrecognized-model.txt"), code=code)
-            adapter = CLIAdapter(replace(self.config, claude_bin=binary, claude_model="opus-5.5"), self.store)
-            with self.subTest(code=code), self.assertRaises(AgentError) as caught:
-                adapter("claude", "Review", 5)
-            self.assertFalse(caught.exception.retryable)
-            self.assertIn("opus-5.5", str(caught.exception))
+        envelope = read_json(Path(self.path("claude", "result-unrecognized-model.json")))
+        error = classify_failure(claude_error_text(envelope), 'opus-5.5')
+        self.assertFalse(error.retryable)
+        self.assertIn('opus-5.5', str(error))
 
     def test_copilot_event_streams(self):
         # GPT models mark the answer phase "final_answer"; Claude models omit phase.
@@ -162,3 +161,78 @@ sys.exit({code})
                 adapter("codex", "Review", 5)
             self.assertFalse(caught.exception.retryable)
             self.assertIn(message, str(caught.exception))
+
+    def test_claude_recorded_streams(self):
+        directory = FIXTURES / 'claude-2.1.330'
+        for name in ('noweb', 'web', 'webtools'):
+            path = directory / f'events-{name}.jsonl'
+            raw = path.read_text()
+            binary = self.replay('claude-stream', stdout=str(path))
+            adapter = CLIAdapter(replace(self.config, claude_bin=binary,
+                                         allow_web=name != 'noweb'), self.store)
+            review = adapter('claude', 'Review', 5)
+            self.assertEqual(review['decision'], 'approve')
+            attempt = max(self.store.path.glob('attempt-*'), key=lambda p: p.stat().st_mtime_ns)
+            self.assertEqual((attempt / 'stdout.log').read_text(), raw)
+            metadata = json.loads((attempt / 'claude-stream.json').read_text())
+            self.assertTrue(metadata['payload_validated'])
+            self.assertTrue(metadata['usage_available'])
+
+    def test_claude_recorded_turn_limit_failure(self):
+        path = FIXTURES / 'claude-2.1.330/events-maxturns.jsonl'
+        for code in (0, 1):
+            binary = self.replay('claude-failed-stream', stdout=str(path), code=code)
+            adapter = CLIAdapter(replace(self.config, claude_bin=binary), self.store)
+            with self.assertRaisesRegex(AgentError, 'internal turn limit') as caught:
+                adapter('claude', 'Review', 5)
+            self.assertFalse(caught.exception.retryable)
+            attempt = max(self.store.path.glob('attempt-*'), key=lambda p: p.stat().st_mtime_ns)
+            self.assertEqual((attempt / 'stdout.log').read_bytes(), path.read_bytes())
+            self.assertEqual(json.loads((attempt / 'claude-stream.json').read_text())['completion'],
+                             'unsuccessful')
+
+    def test_claude_recorded_timeout_streams_cannot_be_reviews(self):
+        directory = FIXTURES / 'claude-2.1.330'
+        for name in ('timeout-noweb', 'timeout-web'):
+            path = directory / f'events-{name}.jsonl'
+            metadata = json.loads((directory / f'metadata-{name}.json').read_text())
+            self.assertEqual(metadata['process_status'], 'timeout')
+            self.assertFalse(metadata['usage_available'])
+            binary = self.replay('claude-partial-stream', stdout=str(path))
+            adapter = CLIAdapter(replace(self.config, claude_bin=binary), self.store)
+            # Even an artificial zero exit cannot turn this partial live log into a review.
+            with self.assertRaisesRegex(AgentError, 'exactly one terminal result'):
+                adapter('claude', 'Review', 5)
+
+    def test_claude_recorded_requests_results_denials_and_web_counters(self):
+        directory = FIXTURES / 'claude-2.1.330'
+        for name, expected in (('noweb', {'Read', 'Glob', 'Grep'}),
+                               ('web', {'WebSearch', 'WebFetch'}),
+                               ('webtools', {'Read', 'Glob', 'Grep', 'WebSearch'})):
+            events = [json.loads(line) for line in (directory / f'events-{name}.jsonl').read_text().splitlines()]
+            requests, results = {}, {}
+            denied = {e['tool_use_id'] for e in events if e.get('subtype') == 'permission_denied'}
+            for event in events:
+                for block in (event.get('message', {}).get('content', [])
+                              if event.get('type') in ('assistant', 'user') else []):
+                    if block['type'] == 'tool_use':
+                        requests[block['id']] = block
+                    elif block['type'] == 'tool_result':
+                        results[block['tool_use_id']] = block
+            successes = {request['name'] for key, request in requests.items()
+                         if key in results and not results[key].get('is_error')}
+            self.assertTrue(expected <= successes)
+            self.assertTrue(all(request['input'] for request in requests.values()))
+            self.assertTrue(set(results) <= set(requests))
+            if name == 'noweb':
+                self.assertEqual(len(denied), 1)
+                errors = {key for key, result in results.items() if result.get('is_error')}
+                self.assertTrue(denied < errors)  # missing file is an ordinary error, not a denial
+                self.assertEqual(denied, {d['tool_use_id'] for d in events[-1]['permission_denials']})
+                self.assertNotIn('WebSearch', events[0]['tools'])
+            else:
+                self.assertTrue({'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'}
+                                <= set(events[0]['tools']))
+                self.assertEqual(events[-1]['usage']['server_tool_use'],
+                                 {'web_search_requests': 0, 'web_fetch_requests': 0})
+                self.assertFalse(denied)

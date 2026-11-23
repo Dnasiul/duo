@@ -159,6 +159,61 @@ def claude_error_text(envelope: object) -> str:
     return "\n".join(fields)
 
 
+def claude_result(path: Path, metadata: dict, *, max_output_mb: int) -> dict:
+    """Read a complete JSONL stream, never an intermediate assistant answer.
+
+    Unknown event types are retained on disk and tolerated. Every emitted line
+    must still be an event object, and exactly one result must end the stream.
+    Metadata describes the stream, independently of process/workflow success.
+    """
+    metadata.update(completion="invalid", terminal_results=0, usage_available=False,
+                    usage=None)
+    terminal = None
+    last_type = None
+    try:
+        if path.stat().st_size > max_output_mb * 1024 * 1024:
+            raise AgentError(f"Claude output exceeds the {max_output_mb} MiB limit "
+                             "(--max-output-mb)", retryable=False)
+        with path.open(encoding="utf-8") as lines:
+            for line in lines:
+                if not line.strip():
+                    continue
+                event = parse_json(line)
+                if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+                    raise AgentError("Claude returned an invalid stream event")
+                last_type = event["type"]
+                if last_type == "result":
+                    metadata["terminal_results"] += 1
+                    terminal = event
+    except (OSError, UnicodeError, RecursionError) as exc:
+        raise AgentError("Claude returned missing or invalid stream data") from exc
+    if metadata["terminal_results"] != 1:
+        metadata["completion"] = "missing" if terminal is None else "ambiguous"
+        raise AgentError("Claude stream must contain exactly one terminal result")
+    if last_type != "result":
+        raise AgentError("Claude emitted events after its terminal result")
+    if not isinstance(terminal.get("subtype"), str) or type(terminal.get("is_error")) is not bool:
+        raise AgentError("Claude returned an invalid result envelope")
+    metadata["completion"] = ("success" if terminal["subtype"] == "success"
+                              and terminal["is_error"] is False else "unsuccessful")
+    metadata["usage_available"] = isinstance(terminal.get("usage"), dict)
+    metadata["usage"] = terminal["usage"] if metadata["usage_available"] else None
+    return terminal
+
+
+def claude_stream_error_text(path: Path) -> str:
+    """Bounded failure diagnostics, even if another stream event is damaged."""
+    messages = []
+    for line in read_tail(path, 8 * DIAGNOSTIC_BYTES).splitlines():
+        try:
+            event = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        if isinstance(event, dict) and event.get("type") == "result":
+            messages.append(claude_error_text(event))
+    return "\n".join(messages[-4:])
+
+
 def codex_error_text(events: Path) -> str:
     """Error messages from Codex's JSONL events; agent messages are never read."""
     messages = []
@@ -359,7 +414,7 @@ class CLIAdapter:
         if agent != "claude":
             raise ValueError("Unknown agent")
         argv = [config.claude_bin, "-p", "--model", config.claude_model,
-                "--output-format", "json", "--json-schema", json.dumps(SCHEMA),
+                "--output-format", "stream-json", "--verbose", "--json-schema", json.dumps(SCHEMA),
                 "--tools", ",".join(claude_tools(config.allow_web)),
                 "--allowedTools", ",".join(claude_tools(config.allow_web)),
                 *claude_options(self.settings_path), "--disallowedTools", "mcp__*",
@@ -405,11 +460,13 @@ class CLIAdapter:
         argv = self.command(agent, directory)
         (directory / "command.json").write_text(json.dumps(argv), encoding="utf-8")
         stdout, stderr = directory / "stdout.log", directory / "stderr.log"
-        # Capture only what the CLI emits, not an archive of inspected files or
-        # pages. Native Claude's JSON result omits successful tool transcripts.
+        # Raw CLI events survive failures and interruption; they are not an
+        # archive of every inspected file or page.
         self.store.event({"event": "cli_start", "agent": agent, "backend": backend,
                           "model": getattr(self.config, f"{agent}_model"),
                           "attempt_dir": directory.name})
+        if backend == "native" and agent == "claude":
+            return self.claude_attempt(argv, prompt, timeout, stdout, stderr, env)
         try:
             code = run_process(argv, prompt, self.config.repo, timeout, stdout, stderr, env=env,
                                check=lambda: self.limit_message(stdout, stderr))
@@ -430,20 +487,59 @@ class CLIAdapter:
             diagnostic = read_tail(stderr)
             if backend == "native" and agent == "codex":
                 diagnostic += "\n" + codex_error_text(stdout)
-            elif backend == "native":
-                try:
-                    diagnostic += "\n" + claude_error_text(read_json(stdout))
-                except AgentError:
-                    pass
             raise classify_failure(diagnostic, getattr(self.config, f"{agent}_model"))
         if backend == "copilot":
             return validate_payload(copilot_reply(stdout))
         if agent == "codex":
             return validate_payload(read_json(directory / "response.json"))
-        envelope = read_json(stdout)
-        if not isinstance(envelope, dict):
-            raise AgentError("Claude returned an invalid result envelope")
-        if envelope.get("is_error") is not False or envelope.get("subtype") != "success":
-            raise classify_failure(claude_error_text(envelope),
-                                   getattr(self.config, f"{agent}_model"))
-        return validate_payload(envelope.get("structured_output"))
+
+    def claude_attempt(self, argv: list[str], prompt: str, timeout: float,
+                       stdout: Path, stderr: Path, env: dict[str, str]) -> dict[str, str]:
+        metadata = {"process_status": "interrupted", "returncode": None,
+                    "payload_validated": False}
+        stream_error = None
+        envelope = None
+        failing = False
+        try:
+            try:
+                code = run_process(argv, prompt, self.config.repo, timeout, stdout, stderr,
+                                   env=env, check=lambda: self.limit_message(stdout, stderr))
+                metadata.update(process_status="exited", returncode=code)
+            except subprocess.TimeoutExpired as exc:
+                metadata["process_status"] = "timeout"
+                raise AgentTimeout("Agent CLI timed out") from exc
+            except LimitExceeded as exc:
+                metadata["process_status"] = "resource_limit"
+                raise AgentError(str(exc), retryable=False) from exc
+            except OSError as exc:
+                metadata["process_status"] = "capture_error"
+                raise AgentError("Cannot start or capture the agent CLI", retryable=False) from exc
+            finally:
+                # Also inspect partial logs after timeout, SIGTERM, or Ctrl-C.
+                # Parsing failure must never replace the original interruption.
+                try:
+                    envelope = claude_result(stdout, metadata,
+                                             max_output_mb=self.config.max_output_mb)
+                except AgentError as exc:
+                    stream_error = exc
+            if code:
+                diagnostic = read_tail(stderr) + "\n" + (
+                    claude_error_text(envelope) if envelope is not None
+                    else claude_stream_error_text(stdout))
+                raise classify_failure(diagnostic, self.config.claude_model)
+            if stream_error:
+                raise stream_error
+            if metadata["completion"] != "success":
+                raise classify_failure(claude_error_text(envelope), self.config.claude_model)
+            result = validate_payload(envelope.get("structured_output"))
+            metadata["payload_validated"] = True
+            return result
+        except BaseException:
+            failing = True
+            raise
+        finally:
+            try:
+                self.store.json(f"{stdout.parent.name}/claude-stream.json", metadata)
+            except Exception as exc:
+                if not failing:
+                    raise AgentError("Cannot write Claude stream metadata", retryable=False) from exc
