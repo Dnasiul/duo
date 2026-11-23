@@ -129,8 +129,50 @@ This is **best-effort detection**:
   secrets;
 - it applies to the plan and reason, not to what the CLI logs locally.
 
-Its run time grows linearly with input; adversarial inputs at the 1 MiB limit
-take well under a second (tested).
+The scanner consumes marker-based token runs once, including OpenAI and JWT
+near-matches, deduplicates candidate values, and searches the current document
+for multiple distinct values in one pass per credential format. Already-known
+values remain permitted as substrings, with normalized line endings; plan and
+reason are scanned separately.
+
+Measured on CPython 3.12.3, Linux 7.0.0-44-generic, x86_64, glibc 2.39:
+
+| Response size | Repeated `sk-` near-matches | Repeated `eyJ-`, no dots | Valid JWT first part + dot, then `eyJ-` repeats | Repeated GitHub-shaped value, known only at document end | Distinct GitHub-shaped values, known in document's second half |
+| --- | --- | --- | --- | --- | --- |
+| 128 KiB | 0.0136 s | 0.0138 s | 0.0138 s | 0.0145 s | 0.0673 s |
+| 256 KiB | 0.0276 s | 0.0278 s | 0.0277 s | 0.0296 s | 0.1499 s |
+| 512 KiB | 0.0539 s | 0.0557 s | 0.0558 s | 0.0575 s | 0.3037 s |
+| 1 MiB | 0.1062 s | 0.1081 s | 0.1090 s | 0.1141 s | 0.6511 s |
+
+These are minimum scan times over three fresh processes per case, excluding
+process startup and input construction, using the size-doubling regression test
+in `tests/test_duo.py`. The known document is the same size as the response for
+the GitHub cases; the distinct case repeats each value twice in the response.
+The JWT second-part case is `"eyJ" + "a" * 10 + "."` followed by repeated
+`"eyJ-"`, truncated to the response size. The `sk-` case also took 0.00129,
+0.00256, and 0.00515 s at 12,288, 24,576, and 49,152 bytes. Doubling from
+128 KiB through 1 MiB increased scan times by 1.94–2.23 times, rather than the
+roughly fourfold growth of the reported quadratic cases. These measurements are
+specific to this interpreter and host. The tests retain a five-second per-case
+guard at the 1 MiB limit and enforce a subprocess timeout; the maximum-size
+checks include the existing PEM adversarial cases, and the size-doubling test
+checks scaling.
+
+Peak memory was also measured with 25,575 distinct GitHub-shaped values in a
+1 MiB response and the same values reversed in a 1 MiB known document, without
+duplicates. Each value was `ghp_` followed by 36 characters drawn using
+`random.Random(0).choices(string.ascii_letters + string.digits, k=36)`, producing
+early trie branches with little prefix sharing. Across three fresh processes
+with five-second timeouts, the minimum scan time was 1.6766 s and peak process
+RSS was 233.0 MiB (`resource.getrusage(resource.RUSAGE_SELF).ru_maxrss`, Linux
+KiB converted to MiB), up 209.5 MiB from the pre-scan high-water mark after input
+construction. The dictionary-per-node known-value index therefore has material
+memory overhead at the input limit; the timing table's distinct case uses half
+as many unique values and does not represent this memory stress case.
+
+Duo rechecks the run deadline after response validation. If validation finishes
+at or after the deadline, the run records `limit_reached` without accepting or
+displaying the review, publishing a revision, or changing the existing approvals.
 
 ## Local files
 
