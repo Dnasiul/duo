@@ -23,8 +23,8 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 | Live runs on Linux: smoke test (native and Copilot) and all four backend combinations, including both mixed pairs | "Linux live verification" below |
 | Live mixed pairs on macOS, with the restricted reviewer environment (`8ffff97`) | "macOS live verification" below |
 | Restricted reviewer environment live on Linux: all four backend combinations (0.3.1) | "Linux live verification" below |
-| Codex MCP check matches the configuration reviews load, so user-configured MCP servers no longer block native Codex | `src/duo/policy.py` (`verify_controls`) |
-| Confinement of file reads and searches tested for every reviewer and backend | `scripts/smoke_inspection.py --confinement`, `--search-confinement`; "Linux live verification" below |
+| Codex MCP check excludes user configuration with an empty `CODEX_HOME`; usual stored login is absent, allowed authentication variables and `--pass-env` additions can remain; login-fetched policy unverified | `src/duo/policy.py` (`verify_controls`) |
+| Historical confinement matrix: native Codex outside reads succeeded and dedicated searches were declined (no boundary test); native Claude outside reads/searches denied; Copilot Claude outside reads/searches denied; Copilot GPT outside searches and symlink read denied, temporary/home reads not attempted and still unverified | `scripts/smoke_inspection.py --confinement`, `--search-confinement`; "Linux live verification" below; open follow-up in plan §8 |
 | Release 0.1.0 (2026-10-13): tag `v0.1.0` on `94186b7`, wheel, sdist, `constraints.txt`, `SHA256SUMS`; release notes hold the release report | https://github.com/Dnasiul/duo/releases/tag/v0.1.0 |
 | Release 0.2.0 (2026-10-13): document modes (experimental); tag `v0.2.0` on `67538e2`, same files and release report | https://github.com/Dnasiul/duo/releases/tag/v0.2.0 |
 | Release 0.2.1 (2026-10-13): `--output` fixes (`.git` case-insensitive, directory targets) and `duo.__version__`; tag `v0.2.1` on `c41ea59`, same files and release report; published with `gh`, downloads verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.2.1 |
@@ -51,6 +51,36 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
    validated on macOS on 2026-11-10 (below); live Linux verification pending.
 4. **Copilot CLI 1.0.103+** (`--sync-session`): validated on Linux with 1.0.105
    on 2026-10-28 (below); live macOS verification remains pending.
+5. **F3: Copilot GPT temporary/home reads** (plan §8): the historical matrix
+   records no attempt at these reads; only the GPT symlink read was denied.
+   Obtain actual attempts with explicit denial or observed access for an
+   available GPT model. Copilot 1.0.105's later `claude-sonnet-5.5` checks in both
+   reviewer roles do not fill this gap. Native Codex's declined dedicated-search
+   requests likewise remain untested operations, not confinement successes.
+6. **Authenticated policy and network boundaries** (plan §8): unavailable
+   authenticated policy evidence remains unverified. An empty Codex home removes
+   its usual stored login, not allowed environment authentication; accepted
+   Claude `doctor` "not fetched" states are not authenticated checks. Network
+   denial requires controlled connection attempts and a working comparison path;
+   the historical DNS failures alone do not establish it. Managed deployments
+   remain unsupported.
+7. **F4: native Claude tool audit** (plan §2): JSON results contain an answer,
+   token usage, and permission denials, but no successful file-read/web-tool
+   transcript. The planned event stream must be validated and retain its observed
+   omissions. Document snapshots archive the reviewed document only; neither
+   current nor proposed emitted logs guarantee complete file/page archives.
+
+## Assurance-record correction (plan §9.2)
+
+F2–F4 documentation and policy metadata now separate supplied settings,
+advertised options, selected effective metadata, and historical behavior tests.
+This correction adds no live evidence and changes no restrictions or probes.
+Preflight and drift checks make no model calls, can retain allowed credentials,
+and do not exercise write/read/network boundaries or every tool restriction.
+The deterministic Codex write-denial results below remain historical evidence:
+Linux x86-64 0.164.0, 0.165.0, 0.166.0; macOS 27.2 arm64 0.167.0. The separate
+0.164.0 model-directed write attempt remains inconclusive. Open items 5–7 retain
+the missing confinement, authenticated-policy/network, and audit evidence.
 
 ## Codex 0.167.0 compatibility validation
 
@@ -115,7 +145,7 @@ unchanged, read-only commands only. Fixtures: `tests/fixtures/codex-0.166.0/`.
 
 2026-11-02, Linux x86-64; codex-cli 0.165.0 (installed by Codex's own update),
 Claude Code 2.1.316, Copilot CLI 1.0.96. `check_drift.py` reported
-`untested-version` with every control verified.
+`untested-version` with every configuration probe passing (not a behavioral test).
 
 Compared with 0.164.0, `exec --help` is unchanged and the empty-home MCP list is
 empty. With Duo's options and an empty `CODEX_HOME`, all nine features Duo
@@ -225,6 +255,8 @@ no token in any file, `calc.py` unchanged, no Copilot runtime left behind, and
 the policy records `session_flags`. Whether a session is synced is decided by
 GitHub's service; the evidence is the option Duo passes and the CLI's own
 description of it. macOS is not yet checked.
+Both Copilot roles here used Claude; these denials supply no new GPT
+temporary/home read evidence.
 
 ## Web access live verification
 
@@ -242,11 +274,16 @@ Every finding matched an independent Crossref query; no token in any file; the
 material was unchanged. Native Codex used web search; its sandboxed `curl` and
 Python requests could not resolve hosts. Copilot used only `web_fetch` (doi.org,
 api.crossref.org, journals.aps.org). Native Claude's JSON output lists no tool
-calls and its usage counters stayed at zero, so a separate call with Duo's exact
+calls and its web-search/fetch counters stayed at zero, so a separate call with Duo's exact
 command line asked it for the 0.3.1 wheel's checksum from the release's
 `SHA256SUMS`: it returned the correct value, which requires a fetch, and also ran
 a web search. Not yet tested: `--allow-web` on macOS, with mixed pairs, or in
 other modes.
+
+These logs are partial emitted evidence, not independent archives of files or
+pages. Disabling web still permits readable information to reach model providers;
+web adds search-provider and arbitrary-URL disclosure paths. The native Claude
+audit gap remains open above and in plan §2.
 
 ## Document modes live verification
 
@@ -379,8 +416,9 @@ CLIs: codex-cli 0.162.1, Claude Code 2.1.296, Copilot CLI 1.0.96 (within the
 tested 1.0.x range). Offline suite: 137 tests, OK. `check_drift.py`: all compatible.
 The first preflight refused native Codex because the user configuration defines
 an MCP server: `-c mcp_servers={}` does not remove configured servers. The MCP
-check now lists servers against an empty `CODEX_HOME`, which loads what a review
-loads (reviews pass `--ignore-user-config`); the live runs below were made with
+check now lists servers against an empty `CODEX_HOME`, excluding user configuration
+as reviews do with `--ignore-user-config`, but also removing the usual stored-login
+location (allowed authentication variables can remain); the live runs below were made with
 that server commented out, and the smoke test was repeated with it enabled.
 
 Smoke test: Codex and Claude, natively (`gpt-6-astra`, `claude-sonnet-5-5`) and
@@ -500,7 +538,10 @@ Tools seen in the attempts:
   consistent with the known lack of read confinement.
 - Native Claude: its JSON output does not list tool calls; no permission denials.
 
-Confinement (`smoke_inspection.py --confinement`, same models): each reviewer was
+Historical confinement matrix (`smoke_inspection.py --confinement`, initial Linux
+checks: codex-cli 0.162.1, Claude Code 2.1.296, Copilot CLI 1.0.96;
+native `gpt-6-astra` / `claude-sonnet-5-5`, Copilot `gpt-5.4` /
+`claude-sonnet-5.5`): each reviewer was
 asked to read a file in the temporary directory, one hidden in the home directory,
 and one through a symbolic link inside the repository.
 
@@ -514,8 +555,8 @@ and one through a symbolic link inside the repository.
 Denials come from the CLIs' own records: Claude Code's `permission_denials` (`Read`)
 and Copilot's tool events (`view`: "Permission denied because no interactive user
 response was available"). No phrase from an unread file appeared in the response
-or audit files. Codex via Copilot runs on the same CLI and settings as Claude via
-Copilot.
+or audit files. The shared Copilot CLI and settings do not turn unattempted GPT
+reads into denial evidence; those temporary/home reads remain open in plan §8.
 
 Search confinement (`smoke_inspection.py --search-confinement`, same models): each
 outside directory held one file whose name and content carried separate random
@@ -531,6 +572,8 @@ tools only.
 
 No file-name or content phrase appeared in any response or audit file. Copilot
 names its grep tool `rg` for the Codex model and `grep` for the Claude model.
+Native Codex declined the dedicated-search requests without attempting them;
+this is not evidence of search confinement.
 
 ## Set up the Linux machine
 

@@ -253,7 +253,11 @@ class CLIAdapter:
         return reviewer_environment(cli, self.config.pass_env)
 
     def probe(self, argv: list[str], env: dict[str, str] | None = None) -> str:
-        """Run a setup probe in the same restricted environment a review gets."""
+        """Run a setup probe without model calls; allowed authentication may remain.
+
+        Uses the reviewer's restricted environment unless an explicit probe
+        environment is supplied (e.g. the empty Codex home for MCP listing).
+        """
         if env is None:
             env = self.environment("claude" if argv[0] == self.config.claude_bin else "codex")
         try:
@@ -401,6 +405,8 @@ class CLIAdapter:
         argv = self.command(agent, directory)
         (directory / "command.json").write_text(json.dumps(argv), encoding="utf-8")
         stdout, stderr = directory / "stdout.log", directory / "stderr.log"
+        # Capture only what the CLI emits, not an archive of inspected files or
+        # pages. Native Claude's JSON result omits successful tool transcripts.
         self.store.event({"event": "cli_start", "agent": agent, "backend": backend,
                           "model": getattr(self.config, f"{agent}_model"),
                           "attempt_dir": directory.name})

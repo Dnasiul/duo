@@ -300,6 +300,29 @@ reply({'decision': 'approve', 'plan': '', 'reason': 'Ready'})
         with self.assertRaisesRegex(RunError, 'required inspection'):
             CLIAdapter(self.copilot_config(binary), self.store).preflight()
 
+    def test_preflight_record_limits_assurance_to_options_and_selected_metadata(self):
+        # The fake exits after metadata probes; no review or tool call is needed
+        # for a successful preflight, so the record must not imply one occurred.
+        binary = self.fake("raise AssertionError('Unexpected model call')")
+        CLIAdapter(self.copilot_config(binary), self.store).preflight()
+        policy = json.loads((self.store.path / 'reviewer-policy.json').read_text())
+        record = policy['copilot']
+        self.assertEqual(record['preflight_checks'],
+                         'Required option names advertised; selected effective config values '
+                         'match settings; local managed and repository sources checked')
+        self.assertEqual(record['settings'], copilot.SETTINGS)
+        self.assertEqual(record['tools'], ['view', 'glob', 'grep'])
+        self.assertEqual(record['assurance'],
+                         'Settings are checked as metadata; tools, session_flags, extensions and '
+                         'disabled_workspace_mcp_servers describe supplied restrictions. No per-run '
+                         'write-denial, read-confinement, network-denial or tool-use tests; '
+                         'service-side session behavior is unverified')
+        self.assertEqual(record['extensions'],
+                         'configured off via fresh configuration, environment and CLI options; '
+                         'no inherited plugins, MCP servers or trusted folders requested')
+        self.assertIn('not behavioral enforcement', policy['assurance'])
+        self.assertNotIn('duo-test-token', json.dumps(policy))
+
 
 def copilot_efforts():
     from duo.models import COPILOT_EFFORTS

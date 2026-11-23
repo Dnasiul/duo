@@ -70,7 +70,7 @@ def reviewer_environment(cli: str, extra: tuple[str, ...] = ()) -> dict[str, str
 def codex_overrides(allow_web: bool = False) -> tuple[str, ...]:
     """Codex configuration overrides; --allow-web turns on its live web search tool.
 
-    Sandboxed commands stay read-only and without network access either way.
+    Both modes request the read-only sandbox; this does not probe network denial.
     """
     if not allow_web:
         return CODEX_OVERRIDES
@@ -94,8 +94,8 @@ def claude_options(settings: Path) -> list[str]:
 
 # Versions whose inspection controls and output formats were exercised with real
 # runs: [first tested, first untested). Later patch releases within a tested minor
-# version are accepted; the help and feature probes still verify every control on
-# each run. Codex is 0.x, where a minor bump may break compatibility: extend the
+# version are accepted; each run still checks advertised options and selected
+# effective metadata, not behavioral enforcement. Codex is 0.x: extend the
 # upper bound one minor version at a time, only with probe and live-run evidence.
 TESTED_VERSIONS = {
     "codex": ((0, 162, 1), (0, 168, 0)),
@@ -204,15 +204,20 @@ def verify_claude_remote(report: str) -> str:
 def verify_controls(codex: str, claude: str, settings: Path,
                     probe: Callable[..., str], agents: set[str] | None = None,
                     pass_env: tuple[str, ...] = (), allow_web: bool = False) -> dict:
-    """Verify the inspection controls; probe(argv, env=None) returns a CLI's stdout.
+    """Check advertised options and selected metadata; probe returns CLI stdout.
 
     Without env, probe must run the CLI in its reviewer environment.
+    No model calls or behavioral boundary tests; allowed credentials may remain.
     """
     agents = {"codex", "claude"} if agents is None else agents
     policy = {
         "id": POLICY_ID,
         "model_and_effort": "Requested values are in manifest.json; effective values are not exposed",
         "web": allow_web,
+        "assurance": "Settings and tool lists describe supplied configuration; preflight checks "
+                     "advertised options and selected metadata, not behavioral enforcement. "
+                     "No per-run write-denial, read-confinement, network-denial or tool-use tests; "
+                     "historical behavioral evidence and open gaps are in docs/STATUS.md",
     }
     if "codex" in agents:
         help_text = probe([codex, "exec", "--help"])
@@ -230,7 +235,8 @@ def verify_controls(codex: str, claude: str, settings: Path,
         # `mcp list` cannot do, and -c mcp_servers={} does not remove servers a
         # configuration layer defines. An empty CODEX_HOME loads what a review
         # loads: managed and system configuration, no user configuration, and no
-        # projects it trusts.
+        # projects it trusts. This removes the usual stored-login location, not
+        # allowed authentication variables or explicit --pass-env additions.
         with tempfile.TemporaryDirectory(prefix="duo-codex-home-") as home:
             listing = probe([codex, *codex_options(allow_web), "mcp", "list", "--json"],
                             env={**reviewer_environment("codex", pass_env), "CODEX_HOME": home})
@@ -243,11 +249,17 @@ def verify_controls(codex: str, claude: str, settings: Path,
                            "(for example, managed configuration); Duo cannot disable them")
         policy["codex"] = {
             "overrides": list(codex_overrides(allow_web)),
+            "preflight_checks": "Required exec option names advertised; disabled feature values "
+                                "reported false; MCP list empty in the probe context",
             "verified_disabled_features": list(CODEX_DISABLED),
             "verified_mcp_servers": [],
             "settings_sources": "CLI overrides; user config and exec rules ignored during review",
             "probe_settings_sources": "CLI overrides over normal configuration; "
-                                      "MCP servers listed without user configuration, as in reviews",
+                                      "MCP servers listed without user configuration via empty CODEX_HOME",
+            "probe_authentication": "Empty CODEX_HOME removes the usual stored-login location; "
+                                    "allowed authentication variables (including CODEX_API_KEY and "
+                                    "OPENAI_API_KEY) and explicit --pass-env additions remain. "
+                                    "Login-fetched managed MCP policy is unverified",
             "authentication": "existing CLI authentication",
         }
     if "claude" in agents:
@@ -264,6 +276,11 @@ def verify_controls(codex: str, claude: str, settings: Path,
             "settings": CLAUDE_SETTINGS, "settings_sources": [],
             "safe_mode": True, "restricted": True, "tools": list(claude_tools(allow_web)),
             "mcp": "disabled", "managed_settings": remote,
+            "preflight_checks": "Required option names advertised; local managed-policy sources "
+                                "checked; doctor remote-policy state accepted as recorded. "
+                                "Settings and tool restrictions are supplied, not exercised",
+            "managed_policy_scope": "An accepted not-fetched state is not an authenticated "
+                                    "policy check; unavailable authenticated policy is unverified",
             "authentication": "existing CLI authentication",
         }
     return policy

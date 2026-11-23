@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+
+- Correct security documentation and policy records to distinguish supplied
+  restrictions, advertised options, selected metadata checks, and historical
+  behavior tests, including Codex write denials and probe credential context.
+  Correct Copilot GPT confinement coverage and explain model-provider exposure
+  without web and incomplete file/web audit evidence. Missing live evidence and
+  the Claude audit improvement remain open; restrictions and probes are unchanged.
+
 ### Fixed
 
 - Credential checking avoids repeated suffix scans for OpenAI- and JWT-shaped
@@ -193,9 +202,9 @@ turns reviewing `plan.md` until both approve the same version.
 
 ### Safety controls
 
-- Reviewers run read-only. Preflight verifies each CLI's inspection controls
-  (sandbox, disabled hooks, MCP servers, plugins, and web access) before any
-  review and stops when one is missing or ineffective.
+- Reviewers receive read-only inspection restrictions. Preflight checks each
+  CLI's advertised options and selected metadata before any review and stops
+  when required checks fail; it does not prove behavioral enforcement.
 - Only tested CLI versions run by default; `--allow-untested-cli` runs others as
   experimental, still subject to every control probe.
 - Responses that introduce a credential (private keys and common API-token

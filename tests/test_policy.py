@@ -87,7 +87,7 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(adapter.policy_verified)
         self.assertEqual(audit['codex']['verified_mcp_servers'], [])
 
-    def test_policy_audit_has_verified_controls_without_secrets(self):
+    def test_policy_audit_distinguishes_configuration_from_behavior(self):
         with patch('duo.policy.check_claude_managed_files'):
             policy = verify_controls('codex', 'claude', self.root / 'settings.json', self.probe)
         self.assertEqual(policy['codex']['verified_mcp_servers'], [])
@@ -95,6 +95,35 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(policy['claude']['tools'], ['Read', 'Glob', 'Grep'])
         self.assertEqual(policy['claude']['settings']['disableAllHooks'], True)
         self.assertIn('effective values are not exposed', policy['model_and_effort'])
+        self.assertIn('Settings and tool lists describe supplied configuration', policy['assurance'])
+        self.assertIn('not behavioral enforcement', policy['assurance'])
+        self.assertIn('No per-run write-denial, read-confinement, network-denial or tool-use tests',
+                      policy['assurance'])
+        self.assertIn('historical behavioral evidence and open gaps are in docs/STATUS.md', policy['assurance'])
+        self.assertEqual(policy['codex']['preflight_checks'],
+                         'Required exec option names advertised; disabled feature values '
+                         'reported false; MCP list empty in the probe context')
+        self.assertEqual(policy['codex']['verified_disabled_features'], list(CODEX_DISABLED))
+        self.assertEqual(policy['claude']['preflight_checks'],
+                         'Required option names advertised; local managed-policy sources '
+                         'checked; doctor remote-policy state accepted as recorded. '
+                         'Settings and tool restrictions are supplied, not exercised')
+        self.assertEqual(policy['claude']['managed_policy_scope'],
+                         'An accepted not-fetched state is not an authenticated '
+                         'policy check; unavailable authenticated policy is unverified')
+
+    def test_not_fetched_policy_is_recorded_without_claiming_authenticated_check(self):
+        for state in ('not fetched — requires an Enterprise or Team subscription',
+                      'not fetched — no usable credentials for the settings fetch'):
+            def probe(argv, env=None):
+                if 'doctor' in argv:
+                    return 'Managed settings (remote): ' + state
+                return self.probe(argv, env)
+            with self.subTest(state=state), patch('duo.policy.check_claude_managed_files'):
+                policy = verify_controls('codex', 'claude', self.root / 'settings.json',
+                                         probe, agents={'claude'})
+            self.assertEqual(policy['claude']['managed_settings'], state)
+            self.assertIn('not an authenticated policy check', policy['claude']['managed_policy_scope'])
 
     def test_mcp_probe_excludes_user_configuration_like_reviews(self):
         # -c mcp_servers={} leaves configured servers listed, so the MCP probe
@@ -107,15 +136,29 @@ class PolicyTests(unittest.TestCase):
                 self.assertNotEqual(str(home), os.environ.get('CODEX_HOME'))
                 self.assertEqual(list(home.iterdir()), [])
                 self.assertEqual(env['PATH'], os.environ['PATH'])
+                self.assertEqual(env['CODEX_API_KEY'], 'fake-codex-auth')
+                self.assertEqual(env['OPENAI_API_KEY'], 'fake-openai-auth')
+                self.assertEqual(env['EXPLICIT_AUTH'], 'fake-explicit-auth')
+                self.assertNotIn('UNRELATED_SECRET', env)
                 homes.append(home)
             else:
                 self.assertIsNone(env)
             return self.probe(argv)
-        with patch('duo.policy.check_claude_managed_files'):
-            policy = verify_controls('codex', 'claude', self.root / 'settings.json', probe)
+        with patch('duo.policy.check_claude_managed_files'), patch.dict(os.environ, {
+                'CODEX_API_KEY': 'fake-codex-auth', 'OPENAI_API_KEY': 'fake-openai-auth',
+                'EXPLICIT_AUTH': 'fake-explicit-auth', 'UNRELATED_SECRET': 'fake-unrelated-secret'}):
+            policy = verify_controls('codex', 'claude', self.root / 'settings.json', probe,
+                                     pass_env=('EXPLICIT_AUTH',))
         self.assertEqual(len(homes), 1)
         self.assertFalse(homes[0].exists())
         self.assertIn('without user configuration', policy['codex']['probe_settings_sources'])
+        self.assertEqual(policy['codex']['probe_authentication'],
+                         'Empty CODEX_HOME removes the usual stored-login location; '
+                         'allowed authentication variables (including CODEX_API_KEY and '
+                         'OPENAI_API_KEY) and explicit --pass-env additions remain. '
+                         'Login-fetched managed MCP policy is unverified')
+        for value in ('fake-codex-auth', 'fake-openai-auth', 'fake-explicit-auth', 'fake-unrelated-secret'):
+            self.assertNotIn(value, json.dumps(policy))
 
     def test_rejects_missing_or_ineffective_controls(self):
         for failure in ('help', 'feature_true', 'feature_missing', 'mcp', 'mcp_invalid', 'doctor'):

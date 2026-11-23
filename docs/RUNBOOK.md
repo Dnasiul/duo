@@ -33,7 +33,8 @@ exists. Runs that reach the review loop also report `turns`, `attempts`,
   exception, or a signal;
 - `events.jsonl`: each attempt, failure, and accepted review in order;
 - `plan-NNN.md`: every accepted plan version; `plan-000.md` is the starting plan;
-- `versions.json` and `reviewer-policy.json`: CLI versions and verified controls;
+- `versions.json` and `reviewer-policy.json`: CLI versions, supplied inspection
+  policy, and option/metadata checks; not proof of per-run behavioral enforcement;
 - `attempt-*/`: each CLI call's command, stdout, and stderr.
 
 ## Interrupted or failed runs
