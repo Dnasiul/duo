@@ -10,13 +10,14 @@
   order, and hashes in private context audit artifacts. Both reviewers receive
   labeled untrusted captures on every turn/retry; separately inspected files
   remain mutable and are not snapshotted. Detection is best-effort.
-- Add `--max-prompt-bytes` with an **INTERIM 512 KiB (524,288-byte) default,
-  pending the owner's decision**. This finite ceiling is a compatibility
-  narrowing versus 0.4.6, which has no combined limit. Measurements on
-  2026-11-23 across seven recorded runs found a maximum of 150,232 bytes,
-  followed by 109,987 and 93,278; fixed inputs peaked around 79 KB. The interim
-  value accepts all measured cases with at least 3.4x margin, but rejects some
-  inputs 0.4.6 accepts. The owner must ratify or change it.
+- Add `--max-prompt-bytes` with a **512 KiB (524,288-byte) default, ratified
+  by the owner on 2026-11-23**. Compatibility change (owner-approved): this
+  finite ceiling narrows compatibility versus 0.4.6, which has no combined
+  limit, so it can reject inputs that 0.4.6 accepted. The measured basis for
+  the ratified value: measurements on 2026-11-23 across seven recorded runs
+  found a maximum of 150,232 bytes (`run-1q3qeibv`), followed by 109,987 and
+  93,278; fixed inputs peaked around 79 KB. The ratified default accepts all
+  measured cases with at least 3.4x margin.
   Check fixed inputs for both backends before startup calls and complete
   prompts before every review call, including diffs, history, context, retry
   feedback, delimiters, and Copilot's schema wrapper. Record overflow without
