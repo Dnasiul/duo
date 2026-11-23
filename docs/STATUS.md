@@ -57,13 +57,15 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
    2026-11-02 (below); live macOS verification remains pending. 0.167.x was
    validated on macOS on 2026-11-10 (below); live Linux verification pending.
 4. **Copilot CLI 1.0.103+** (`--sync-session`): validated on Linux with 1.0.105
-   on 2026-10-28 (below); live macOS verification remains pending.
-5. **F3: Copilot GPT temporary/home reads** (plan §8): the historical matrix
-   records no attempt at these reads; only the GPT symlink read was denied.
-   Obtain actual attempts with explicit denial or observed access for an
-   available GPT model. Copilot 1.0.105's later `claude-sonnet-5.5` checks in both
-   reviewer roles do not fill this gap. Native Codex's declined dedicated-search
-   requests likewise remain untested operations, not confinement successes.
+   on 2026-10-28 (below) and with 1.0.114 on 2026-11-23 (below); live macOS
+   verification remains pending.
+5. **F3: Copilot GPT temporary/home reads** (plan §8): attempted on Linux on
+   2026-11-23 with Copilot 1.0.114 and `gpt-6-luna` — temporary, home, and
+   symlink-target reads not accessed (see "Linux live verification"); the GPT
+   role's refusal was model-level, with tool-level denials recorded for the
+   Claude role in the same run. macOS GPT confinement evidence remains open.
+   Native Codex's declined dedicated-search requests likewise remain untested
+   operations, not confinement successes.
 6. **Authenticated policy and network boundaries** (plan §8): unavailable
    authenticated policy evidence remains unverified. An empty Codex home removes
    its usual stored login, not allowed environment authentication; accepted
@@ -768,6 +770,28 @@ No file-name or content phrase appeared in any response or audit file. Copilot
 names its grep tool `rg` for the Codex model and `grep` for the Claude model.
 Native Codex declined the dedicated-search requests without attempting them;
 this is not evidence of search confinement.
+
+**2026-11-23, Linux x86-64; Copilot CLI 1.0.114** (npm `@github/copilot`,
+installed under `~/.local` on the checking VM, which previously had no Copilot
+CLI; authenticated with the owner's gh token via `GH_TOKEN`, Copilot Pro
+account). `check_drift.py`: Copilot 1.0.114 **compatible**; help flags added
+since the fixtures: `--disable-client-telemetry`, `--sync-session`,
+`--trust-folder`; removed: `--no-remote`, `--no-remote-export`, `--plain-diff`,
+`--remote`, `--remote-export`. Model availability probed through the CLI:
+offered — `claude-sonnet-5.5`, `gpt-6-luna`, `gpt-5.3-codex`; not offered —
+`gpt-5.4`, `gpt-6-astra`, `claude-opus-5.5`, `claude-fable-5-1` (the latter
+three are Pro+ models in GitHub's plan documentation, which accounts for the
+previously recorded refusals; `gpt-5.4` is listed for Pro in that documentation
+but was refused by the CLI). Inspection smoke with `--confinement`, both
+reviewers through Copilot: repository inspected, no hook/MCP sentinel executed;
+the F3 temporary-directory, home-directory, and symlink-target reads were
+attempted with `gpt-6-luna` and **not read** (the GPT role declined on
+workspace-boundary grounds; the same three reads in the `claude-sonnet-5.5`
+role were explicitly denied at the tool layer, "Permission denied because no
+interactive user response was available"). Live Copilot + Copilot run (GPT
+`gpt-6-luna` + Claude `claude-sonnet-5.5`, plan mode): **agreed in 5 turns and
+5 attempts** (`run-0lh3gb8y`); audit record complete, `report.html`
+auto-emitted.
 
 ## Set up the Linux machine
 
