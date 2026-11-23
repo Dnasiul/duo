@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 import math
 import re
@@ -181,6 +182,70 @@ _PEM_LINE = (r"(?:[A-Za-z0-9+/]{16,}={0,2}|[A-Za-z0-9+/]*[0-9+/][A-Za-z0-9+/]*={
              r"|[A-Za-z0-9+/]+={1,2})(?![A-Za-z0-9+/=])")
 _PEM_META = r"(?:Proc-Type|DEK-Info):[^\n\\]*"
 
+
+class _MarkerPattern:
+    """Consume a whole token run before testing its required interior marker.
+
+    A regex requiring the marker after an unbounded repetition retries the
+    remaining suffix at every near-match prefix (for example repeated ``sk-``).
+    The first prefix consumes the run here, even when its marker is absent.
+    Later prefixes in that run cannot yield a match that the first one missed.
+    """
+
+    def __init__(self, pattern: str, prefix_length: int, marker: str):
+        self.token = re.compile(pattern)
+        self.prefix_length = prefix_length
+        self.marker = marker
+
+    def finditer(self, text: str):
+        for match in self.token.finditer(text):
+            # Require at least one token character after the marker, just as
+            # the original greedy regex did; retain the entire matched value.
+            if text.find(self.marker, match.start() + self.prefix_length,
+                         match.end() - 1) != -1:
+                yield match
+
+    def search(self, text: str):
+        return next(self.finditer(text), None)
+
+
+class _JWTPattern:
+    """Check three dot-separated runs without retrying each ``eyJ`` suffix."""
+
+    token = re.compile(r"[A-Za-z0-9_-]+")
+    prefix = re.compile(r"\beyJ")
+    value = re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
+
+    def finditer(self, text: str):
+        runs = deque(maxlen=3)
+        matched_end = 0
+        for run in self.token.finditer(text):
+            runs.append(run)
+            if len(runs) < 3:
+                continue
+            first, second, third = runs
+            if (first.start() < matched_end
+                    or second.start() != first.end() + 1 or text[first.end()] != "."
+                    or third.start() != second.end() + 1 or text[second.end()] != "."
+                    or second.end() - second.start() < 13
+                    or not text.startswith("eyJ", second.start())
+                    or third.end() - third.start() < 10):
+                continue
+            # Search the original text so Unicode word boundaries, including
+            # '-' versus '_', stay intact. Leave ten characters after 'eyJ'.
+            prefix = self.prefix.search(text, first.start(), first.end() - 10)
+            if prefix is not None:
+                # All three parts are valid: the original regex now succeeds
+                # without retrying suffixes, preserving its greedy span/value
+                # and Match interface. Its character classes cannot cross dots.
+                match = self.value.match(text, prefix.start(), third.end())
+                yield match
+                matched_end = third.end()
+
+    def search(self, text: str):
+        return next(self.finditer(text), None)
+
+
 # Credential formats specific enough to avoid matching ordinary plan text.
 SECRET_PATTERNS = {
     # Include the body even without a footer; a header alone must not allow new
@@ -195,18 +260,72 @@ SECRET_PATTERNS = {
     "AWS access key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     "GitHub token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"),
     "Anthropic API key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
-    "OpenAI API key": re.compile(r"\bsk-[A-Za-z0-9_-]*T3BlbkFJ[A-Za-z0-9_-]+"),
+    "OpenAI API key": _MarkerPattern(r"\bsk-[A-Za-z0-9_-]*", 3, "T3BlbkFJ"),
     "Slack token": re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}"),
     "Google API key": re.compile(r"\bAIza[0-9A-Za-z_-]{35}"),
     "Stripe live key": re.compile(r"\b[rs]k_live_[0-9A-Za-z]{20,}"),
-    "JSON Web Token": re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    "JSON Web Token": _JWTPattern(),
 }
+
+
+def _contains_all(known: str, candidates: set[str]) -> bool:
+    """Find all distinct values as substrings, scanning known only once.
+
+    Aho-Corasick failure links allow overlapping/prefix/suffix values, including
+    values embedded in text that would not itself match a credential pattern.
+    Mark visited states and propagate them afterwards instead of enumerating
+    every match: repeated or nested known values must not multiply the work.
+    """
+    if not candidates:
+        return True
+    if any(len(value) > len(known) for value in candidates):
+        return False
+    if len(candidates) == 1:
+        return next(iter(candidates)) in known
+
+    edges: list[dict[str, int]] = [{}]
+    failure = [0]
+    terminals = []
+    for value in candidates:
+        node = 0
+        for char in value:
+            child = edges[node].get(char)
+            if child is None:
+                child = len(edges)
+                edges[node][char] = child
+                edges.append({})
+                failure.append(0)
+            node = child
+        terminals.append(node)
+
+    # Appending while iterating gives breadth-first order without copying it.
+    order = list(edges[0].values())
+    for node in order:
+        for char, child in edges[node].items():
+            fallback = failure[node]
+            while fallback and char not in edges[fallback]:
+                fallback = failure[fallback]
+            failure[child] = edges[fallback].get(char, 0)
+            order.append(child)
+
+    seen = bytearray(len(edges))
+    node = 0
+    for char in known:
+        while node and char not in edges[node]:
+            node = failure[node]
+        node = edges[node].get(char, 0)
+        seen[node] = 1
+    for node in reversed(order):
+        if seen[node]:
+            seen[failure[node]] = 1
+    return all(seen[node] for node in terminals)
 
 
 def new_secret(text: str, known: str) -> str | None:
     """Name a credential in text that the known text does not already contain."""
     for kind, pattern in SECRET_PATTERNS.items():
-        if any(match.group(0) not in known for match in pattern.finditer(text)):
+        candidates = {match.group(0) for match in pattern.finditer(text)}
+        if not _contains_all(known, candidates):
             return kind
     return None
 

@@ -74,6 +74,9 @@ class Reviewer:
                     state.update(status="limit_reached", error="Run time limit reached")
                     return
                 result = validate_review(payload, state["plan"])
+                if self.clock() >= self.deadline:
+                    state.update(status="limit_reached", error="Run time limit reached")
+                    return
                 break
             except AgentError as exc:
                 self.plan_file.check()

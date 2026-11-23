@@ -16,7 +16,8 @@ from unittest.mock import Mock, patch
 
 from duo.adapters import CLIAdapter, classify_failure, run_process
 from duo.cli import main
-from duo.models import MAX_TEXT_BYTES, AgentError, Config, RunError, validate_review
+from duo.models import (MAX_TEXT_BYTES, SECRET_PATTERNS, AgentError, Config, RunError,
+                        new_secret, validate_review)
 from duo.policy import CODEX_DISABLED
 from duo.prompts import build_prompt, revision_diff
 from duo.storage import PlanFile, RunStore, atomic_write, read_input, run_lock
@@ -294,6 +295,73 @@ class ContractTests(Fixture):
         ordinary = "Use sk-learn-compatible-pipeline-steps and task-runner-config-v2.\n"
         validate_review(response("revise", ordinary), "Old")
 
+    def test_marker_token_matches_preserve_original_values_and_boundaries(self):
+        marker = "T3Bl" + "bkFJ"
+        original = re.compile(r"\bsk-[A-Za-z0-9_-]*" + marker + r"[A-Za-z0-9_-]+")
+        pattern = SECRET_PATTERNS["OpenAI API key"]
+        for prefix in ("", "word", "_", "é", "-", "sk-", "sk-" * 100):
+            for body in ("", marker, marker + "x", "x" + marker + "-",
+                         marker + marker, marker + "-sk-" + marker + "x"):
+                for suffix in ("", "é", ".sk-" + marker + "x", "\nsk-" + marker + "x"):
+                    text = prefix + "sk-" + body + suffix
+                    with self.subTest(text=text):
+                        expected = [(m.span(), m.group()) for m in original.finditer(text)]
+                        self.assertEqual([(m.span(), m.group()) for m in pattern.finditer(text)],
+                                         expected)
+                        self.assertEqual(new_secret(text, ""),
+                                         "OpenAI API key" if expected else None)
+                        self.assertIsNone(new_secret(text, "prefix" + text + "suffix"))
+
+    def test_jwt_matches_preserve_original_values_and_boundaries(self):
+        from itertools import product
+
+        original = re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
+        pattern = SECRET_PATTERNS["JSON Web Token"]
+        part = "eyJ" + "a" * 10
+        jwt = part + "." + part + "." + "b" * 10
+        segments = ("", "a" * 9, "a" * 10, "eyJ", "eyJ" + "a" * 9,
+                    part, part + "-eyJ", part + "_eyJ", "eyJ-" * 5)
+        bodies = [".".join(parts) for parts in product(segments, repeat=3)]
+        bodies += [".".join([part] * count) for count in range(2, 9)]
+        bodies += [jwt + separator + jwt for separator in (".", "..", "-", "_", " ", "\n")]
+        bodies += [part + ".." + jwt, "eyJshort." + jwt,
+                   part + ".eyJshort." + jwt,
+                   "eyJ-" * 100, part + "." + "eyJ-" * 100,
+                   "eyJ-" * 100 + jwt]
+        for prefix, body, suffix in product(
+                ("", "word", "_", "é", "-", "word-", "word_", "eyJ-", "before: "),
+                bodies, ("", "é", "-tail", "_tail", "." + jwt, "\nafter: " + jwt)):
+            text = prefix + body + suffix
+            with self.subTest(text=text):
+                expected = [(m.span(), m.group()) for m in original.finditer(text)]
+                self.assertEqual([(m.span(), m.group()) for m in pattern.finditer(text)],
+                                 expected)
+                match = pattern.search(text)
+                self.assertEqual((match.span(), match.group()) if match else None,
+                                 expected[0] if expected else None)
+        for text in (jwt, "word-" + jwt, "word_" + jwt, "é" + jwt,
+                     jwt + "\r\n" + jwt):
+            with self.subTest(text=text):
+                self.assertEqual(new_secret(text, ""),
+                                 "JSON Web Token" if original.search(text) else None)
+                self.assertIsNone(new_secret(text, "prefix" + text + "suffix"))
+
+    def test_distinct_known_credentials_are_substrings_not_reparsed_tokens(self):
+        # Prefixes and suffixes overlap in known; its leading word prevents
+        # credential regex matches there. All response values still count as known.
+        short = "github_pat_" + "a" * 22
+        long = short + "_" + short
+        other = "ghp_" + "b" * 36
+        values = [short, long, short + "_", other, other + "c"]
+        text = "\n".join(values + values)
+        known = "word" + long + "\nword" + other + "c"
+        self.assertIsNone(new_secret(text, known))
+        for item in (response("revise", text), response("approve", reason=text)):
+            validate_review(item, known)
+        for value in values:
+            with self.subTest(value=value):
+                self.assertEqual(new_secret(text + "\n" + value + "NEW", known), "GitHub token")
+
     def test_existing_private_key_header_does_not_allow_new_key_material(self):
         for kind in ("PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY",
                      "OPENSSH PRIVATE KEY", "ENCRYPTED PRIVATE KEY"):
@@ -410,25 +478,77 @@ class ContractTests(Fixture):
         validate_review(response("revise", text + "x"), text)
         self.assertLess(time.monotonic() - started, 2)
 
+    def measure_credential_scan(self, text, known, expected=None):
+        # A subprocess timeout bounds even a hung regex, unlike an assertion
+        # made only after new_secret returns. Time scanning separately from startup.
+        script = """import json, sys, time
+from duo.models import new_secret
+text, known = json.load(sys.stdin)
+started = time.perf_counter()
+result = new_secret(text, known)
+print(json.dumps([result, time.perf_counter() - started]))
+"""
+        completed = subprocess.run([sys.executable, "-c", script],
+                                   input=json.dumps([text, known]), text=True,
+                                   capture_output=True, timeout=5, check=True)
+        result, elapsed = json.loads(completed.stdout)
+        self.assertEqual(result, expected)
+        self.assertLess(elapsed, 5)
+        return elapsed
+
     def test_credential_scan_is_bounded_on_adversarial_inputs_at_size_limit(self):
-        import time
-        from duo.models import MAX_TEXT_BYTES, new_secret
         header = "-----BEGIN RSA PRIVATE KEY-----"
         n = MAX_TEXT_BYTES
         repeated = (header + "\n") * (n // (len(header) + 1))
         tokens = ("ghp_" + "a1" * 18 + " ") * (n // 41)
         cases = (
-            (header + ("\nab" * n)[:n - len(header)], ""),       # short lines, no footer
-            (header + ("\\n" * n)[:n - len(header)], ""),        # escaped line breaks
-            (header + "\n" + "A" * (n - 80) + "\n-----END DSA PRIVATE KEY-----", ""),
-            (repeated, repeated),                                # every match already known
-            (tokens, tokens),
+            ("eyJ-" * (n // 4), "", None),
+            ("eyJ" + "a" * 10 + "." + ("eyJ-" * (n // 4))[:n - 14], "", None),
+            (header + ("\nab" * n)[:n - len(header)], "", "private key"),
+            (header + ("\\n" * n)[:n - len(header)], "", "private key"),
+            (header + "\n" + "A" * (n - 80) + "\n-----END DSA PRIVATE KEY-----", "", "private key"),
+            (repeated, repeated, None),                         # every match already known
+            (tokens, tokens, None),
         )
-        for text, known in cases:
-            started = time.monotonic()
-            new_secret(text, known)
-            # About 0.2 s on a laptop; the bound catches super-linear behavior.
-            self.assertLess(time.monotonic() - started, 5)
+        for text, known, expected in cases:
+            self.measure_credential_scan(text, known, expected)
+
+    def test_credential_scan_adversarial_size_doubling(self):
+        sizes = [128 * 1024, 256 * 1024, 512 * 1024, MAX_TEXT_BYTES]
+        for case in ("sk-prefixes", "jwt-prefixes", "jwt-second-part-prefixes",
+                     "duplicate-known-at-end", "distinct-known-at-end"):
+            measurements = []
+            case_sizes = [12_288, 24_576, 49_152, *sizes] if case == "sk-prefixes" else sizes
+            for size in case_sizes:
+                if case == "sk-prefixes":
+                    text, known = ("sk-" * (size // 3)).ljust(size), ""
+                elif case == "jwt-prefixes":
+                    text, known = "eyJ-" * (size // 4), ""
+                elif case == "jwt-second-part-prefixes":
+                    text = "eyJ" + "a" * 10 + "." + ("eyJ-" * (size // 4))[:size - 14]
+                    known = ""
+                elif case == "duplicate-known-at-end":
+                    token = "ghp_" + "a1" * 18
+                    text = ((token + " ") * (size // 41)).ljust(size)
+                    known = " " * (size - len(token)) + token
+                else:
+                    # Distinct early branches, shared suffixes, and duplicates;
+                    # known occurrences occupy only the second half of the document.
+                    values = [f"ghp_{i:08x}" + "a1" * 14 for i in range(size // 82)]
+                    text = " ".join(values * 2).ljust(size)
+                    known = " ".join(reversed(values)).rjust(size)
+                self.assertEqual(len(text.encode()), size)
+                self.assertLessEqual(len(known.encode()), size)
+                with self.subTest(case=case, size=size):
+                    measurements.append(min(self.measure_credential_scan(text, known)
+                                            for _ in range(3)))
+            # Compare an eightfold size increase: quadratic work grows 64x.
+            # Allow scheduling/allocator noise while rejecting that growth.
+            self.assertLess(measurements[-1], measurements[-4] * 20 + 0.02,
+                            (case, list(zip(case_sizes, measurements))))
+            for small, large in zip(measurements[-4:], measurements[-3:]):
+                self.assertLess(large, small * 3.5 + 0.01,
+                                (case, list(zip(case_sizes, measurements))))
 
     def test_whitespace_is_preserved(self):
         text = "  code  \r\nValue\u00a0"

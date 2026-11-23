@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Credential checking avoids repeated suffix scans for OpenAI- and JWT-shaped
+  near-matches and repeated document searches for known credentials, including
+  distinct values.
+- Reviews that finish validation after the run deadline now stop with a
+  time-limit outcome, preserving the previous document and approvals.
+
 ## 0.4.5 (2026-11-10)
 
 ### Changed

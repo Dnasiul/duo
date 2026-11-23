@@ -132,6 +132,40 @@ class AcceptanceTests(Fixture):
         self.assertEqual(adapter.call_count, 1)
         node.sleep.assert_not_called()
 
+    def test_deadline_crossed_during_validation_preserves_document_and_approvals(self):
+        for decision in ('approve', 'revise'):
+            for finished_at in (100, 101):
+                with self.subTest(decision=decision, finished_at=finished_at):
+                    payload = response(decision, 'New' if decision == 'revise' else '')
+                    node, state, adapter = self.node([payload], plan='Old')
+                    state['approved'] = ['claude']
+                    node.clock = Mock(return_value=99)
+                    node.deadline = 100
+                    node.on_review = Mock()
+                    def validate_late(value, plan):
+                        result = validate_review(value, plan)
+                        node.clock.return_value = finished_at
+                        return result
+                    with patch('duo.workflow.validate_review', side_effect=validate_late) as validate, \
+                            patch.object(node.plan_file, 'write') as publish, \
+                            patch.object(node.store, 'snapshot') as snapshot, \
+                            patch.object(node.store, 'event') as event:
+                        result = build_graph(node).invoke(state)
+                    validate.assert_called_once_with(payload, 'Old')
+                    self.assertEqual(result['status'], 'limit_reached')
+                    self.assertEqual(result['error'], 'Run time limit reached')
+                    self.assertEqual(outcome(result)['status'], 'limit_reached')
+                    self.assertEqual(result['attempts'], 1)
+                    for field in ('plan', 'approved', 'turns', 'history', 'last_diff', 'next_agent'):
+                        self.assertEqual(result[field], state[field], field)
+                    self.assertEqual((self.repo / 'plan.md').read_text(), 'Old')
+                    self.assertEqual(adapter.call_count, 1)
+                    self.assertEqual([call.args[0]['event'] for call in event.call_args_list],
+                                     ['attempt'])
+                    publish.assert_not_called()
+                    snapshot.assert_not_called()
+                    node.on_review.assert_not_called()
+
     def test_publication_failure_matrix(self):
         # Fail only the publication, after the proposal snapshot has been saved.
         for operation in ('write', 'flush', 'fsync', 'chmod', 'replace'):
