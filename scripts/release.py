@@ -93,7 +93,7 @@ Released under the MIT License.
 
 | Check | Result |
 | --- | --- |
-| CI (Ubuntu and macOS, Python 3.10–3.14, wheel and sdist installed with `constraints.txt`, dependency audit, newest dependencies) | CI_RESULT |
+| CI (Ubuntu and macOS, Python 3.11–3.14, wheel and sdist installed with `constraints.txt`, dependency audit, newest dependencies) | CI_RESULT |
 | Installation test of these exact files | INSTALL_RESULT |
 | Drift check against recorded CLI fixtures | DRIFT_RESULT |
 | Live runs on the release candidate | LIVE_RESULT |
@@ -112,7 +112,7 @@ def main() -> int:
     parser.add_argument("--python", default=sys.executable,
                         help="Python used for the install tests (default: this one)")
     args = parser.parse_args()
-    import tomllib  # Python 3.11+; imported here so tests load this on 3.10
+    import tomllib  # Python 3.11+ (stdlib on every supported Python)
 
 
     commit = run("git", "rev-parse", "--verify", f"{args.commit}^{{commit}}", cwd=ROOT, capture=True)

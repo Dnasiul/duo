@@ -47,6 +47,10 @@
   plus fresh restricted probes and timed-out adapter captures. Document exact
   provenance and omissions: web counters are not tool evidence, and emitted
   results do not constitute complete file/page archives.
+- Retire Python 3.10 (owner decision, 2026-11-23; plan §7.3): `requires-python`
+  is now `>=3.11`, the CI matrix covers Python 3.11–3.14, and
+  `constraints.txt` was regenerated for 3.11–3.14. Python 3.10 reached end of
+  life in October 2026; package metadata now refuses installation on it.
 
 ## 0.4.6 (2026-11-23)
 

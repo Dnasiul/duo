@@ -5,7 +5,7 @@ one tested resolution. For each given Python interpreter, Duo is installed into
 a clean virtual environment and the resolved versions are recorded. Packages
 whose resolution differs between interpreters get environment markers.
 
-  python scripts/update_constraints.py /path/to/python3.10 ... /path/to/python3.14
+  python scripts/update_constraints.py /path/to/python3.11 ... /path/to/python3.14
 
 Then run the test suite against the new pins (CI does so on every push) and
 review `pip-audit -r constraints.txt` before releasing.
