@@ -11,6 +11,7 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 | Area | Where |
 | --- | --- |
 | HTML agreement reports (Unreleased): offline rendering of stored runs, standalone CLI, best-effort automatic output, escaped text and collapsible diffs | `src/duo/report.py`, `src/duo/cli.py`, `tests/test_report.py`; "HTML agreement reports" below |
+| HTML report standalone-CLI test canonicalizes its expected output path (`8a1f705`, test-only): the CLI prints the resolved path (`write_report` resolves the run directory), but the test compared it with the unresolved temporary-directory path, which fails on macOS where the temp directory sits behind the `/var` → `/private/var` symlink; reproduced on Linux with `TMPDIR` pointed through a symlinked directory (failed before, passes after), full strict suite 275 tests green | `tests/test_report.py` |
 | Real end-to-end runs: native Codex + native Claude, and both reviewers via Copilot (macOS) | README compatibility table |
 | CI: Ubuntu and macOS, Python 3.11–3.14, wheel and sdist installed with `constraints.txt`, strict runner (no skips), newest-dependency job, `pip-audit` | `.github/workflows/ci.yml` |
 | Python 3.10 retired in 0.5.0 (owner decision, 2026-11-23; plan §7.3): supported range is Python 3.11–3.14 in package metadata, CI, and regenerated `constraints.txt` | `pyproject.toml`, `.github/workflows/ci.yml`, `constraints.txt` |
