@@ -39,7 +39,7 @@ jobs:
             env="$RUNNER_TEMP/env-$(basename "$artifact")"
             python -m venv "$env"
             "$env/bin/python" -m pip install --disable-pip-version-check -c constraints.txt "$artifact"
-            # Strict: a failure or any skipped test (e.g. missing LangGraph) fails.
+            # Strict: empty suites, failures, errors, skips, or missing LangGraph fail.
             (cd tests && "$env/bin/python" -B ../scripts/run_tests.py)
             "$env/bin/duo" --help > /dev/null
             "$env/bin/duo-clean" --help > /dev/null

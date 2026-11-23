@@ -613,11 +613,15 @@ The tests use standard-library `unittest` and fake CLI executables, so they make
 no model calls and require no credentials:
 
 ```sh
-PYTHONPATH=src micromamba run -n duo python -m unittest discover -s tests -v
+micromamba run -n duo python -m pip install -c constraints.txt .
+micromamba run -n duo python scripts/run_tests.py
 ```
 
-Install the declared dependencies before validating the deliverable. The
-acceptance suite requires real LangGraph integration tests to execute.
+Run these commands from the repository root against the installed package.
+The runner also works from `tests/` as `python ../scripts/run_tests.py`, or
+from any directory using its absolute path. It rejects empty suites, failures,
+errors, skips, and missing LangGraph; the acceptance suite requires real
+LangGraph integration tests to execute.
 The suite covers approval invalidation, retries, deadlines, malformed responses,
 verbatim inputs, reviewer policy, CLI response formats, process cleanup, file
 conflicts, write/flush/fsync/chmod/replace failures, exits, and document modes
@@ -631,8 +635,9 @@ checks, so the fake CLIs cannot drift from real formats unnoticed. See
 CI (`.github/workflows/ci.yml`) runs on Ubuntu and macOS with Python 3.10 to
 3.14. It builds the wheel and the source distribution, installs each into a
 clean environment with `constraints.txt`, and runs the suite against the
-installed package with `scripts/run_tests.py`, which fails on any skipped test
-(for example when LangGraph is missing). A separate job tests the newest
+installed package with `scripts/run_tests.py`. CI already invoked the runner
+from the correct `tests/` directory; the discovery fix does not imply that
+historical CI runs executed zero tests. A separate job tests the newest
 dependency versions allowed by `pyproject.toml`, and another runs `pip-audit`
 on the pinned versions. CI uses no reviewer credentials.
 

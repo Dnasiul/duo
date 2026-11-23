@@ -584,7 +584,7 @@ git clone https://github.com/Dnasiul/duo.git && cd duo
 micromamba run -n duo python -m pip install -c constraints.txt -e .
 
 # Offline check first: no logins, no model calls. Expect "OK" with 137+ tests.
-(cd tests && micromamba run -n duo python ../scripts/run_tests.py)
+micromamba run -n duo python scripts/run_tests.py
 ```
 
 Reviewer CLIs, pinned to the tested versions (Node.js 22 or newer with npm):
@@ -649,6 +649,10 @@ Each costs a few model calls. Keep runs bounded and in scratch repositories.
 - Never put a token in a command line; read it from `~/.copilot-token`.
 - The owner approves pushes; CI status is public at
   `https://api.github.com/repos/Dnasiul/duo/actions/runs?per_page=3`.
-- Run tests with `scripts/run_tests.py` from `tests/`; it fails on skipped tests.
+- Run `python scripts/run_tests.py` from the repository root against the installed
+  package, or `python ../scripts/run_tests.py` from `tests/`. An absolute script
+  path works from any directory. Empty suites, failures, errors, skips, and
+  missing LangGraph fail the check. CI already used the correct `tests/` working
+  directory; this discovery fix does not imply historical CI ran zero tests.
 - Live model IDs used so far: native `gpt-6-astra`, `claude-opus-5-5`,
   `claude-sonnet-5-5`; Copilot `gpt-5.4`, `claude-sonnet-5.5` (dotted names).

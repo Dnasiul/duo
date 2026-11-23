@@ -228,8 +228,12 @@ Until an isolation profile exists, for repositories you are less sure of:
 
 ## Reproducing the evidence
 
-- `python scripts/run_tests.py` (from `tests/`): offline suite, including
-  credential-filter, fixture, and limit tests.
+- `python scripts/run_tests.py` (from the repository root, with Duo and its
+  dependencies installed): offline suite, including credential-filter, fixture,
+  and limit tests. From `tests/`, use `python ../scripts/run_tests.py`; an absolute
+  script path works from any directory. Empty suites, failures, errors, skips,
+  and missing LangGraph fail the check. CI already used the correct `tests/`
+  working directory; this discovery fix does not imply historical CI ran zero tests.
 - `python scripts/smoke_inspection.py --codex-model ... --claude-model ...`: real
   CLIs, two model calls; checks that hooks and MCP launchers stay inert, the plan
   is unchanged, and the repository is readable. `--confinement` adds two model

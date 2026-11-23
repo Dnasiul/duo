@@ -5,10 +5,10 @@
 From a clean clone of the commit, this builds the wheel and sdist with the
 pinned tools in scripts/build-requirements.txt, installs each into a fresh
 environment with constraints.txt, runs the offline suite from the installed
-package (strictly: no skips), runs `duo --help` and `duo-clean --help`, and
-checks the installed version and that the wheel's package files match the
-commit. It then writes the release files and SHA256SUMS to DIR/final and a
-release-notes template to DIR/notes.md.
+package (strictly: nonempty, no failures, errors, or skips), runs `duo --help`
+and `duo-clean --help`, and checks the installed version and that the wheel's
+package files match the commit. It then writes the release files and SHA256SUMS
+to DIR/final and a release-notes template to DIR/notes.md.
 
 It needs Python 3.11 or newer, git, and network access to install packages; it
 never needs credentials, calls a model, or publishes anything. The release
@@ -146,7 +146,7 @@ def main() -> int:
         python = environment(out / f"env-{artifact.name}", args.python)
         run(python, "-m", "pip", "install", "--quiet", "--disable-pip-version-check",
             "-c", clone / "constraints.txt", artifact)
-        # From the tests directory, so the installed package is what runs.
+        # The runner discovers tests relative to itself and does not add src/.
         run(python, "-B", "../scripts/run_tests.py", cwd=clone / "tests")
         installed = run(python, "-c", "import duo; print(duo.__version__)", capture=True)
         if installed != version:
