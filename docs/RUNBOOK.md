@@ -16,7 +16,7 @@ code first:
 | 0 | Both reviewers approved the current plan | Review `plan.md` (or the `--mode` document, shown as `plan_path`) |
 | 1 | Setup, reviewer, storage, or limit failure | Read `message`; see the sections below |
 | 2 | Invalid command-line arguments | Fix the command |
-| 3 | A reviewer needs a decision (`blocked`) | Add the answer to the criteria and rerun |
+| 3 | A reviewer needs a decision (`blocked`) | Rerun with `--answer TEXT --source-run RUN_DIR`, keeping the same task and criteria |
 | 4 | Turn or time budget used up | Rerun, or raise `--max-turns` / `--max-seconds` |
 | 130, 143, 129 | Stopped by Ctrl-C, SIGTERM, or SIGHUP | Rerun when ready |
 
@@ -36,6 +36,22 @@ exists. Runs that reach the review loop also report `turns`, `attempts`,
 - `versions.json` and `reviewer-policy.json`: CLI versions, supplied inspection
   policy, and option/metadata checks; not proof of per-run behavioral enforcement;
 - `attempt-*/`: each CLI call's command, stdout, and stderr.
+
+## Answering a blocked run
+
+Read the final review's question in `latest_review.reason` or the last history
+turn in `result.json`. Repeat the command with `--source-run` pointing to that
+run directory and `--answer` containing your decision. Supply the original task
+and criteria exactly, and keep the repository, document path, and mode the same.
+Duo requires both options and a completed blocked source with a matching snapshot;
+invalid sources are rejected before creating a new run or calling reviewers.
+
+This starts a fresh run. The source is never modified, and its approvals are not
+carried over. You may change the current document before answering; both reviewers
+must approve it afresh. The new manifest's `answer` object records the source path
+and ID, question, answer, and blocked/current document hashes. The prompt explains
+any changed document and treats your answer as a decision on the question, not an
+approval. The same blocked source can be answered more than once.
 
 ## Interrupted or failed runs
 

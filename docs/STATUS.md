@@ -10,6 +10,7 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 
 | Area | Where |
 | --- | --- |
+| Answer a blocked run in a fresh run (Unreleased, plan §7.1): explicit source validation, user clarification, source/current hashes, fresh approvals | `src/duo/storage.py`, `src/duo/cli.py`, `src/duo/prompts.py`, `src/duo/workflow.py`, `tests/test_answer.py`; "Answering blocked runs" below |
 | Structured verdicts and findings (Unreleased, plan §11): versioned artifact, persistent role-owned findings, reference CI gate | `src/duo/verdicts.py`, `src/duo/schemas/`, `examples/check_verdict.py`, `tests/test_verdicts.py`; "Structured verdicts" below |
 | HTML agreement reports (Unreleased): offline rendering of stored runs, standalone CLI, best-effort automatic output, escaped text and collapsible diffs | `src/duo/report.py`, `src/duo/cli.py`, `tests/test_report.py`; "HTML agreement reports" below |
 | HTML report standalone-CLI test canonicalizes its expected output path (`8a1f705`, test-only): the CLI prints the resolved path (`write_report` resolves the run directory), but the test compared it with the unresolved temporary-directory path, which fails on macOS where the temp directory sits behind the `/var` → `/private/var` symlink; reproduced on Linux with `TMPDIR` pointed through a symlinked directory (failed before, passes after), full strict suite 275 tests green | `tests/test_report.py` |
@@ -875,6 +876,23 @@ Each costs a few model calls. Keep runs bounded and in scratch repositories.
   directory; this discovery fix does not imply historical CI ran zero tests.
 - Live model IDs used so far: native `gpt-6-astra`, `claude-opus-5-5`,
   `claude-sonnet-5-5`; Copilot `gpt-5.4`, `claude-sonnet-5.5` (dotted names).
+
+## Answering blocked runs
+
+Plan section 7.1 is implemented in the working tree (Unreleased). Paired
+`--answer` / `--source-run` options select a completed blocked run explicitly.
+Bounded record and snapshot reads validate the source question and document hash,
+repository, document path/mode, and exact task/criteria association before locking,
+audit creation, or reviewer calls. The answer receives the existing credential
+check and travels in a labeled, budgeted user clarification section.
+
+The new manifest records source identity, question, answer, and blocked/current
+document hashes. Changed documents are reviewed afresh; no source approvals,
+history, or findings carry over. Tests cover malformed sources, identity mismatches,
+multiple sources, changed documents, fresh approvals, repeated use without source
+changes, credential/budget limits, unchanged default prompts, and ordinary agreed
+verdict output. This does not restore checkpoints or implement section 12 recovery.
+The package version and structured verdict contract are unchanged.
 
 ## Structured verdicts
 

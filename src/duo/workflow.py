@@ -7,7 +7,7 @@ from typing import Callable
 from .models import (MAX_RETRY_AFTER, AgentError, AgentTimeout, Config, RunError, State, Turn,
                      validate_review)
 from .prompts import build_prompt, check_prompt_budget, revision_diff
-from .storage import ContextFile, PlanFile, RunStore, content_hash, timestamp
+from .storage import ContextFile, PlanFile, RunStore, UserClarification, content_hash, timestamp
 
 
 def initial_state(task: str, criteria: str, plan: str, config: Config) -> State:
@@ -95,8 +95,10 @@ class Reviewer:
                  progress: Callable | None = None, clock: Callable = time.monotonic,
                  sleep: Callable = time.sleep,
                  on_review: Callable[[int, Turn, str, str], None] | None = None,
-                 context: tuple[ContextFile, ...] = ()):
+                 context: tuple[ContextFile, ...] = (),
+                 user_clarification: UserClarification | None = None):
         self.context = context
+        self.user_clarification = user_clarification
         self.config, self.adapter, self.plan_file, self.store = config, adapter, plan, store
         self.progress, self.clock, self.sleep = progress, clock, sleep
         self.on_review = on_review
@@ -106,7 +108,8 @@ class Reviewer:
         sizes: dict[str, int] = {}
         prompt = build_prompt(state, self.config.history_limit, feedback,
                               self.config.mode, self.config.guidance, self.config.output,
-                              self.config.allow_web, self.context, sizes)
+                              self.config.allow_web, self.context, sizes,
+                              user_clarification=self.user_clarification)
         return prompt, sizes
 
     def check_startup_budget(self, state: State) -> None:
