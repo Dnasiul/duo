@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- Versioned `verdict.json` audit artifacts for external gates, with subject and
+  fixed-input hashes, reviewer agreement bindings, and persistent structured
+  findings with stable IDs, severity, locations, and role-owned dispositions.
+  Schema 1.0 and valid/invalid fixtures ship with the implementation; the stdlib
+  `examples/check_verdict.py` demonstrates fail-closed CI consumption.
+- Model-response contract: reviewers now return required `findings` and
+  `finding_updates` arrays (empty when unused). Each reviewer must reconcile its
+  own open findings against the inspected subject before approving.
+
 ### Fixed
 
 - Correct the `--max-prompt-bytes` help text, which still described the

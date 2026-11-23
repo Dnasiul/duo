@@ -471,7 +471,7 @@ class CLIAdapter:
                     "including CLI logs and caches")
         return None
 
-    def __call__(self, agent: Agent, prompt: str, timeout: float) -> dict[str, str]:
+    def __call__(self, agent: Agent, prompt: str, timeout: float) -> dict:
         backend = getattr(self.config, f"{agent}_backend")
         check_prompt_budget(prompt, self.config.max_prompt_bytes, backend)
         prompt = backend_prefix(backend) + prompt
@@ -524,7 +524,7 @@ class CLIAdapter:
             return validate_payload(read_json(directory / "response.json"))
 
     def claude_attempt(self, argv: list[str], prompt: str, timeout: float,
-                       stdout: Path, stderr: Path, env: dict[str, str]) -> dict[str, str]:
+                       stdout: Path, stderr: Path, env: dict[str, str]) -> dict:
         metadata = {"process_status": "interrupted", "returncode": None,
                     "payload_validated": False}
         stream_error = None

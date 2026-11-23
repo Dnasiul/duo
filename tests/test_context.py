@@ -248,7 +248,8 @@ class ContextTests(Fixture):
                 self.assertIn('Prompt exceeds', (self.store.path / 'events.jsonl').read_text())
 
     def test_wrapper_midrun_overflow_preserves_revision(self):
-        node, state, adapter = self.node([response('revise', 'New' * 100)], plan='Old',
+        # The revision must outgrow the larger findings-aware schema wrapper.
+        node, state, adapter = self.node([response('revise', 'New' * 1000)], plan='Old',
                                          claude_backend='copilot')
         revised = node(state)
         prompt, _ = node.prompt(revised)
@@ -258,8 +259,8 @@ class ContextTests(Fixture):
         result = node(revised)
         self.assertEqual(result['status'], 'error')
         self.assertEqual(adapter.call_count, 1)
-        self.assertEqual((self.repo / 'plan.md').read_text(), 'New' * 100)
-        self.assertEqual((self.store.path / 'plan-001.md').read_text(), 'New' * 100)
+        self.assertEqual((self.repo / 'plan.md').read_text(), 'New' * 1000)
+        self.assertEqual((self.store.path / 'plan-001.md').read_text(), 'New' * 1000)
 
     def test_retry_feedback_midrun_overflow_is_not_retried(self):
         node, state, adapter = self.node([response('revise', 'New'), AgentError('x' * 5000)], plan='Old')

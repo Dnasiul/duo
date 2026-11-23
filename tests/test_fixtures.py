@@ -28,6 +28,34 @@ def fixture_dir(agent: str) -> Path:
     return FIXTURES / f"{agent}-{'.'.join(map(str, TESTED_VERSIONS[agent][0]))}"
 
 
+def modern_response(value):
+    """Old captures predate findings; upgrade only replay copies to today's envelope."""
+    if isinstance(value, dict):
+        result = {key: modern_response(item) for key, item in value.items()}
+        if set(result) == {"decision", "plan", "reason"}:
+            result.update(findings=[], finding_updates=[])
+        return result
+    if isinstance(value, list):
+        return [modern_response(item) for item in value]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (ValueError, RecursionError):
+            return value
+        if isinstance(parsed, (dict, list)):
+            return json.dumps(modern_response(parsed), ensure_ascii=False)
+    return value
+
+
+def modern_capture(path):
+    raw = Path(path).read_text()
+    try:
+        return json.dumps(modern_response(json.loads(raw)), ensure_ascii=False)
+    except ValueError:
+        return "\n".join(json.dumps(modern_response(json.loads(line)), ensure_ascii=False)
+                         for line in raw.splitlines()) + "\n"
+
+
 def text(agent: str, name: str) -> str:
     return (fixture_dir(agent) / name).read_text()
 
@@ -100,6 +128,14 @@ class RecordedResponseTests(Fixture):
     """Replay recorded stdout/stderr through the real adapter."""
 
     def replay(self, name, stdout="", stderr="", code=0, response=None):
+        for field, source in (("stdout", stdout), ("response", response)):
+            if source and Path(source).suffix in (".json", ".jsonl"):
+                target = self.root / (field + "-modern.json")
+                target.write_text(modern_capture(source))
+                if field == "stdout":
+                    stdout = str(target)
+                else:
+                    response = str(target)
         body = f"""import pathlib, sys
 sys.stdin.read()
 if {response!r} and '-o' in sys.argv:
@@ -128,7 +164,7 @@ sys.exit({code})
     def test_claude_success_envelope(self):
         # Historical --output-format json evidence, not a stream recording.
         envelope = read_json(Path(self.path("claude", "result-approve.json")))
-        review = validate_review(envelope['structured_output'], '# Plan\n')
+        review = validate_review(modern_response(envelope['structured_output']), '# Plan\n')
         self.assertEqual(review["decision"], "approve")
 
     def test_claude_unrecognized_model(self):
@@ -143,7 +179,9 @@ sys.exit({code})
         for name, decision in (("events-gpt-revise.jsonl", "revise"),
                                ("events-claude-approve.jsonl", "approve")):
             with self.subTest(name=name):
-                review = copilot_reply(Path(self.path("copilot", name)))
+                capture = self.root / name
+                capture.write_text(modern_capture(self.path("copilot", name)))
+                review = copilot_reply(capture)
                 self.assertEqual(review["decision"], decision)
                 validate_review(review, "" if decision == "revise" else "# Plan\n")
 
@@ -166,7 +204,7 @@ sys.exit({code})
         directory = FIXTURES / 'claude-2.1.330'
         for name in ('noweb', 'web', 'webtools'):
             path = directory / f'events-{name}.jsonl'
-            raw = path.read_text()
+            raw = modern_capture(path)
             binary = self.replay('claude-stream', stdout=str(path))
             adapter = CLIAdapter(replace(self.config, claude_bin=binary,
                                          allow_web=name != 'noweb'), self.store)
@@ -187,7 +225,7 @@ sys.exit({code})
                 adapter('claude', 'Review', 5)
             self.assertFalse(caught.exception.retryable)
             attempt = max(self.store.path.glob('attempt-*'), key=lambda p: p.stat().st_mtime_ns)
-            self.assertEqual((attempt / 'stdout.log').read_bytes(), path.read_bytes())
+            self.assertEqual((attempt / 'stdout.log').read_bytes(), modern_capture(path).encode())
             self.assertEqual(json.loads((attempt / 'claude-stream.json').read_text())['completion'],
                              'unsuccessful')
 

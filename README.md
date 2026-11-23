@@ -108,6 +108,10 @@ allowlisted with explicit additions, and the credential check is best-effort.
 | Models used in live runs | Native: `gpt-6-astra`, `claude-opus-5-5`, `claude-sonnet-5-5`; Copilot: `gpt-5.4`, `claude-sonnet-5.5` | Any other model your account offers; unknown names stop the run without retrying |
 | Authentication | Codex and Claude Code: their own CLI login. Copilot: a token in `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`; a fine-grained token needs the "Copilot Requests" permission | Copilot's saved interactive login is not used |
 
+These live results predate the section 11 response contract: acceptance of the new
+required `findings` and `finding_updates` shape by native Codex, native Claude, and
+Copilot CLIs remains unverified until new live runs are recorded.
+
 The weekly drift check keeps the CLI rows honest (see
 [Responding to CLI drift](#responding-to-cli-drift)); a version enters the
 tested ranges only with recorded evidence. For operations such as renewing
@@ -569,6 +573,72 @@ is saved, the report shows `interrupted`, zero completed turns, attempts as
 error message. Missing snapshots leave an unavailable note. Attempts that never
 completed a review are not conversation turns. Setup failures before a run
 manifest exists may have no report.
+
+### Structured verdicts and findings
+
+Each run writes `verdict.json` beside `result.json` and `report.html` in its audit
+run directory. It is separate from the unchanged `--json` CLI summary. The
+artifact records completion (`agreed`, `blocked`, `limit`, `error`, or
+`interrupted`), whether the run is complete, the final document's repository-relative
+path and SHA-256, fixed task/criteria/context hashes, the reviewer roster, per-turn
+subject bindings, and the findings ledger. `approved_subject_sha256` is populated
+only for agreement by both reviewers on the same subject. Empty findings alone do
+not mean agreement. Interrupted runs have `complete: false`; error and blocked
+runs do not pass an agreement gate.
+Verdict publication is part of run completion: if `verdict.json` cannot be built
+or written for a terminal run, the run reports error (exit 1).
+
+Reviewers now always return `findings` and `finding_updates` arrays, empty when
+unused. Duo assigns run-scoped IDs (`F1`, `F2`, …) to substantive findings, with
+severity ordered `info < low < medium < high < critical`. Findings persist across
+revisions and omissions. Only the reporting role can resolve or dismiss its
+findings, with a reason bound to the document it inspected; it must reconcile all
+its open findings before approving. Findings reported with a revision describe the
+pre-revision document. A disposition recorded in a revise response also binds to
+the pre-revision subject the reviewer inspected (`subject_hash`), so its
+`disposition.subject_hash` can differ from the approved subject hash in an agreed verdict.
+Locations include line ranges, document sections (`{"kind": "section", "section":
+"<heading text>"}`, matching a line in the inspected subject with trailing whitespace
+ignored), or an explicit
+whole-subject explanation; moved locations and dispositions remain in the audit ledger.
+Recorded locations include `path` and `subject_sha256`: a location's line numbers
+refer to the subject identified by its `subject_sha256`. Each `location_history`
+entry contains `subject_hash` and `location`, whose `subject_sha256` matches that hash.
+Titles, descriptions, section text, and subject explanations must be nonempty after
+stripping; titles are capped at 512 UTF-8 bytes and other text at `MAX_TEXT_BYTES`
+(1 MiB). Diff old/new-side locations remain deferred to plan section 10.
+
+The exported schema version starts at **1.0**, independently of package releases.
+Field meanings, severity ordering, ID scope, hashing, and completion semantics
+are frozen within a major version. Additive optional fields use minor versions,
+including at the verdict and finding levels. Location objects retain their exact
+key sets throughout 1.x; minor versions cannot add fields inside locations.
+Incompatible changes require a new major version and migration notes. The schema
+ships as `duo/schemas/verdict-1.0.json`; example artifacts are in
+[`tests/fixtures/verdicts`](tests/fixtures/verdicts).
+`validate_verdict` is the authoritative 1.0 checker; the JSON Schema is the published
+description of the same contract. JSON Schema `integer` also accepts integral floats
+such as `4.0`, while Duo's validator requires true integers. Agreement requires both
+roles' approvals on the final subject after the last revision, a final approve
+decision, no blocked decision, and no open findings.
+
+Use the standalone, stdlib-only reference gate in CI:
+
+```sh
+python examples/check_verdict.py --verdict "$RUN_DIR/verdict.json" \
+  --document plan.md --task-file task.txt --criteria-file criteria.txt \
+  --threshold high
+```
+
+The gate requires complete agreement, the expected agreement rule, matching current
+normalized UTF-8 content hashes (CRLF/CR become LF), and no open findings in an agreed
+verdict. The threshold adds severity-specific diagnostics. It exits **0** on success
+and **2** on failure, printing failed checks
+to stderr. Missing, malformed, incompatible, incomplete, stale, and non-agreed
+artifacts fail closed. `--rule` can select the expected agreement rule; the default
+is `both-reviewers-approve-same-subject`. Generate the artifact in trusted CI:
+hashes bind content but are not signatures and cannot protect against rewriting
+both the artifact and the content. See the [runbook](docs/RUNBOOK.md).
 
 ### Captured context files
 

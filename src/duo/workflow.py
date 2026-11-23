@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import time
 from typing import Callable
 
@@ -15,8 +16,76 @@ def initial_state(task: str, criteria: str, plan: str, config: Config) -> State:
     return {
         "task": task, "criteria": criteria, "plan": plan, "approved": [],
         "next_agent": config.start, "turns": 0, "attempts": 0,
-        "status": "running", "history": [], "last_diff": "", "error": "",
+        "status": "running", "history": [], "findings": [], "last_diff": "", "error": "",
     }
+
+
+def stage_findings(state: State, result: dict, agent: str, attempt: int,
+                   path: str) -> tuple[list, list]:
+    """Validate against the inspected text; never mutate the accepted ledger."""
+    ledger = deepcopy(state["findings"])
+    inspected_hash = content_hash(state["plan"])
+    turn = state["turns"] + 1
+    events = []
+
+    def location(value):
+        text = state["plan"]
+        line_count = 0 if not text else text.count("\n") + (0 if text.endswith("\n") else 1)
+        if value["kind"] == "lines" and value["end_line"] > line_count:
+            raise AgentError("Finding location exceeds the inspected subject's line count")
+        if value["kind"] == "section" and not any(
+                line.rstrip() == value["section"].rstrip() for line in text.split("\n")):
+            raise AgentError("Finding section must appear as a line of the inspected subject")
+        return {**value, "path": path, "subject_sha256": inspected_hash}
+
+    by_id = {item["id"]: item for item in ledger}
+    updated = set()
+    for update in result["finding_updates"]:
+        ident = update["id"]
+        if ident in updated:
+            raise AgentError("Duplicate finding update ID")
+        updated.add(ident)
+        if ident not in by_id:
+            raise AgentError("Unknown finding update ID")
+        finding = by_id[ident]
+        if finding["reported_by"] != agent:
+            raise AgentError("You may only close your own findings")
+        if finding["status"] != "open":
+            raise AgentError("Finding update must reference an open finding")
+        if not update["reason"].strip():
+            raise AgentError("Finding update requires a nonempty reason")
+        if update["subject_hash"] != inspected_hash:
+            raise AgentError("Finding update subject_hash must match the inspected subject SHA-256")
+        if "location" in update:
+            moved = location(update["location"])
+            if moved != finding["location"]:
+                finding["location_history"].append({
+                    # Later sightings do not relocate coordinates implicitly.
+                    "subject_hash": finding["location"]["subject_sha256"],
+                    "location": finding["location"],
+                })
+                finding["location"] = moved
+        finding.update(status=update["status"], last_seen_subject_hash=inspected_hash,
+                       disposition={"status": update["status"], "reason": update["reason"],
+                                    "subject_hash": inspected_hash, "turn": turn, "by": agent})
+        events.append({"event": "finding_updated", "id": ident, "agent": agent, "turn": turn})
+    next_id = max((int(item["id"][1:]) for item in ledger), default=0) + 1
+    for report in result["findings"]:
+        ident = f"F{next_id}"
+        next_id += 1
+        ledger.append({**report, "id": ident, "location": location(report["location"]),
+                       "status": "open", "reported_by": agent, "reported_turn": turn,
+                       "reported_attempt": attempt, "first_seen_subject_hash": inspected_hash,
+                       "last_seen_subject_hash": inspected_hash, "location_history": [],
+                       "disposition": None})
+        events.append({"event": "finding_reported", "id": ident, "agent": agent, "turn": turn})
+    for finding in ledger:
+        if finding["reported_by"] == agent and finding["status"] == "open":
+            if result["decision"] == "approve":
+                raise AgentError("Reconcile all your open findings: resolve or dismiss each "
+                                 "against the current subject before approving")
+            finding["last_seen_subject_hash"] = inspected_hash
+    return ledger, events
 
 
 class Reviewer:
@@ -90,6 +159,9 @@ class Reviewer:
                     state.update(status="limit_reached", error="Run time limit reached")
                     return
                 result = validate_review(payload, state["plan"])
+                findings, finding_events = stage_findings(
+                    state, result, agent, attempt,
+                    self.config.output or self.config.mode + ".md")
                 if self.clock() >= self.deadline:
                     state.update(status="limit_reached", error="Run time limit reached")
                     return
@@ -139,6 +211,7 @@ class Reviewer:
         else:
             state["status"] = "blocked"
 
+        state["findings"] = findings
         state["approved"] = sorted(approved)
         state["turns"] += 1
         state["next_agent"] = "claude" if agent == "codex" else "codex"
@@ -152,6 +225,8 @@ class Reviewer:
                 state["status"] = "agreed"
             elif state["turns"] >= self.config.max_turns:
                 state.update(status="limit_reached", error="Review turn limit reached")
+        for event in finding_events:
+            self.store.event(event)
         self.store.event({"event": "review", "turn": state["turns"], **turn})
         self.store.json("state.json", state)
         if self.on_review:

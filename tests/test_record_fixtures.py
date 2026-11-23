@@ -158,7 +158,7 @@ class RecordFixtureTests(unittest.TestCase):
     def test_claude_sanitizer_preserves_correlations_inputs_and_terminal(self):
         import json
         convert = self.recorder.claude_events()
-        payload = {'decision': 'revise', 'plan': 'x' * 500, 'reason': 'Synthetic'}
+        payload = {'decision': 'revise', 'plan': 'x' * 500, 'reason': 'Synthetic', 'findings': [], 'finding_updates': []}
         request = convert({'type': 'assistant', 'session_id': 'private-session', 'message': {
             'id': 'private-message', 'content': [
                 {'type': 'thinking', 'thinking': 'private reasoning', 'signature': 'opaque'},

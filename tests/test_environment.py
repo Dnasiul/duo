@@ -35,7 +35,7 @@ class EnvironmentTests(Fixture):
         binary = self.executable(name, f"""import json, os, pathlib, sys
 sys.stdin.read()
 pathlib.Path({str(marker)!r}).write_text(json.dumps(sorted(os.environ)))
-result = {{'decision': 'approve', 'plan': '', 'reason': 'Ready'}}
+result = {{'decision': 'approve', 'plan': '', 'reason': 'Ready', 'findings': [], 'finding_updates': []}}
 if '-o' in sys.argv:
     pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
 else:
