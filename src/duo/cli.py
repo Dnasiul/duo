@@ -41,8 +41,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--context-file", type=Path, action="append", default=[],
                         help="Capture a UTF-8 context file (repeatable; 64 KiB aggregate)")
     result.add_argument("--max-prompt-bytes", type=int, default=DEFAULT_MAX_PROMPT_BYTES,
-                        help="Full UTF-8 prompt ceiling (INTERIM default: 524288 bytes, "
-                             "pending owner decision)")
+                        help="Full UTF-8 prompt ceiling (default: 524288 bytes, "
+                             "owner-ratified 2026-11-23)")
     result.add_argument("--output", type=Path,
                         help="Document path relative to --repo (default: <mode>.md)")
     result.add_argument("--codex-model", required=True, help="Explicit Codex model identifier")
