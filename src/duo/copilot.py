@@ -35,7 +35,7 @@ def options(help_text: str) -> set[str]:
 
 
 def session_flags(help_text: str) -> list[str]:
-    """The options that keep this Copilot's session from being shared or controlled."""
+    """Advertised options requesting no session sharing/control; not a service test."""
     available = options(help_text)
     if available.issuperset(LEGACY_SESSION_FLAGS):
         return list(LEGACY_SESSION_FLAGS)
@@ -238,9 +238,16 @@ def _preflight(config: Config, directory: Path) -> tuple[str, dict]:
         'version_status': status,
         'settings': SETTINGS, 'tools': tools(config.allow_web), 'web': config.allow_web,
         'session_flags': session,
+        'preflight_checks': 'Required option names advertised; selected effective config values '
+                            'match settings; local managed and repository sources checked',
+        'assurance': 'Settings are checked as metadata; tools, session_flags, extensions and '
+                     'disabled_workspace_mcp_servers describe supplied restrictions. No per-run '
+                     'write-denial, read-confinement, network-denial or tool-use tests; '
+                     'service-side session behavior is unverified',
         'configuration': 'fresh isolated home and cache per invocation',
         'authentication': 'environment token; values never included in audit metadata',
-        'extensions': 'disabled; no inherited plugins, MCP servers or trusted folders',
+        'extensions': 'configured off via fresh configuration, environment and CLI options; '
+                      'no inherited plugins, MCP servers or trusted folders requested',
         'disabled_workspace_mcp_servers': disabled_servers,
         'response': 'final answer from the JSONL event stream, validated locally; no native schema-enforcement flag',
     }

@@ -21,8 +21,8 @@ then has the host agent check the findings.
 | Output | A chat message | A file in the repository (plan, report, description, or review) that the next run starts from |
 | Scope | Code changes | Any document: plans, code reviews, analysis reports, descriptions, reference checks |
 | Running | Inside an interactive session | A standalone command with exit codes and a JSON summary, suited to scripts and unattended runs |
-| Restrictions | Whatever flags the command passes, unchecked; the reviewer usually gets your full environment and configuration | Checked before every run and refused if missing; allowlisted environment variables; tested CLI versions only (see [Reviewer inspection policy](#reviewer-inspection-policy)) |
-| Record | The conversation | Every prompt, attempt, response, CLI version, and the restrictions in force, per run |
+| Restrictions | Whatever flags the command passes, unchecked; the reviewer usually gets your full environment and configuration | Preflight checks advertised options and selected effective metadata, failing closed on required probe failures; no per-run behavioral boundary tests. Allowlisted environment; tested CLI ranges by default (see [Reviewer inspection policy](#reviewer-inspection-policy)) |
+| Record | The conversation | Prompts, attempts, responses, CLI versions, supplied restrictions and preflight results; tool evidence limited to emitted CLI logs |
 | Cost | One model call plus the host's checking | Usually three or more model calls |
 
 A one-pass review is faster and fits interactive work: it can build the diff
@@ -87,10 +87,11 @@ should still assess the final plan.
 
 [docs/SECURITY.md](docs/SECURITY.md) details what each reviewer can read and
 reach, which controls are tested or only configured, and what Duo does not
-claim. In short: Codex's reads are not confined to the repository (Claude Code
-and Copilot refused file reads and searches outside it in tests), reviewer CLIs
-receive only the environment variables they need, and the credential check is
-best-effort.
+claim. Codex's reads are not confined to the repository. Historical Claude Code
+and Copilot checks recorded outside denials, but Copilot GPT temporary/home reads
+were not attempted and remain unverified; native Codex declined dedicated-search
+requests, which is not confinement evidence. Reviewer environments are
+allowlisted with explicit additions, and the credential check is best-effort.
 
 ### Compatibility
 
@@ -235,9 +236,10 @@ Claude can read and search text files only, so it cannot open binary trajectorie
 Codex can also run read-only commands on them. Whatever either reads is sent to
 the model providers.
 
-Reviewers have no web access unless you pass `--allow-web` (experimental), for
-example to check references against their DOI records. It lets text the
-reviewers read steer them into sending data out through queries and URLs; read
+Web tools are disabled unless you pass `--allow-web` (experimental), for
+example to check references against their DOI records. Readable information can
+reach model providers even without web tools; enabling them adds disclosure
+paths through search providers and arbitrary URLs. Read
 "Web access" in [docs/SECURITY.md](docs/SECURITY.md) before using it.
 
 For how the modes fit together across a research project, from observations and
@@ -400,7 +402,9 @@ It starts fresh agent sessions and passes review context explicitly.
 
 ### Reviewer inspection policy
 
-Duo applies and audits inspection restrictions before starting reviews:
+Duo supplies inspection restrictions and checks advertised options and selected
+metadata before starting reviews. These checks do not exercise write denial,
+read confinement, network denial, or every tool restriction on each run:
 
 - **Codex:** a fresh process with the read-only sandbox and approvals set to
   `never`; user configuration and executable rules are ignored during review.
@@ -410,23 +414,31 @@ Duo applies and audits inspection restrictions before starting reviews:
   sandbox does not limit reads to the repository. Codex runs with `--json`, so
   its transcript stays out of stderr and failures are classified from
   structured error events, never from model text. Preflight checks
-  the effective feature flags and empty MCP list, including inherited and managed
-  configuration; unsupported or conflicting controls stop the run. MCP servers
-  in your own Codex configuration are allowed: reviews ignore it, and preflight
-  lists servers the same way. Servers from managed configuration stop the run.
+  required help names, disabled feature values under overrides over normal
+  configuration, and an empty MCP list with an empty `CODEX_HOME`. Missing options,
+  conflicting feature metadata, or listed MCP servers stop setup. Reviews ignore
+  user configuration; the MCP probe's empty home also removes the usual stored
+  login, but retains allowed authentication variables and explicit `--pass-env`
+  additions. Login-fetched managed MCP policy remains unverified. Historical
+  deterministic write denials are recorded for Codex 0.164.0–0.166.0 on Linux
+  and 0.167.0 on macOS; the model-directed 0.164.0 write attempt was inconclusive.
 - **Claude:** safe and restricted modes, an empty list of user/project/local
   setting sources, explicit settings disabling hooks and connector/plugin sync,
   and only `Read`, `Glob`, and `Grep` tools. MCP, Chrome integration, and skills
   are disabled. Safe mode also turns off automatic `CLAUDE.md` loading; reviewers
-  can still read repository instruction files as context.
+  can still read repository instruction files as context. Preflight checks
+  required help names and managed-policy metadata, not an effective tool list.
 - **Copilot:** a fresh home/cache per invocation, hooks and connectors disabled,
   no inherited plugins or trusted folders, and only `view`, `glob`, and `grep`
-  exposed, confined to the repository. Shell, write, and URL permissions are
+  requested with repository confinement (historical GPT read gaps noted above).
+  Shell, write, and URL permissions are
   denied. Built-in MCP servers and discovered repository MCP servers are
   explicitly disabled. Project extension opt-ins, custom provider environment
-  overrides, and auto-update are disabled, and the session is kept off GitHub web
-  and mobile: `--no-remote --no-remote-export` before Copilot 1.0.103,
+  overrides, and auto-update are disabled, and session sharing/control is requested
+  off: `--no-remote --no-remote-export` before Copilot 1.0.103,
   `--sync-session=off` from 1.0.103, chosen from the installed CLI's help.
+  Preflight checks advertised options and selected effective configuration
+  values; it does not verify GitHub's service-side session behavior.
   Conflicting repository settings and local managed policy cause a setup error;
   repository settings that require inspection must be plain JSON. Configurations
   and organization policy must remain stable during the run.
@@ -460,9 +472,14 @@ detected system/MDM policy files and populated remote-policy caches, then uses
 policy results stop setup. Even benign managed settings may cause rejection;
 Duo does not attempt to reinterpret an administrator's policy. Keep CLI settings
 and organization policy stable throughout a run, as well as repository contents.
+Accepted `doctor` states also include policy not fetched for lack of a qualifying
+subscription or usable credentials; these do not establish authenticated policy
+absence. Unavailable authenticated policy and network-boundary evidence remain
+open in plan §8 and [STATUS](docs/STATUS.md#open).
 
 `reviewer-policy.json` records the policy, settings sources, CLI versions, and
-verified controls. Requested model and effort values remain in `manifest.json`;
+the scope of option/metadata checks, separately from supplied settings and
+unverified behavior. Requested model and effort values remain in `manifest.json`;
 Duo does not claim to know effective values that a CLI does not expose.
 See [Codex configuration](https://developers.openai.com/codex/config-reference),
 [Claude's CLI modes](https://code.claude.com/docs/en/cli-reference), and
@@ -481,7 +498,7 @@ that variable is unset. Override this with `--state-dir /outside/the/repo`.
 Each run has a private directory containing:
 
 - `manifest.json` and `versions.json`: inputs, options, and CLI versions.
-- `reviewer-policy.json`: inspection policy and verified configuration controls.
+- `reviewer-policy.json`: supplied inspection policy and option/metadata checks.
 - `claude-settings.json`: generated settings used for Claude review invocations.
 - `events.jsonl`: attempts, errors, and accepted reviews with plan hashes.
 - `plan-000.md` and later snapshots: the initial plan and validated proposals.
@@ -493,6 +510,11 @@ Each run has a private directory containing:
 A proposal snapshot may exist even when publishing it to `plan.md` failed.
 Audit files contain task and repository-derived content. They are local records,
 not resumable LangGraph checkpoints, and are never deleted automatically.
+Snapshots save the reviewed document, not every inspected file or page. File and
+web tool evidence depends on emitted CLI logs and may be incomplete. Native
+Claude's recorded JSON result contains the answer, usage, and permission denials
+but no successful tool transcript. Plan §2 tracks that audit improvement; it
+will not guarantee complete file or web archives.
 
 ### Restarting
 
@@ -550,11 +572,13 @@ a review: this version does not fingerprint all code or detect every code edit.
 The **CLI drift** workflow (`.github/workflows/drift.yml`) runs every Monday and
 on demand. On Ubuntu and macOS it installs the newest Codex, Claude Code, and
 Copilot releases from npm and runs `scripts/check_drift.py`. That script applies
-Duo's own credential-free setup checks and compares help flags and Codex
-feature names with the recorded fixtures. Each CLI is reported as:
+Duo's own setup checks without model calls and compares help flags and Codex
+feature names with the recorded fixtures. Allowed authentication can remain;
+"no model calls" does not mean "no credentials". Each CLI is reported as:
 
-- `compatible`: a tested version whose controls all verify. Nothing to do.
-- `untested-version`: the controls verify, but the version is outside the tested
+- `compatible`: a version in the tested range whose configuration probes pass;
+  this does not prove behavioral enforcement.
+- `untested-version`: the probes pass, but the version is outside the tested
   range. Duo refuses it unless `--allow-untested-cli` is passed.
 - `probe-failure`: a control is missing or did not take effect, or the CLI did
   not start. The job fails.
@@ -645,7 +669,8 @@ repository the same way, reporting leaked file names and contents separately.
 ## Implementation
 
 `src/duo/workflow.py` builds the LangGraph cycle. `adapters.py` runs the CLIs,
-`policy.py` defines and verifies their inspection configuration,
+`policy.py` defines their inspection configuration and checks advertised options
+and selected metadata,
 `models.py` validates the shared response contract, `prompts.py` builds review
 context and each mode's checklist, and `storage.py` manages document publication
 and audit files.

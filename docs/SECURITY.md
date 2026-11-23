@@ -1,14 +1,25 @@
 # Duo security model
 
 What each reviewer can reach, what Duo enforces, and what it does not claim.
-Every statement is tagged with its evidence:
+Evidence labels distinguish configuration from enforcement:
 
-- **Tested**: shown with synthetic data by the test suite or the real-CLI smoke
-  test (`scripts/smoke_inspection.py`).
-- **Verified each run**: preflight probes confirm the control before any review;
-  a missing or ineffective control stops the run.
-- **Configured**: Duo passes the setting, but no test shows the CLI enforcing it.
+- **Configured**: Duo supplies settings, environment variables, or CLI options.
+- **Options checked each run**: required option names appear in CLI help; this
+  establishes advertised availability, not enforcement.
+- **Metadata checked each run**: the specific effective values or policy state
+  named in the row pass preflight. Missing, conflicting, or unrecognized probe
+  results stop setup according to the existing checks.
+- **Tested**: behavior observed in offline tests or historical live checks, only
+  for the recorded operations, models, CLI versions, and platforms. An unchanged
+  document alone is not a deliberate write-denial test.
 - **Not verified**: unknown; assume the less safe answer.
+
+Preflight makes no model calls and does not exercise write denial, read
+confinement, network denial, or every tool restriction. Historical live results
+are in [STATUS](STATUS.md); accepted version ranges include unexercised patches.
+Unless specified otherwise, the historical Linux confinement matrix used Codex
+0.162.1 / `gpt-6-astra`, Claude Code 2.1.296 / `claude-sonnet-5-5`, and Copilot
+1.0.96 / `gpt-5.4` and `claude-sonnet-5.5`. Later checks have their own scopes.
 
 ## Scope
 
@@ -38,11 +49,11 @@ Review each provider's data-handling settings before use.
 
 | Access | Behavior | Evidence |
 | --- | --- | --- |
-| Reading files | Sandboxed shell commands can read any file your user can read. Reads are **not** confined to the repository. | Tested: a recorded real run (`tests/fixtures/codex-0.162.1/events-approve.jsonl`) shows Codex checking for files in every directory above the repository; live runs on Linux also read `/tmp` and `/`. Tested (`--confinement`, Linux): read a file in the temporary directory, one in the home directory, and one through a symbolic link inside the repository |
-| Writing files | Read-only sandbox, approvals `never` | Verified each run (overrides applied); Tested: plan unchanged in the smoke test. Not verified: a deliberate write attempt |
-| Tools | Read-only sandboxed commands. MCP servers, apps, plugins, hooks, notify commands, browser use, web search, multi-agent tools, and shell snapshots disabled | Verified each run (effective feature list, empty MCP list); Tested: repository hooks and MCP launchers did not run in the smoke test. The `mcp_servers={}` override does not remove configured servers (Codex 0.162.1), so the MCP list is checked against an empty `CODEX_HOME`, the configuration reviews load. Tested: servers in user configuration, and in projects it trusts, are not loaded by a review; the smoke test passes with one configured. Because that check runs without credentials, MCP servers from policy fetched with your login are not verified |
+| Reading files | Sandboxed shell commands can read any file your user can read. Reads are **not** confined to the repository. | Tested: a recorded real run (`tests/fixtures/codex-0.162.1/events-approve.jsonl`) shows Codex checking for files in every directory above the repository; live runs on Linux also read `/tmp` and `/`. Tested (`--confinement`, Linux): read a file in the temporary directory, one in the home directory, and one through a symbolic link inside the repository. Dedicated-search requests were declined for lack of search tools, not tested for confinement |
+| Writing files | Read-only sandbox, approvals `never` | Configured: sandbox and approval overrides supplied. Options checked each run: required `exec` option names, including `--sandbox`; no effective sandbox/approval metadata check. Tested: deterministic probes denied writes inside/outside the repository on Linux x86-64: 0.164.0 through `codex sandbox` with Duo's options and reviewer environment (`EROFS`); 0.165.0 and 0.166.0 deterministic probes ("Read-only file system"). On macOS 27.2 arm64, 0.167.0 through `codex sandbox` with Duo's options denied writes inside/outside the repository and in the home directory ("Operation not permitted"). No files were created. These are historical STATUS results, not per-run tests. The separate 0.164.0 model-directed write attempt timed out without a tool call and remains inconclusive |
+| Tools | Read-only sandboxed commands. MCP servers, apps, plugins, hooks, notify commands, browser use, web search, multi-agent tools, and shell snapshots configured off | Options checked each run: required `exec` names. Metadata checked each run: the nine disabled feature values report false under CLI overrides over normal configuration; MCP list is empty with an empty `CODEX_HOME`. Other overrides, including notify and web search, are supplied, not independently checked as effective values. Tested: hooks and MCP launchers stayed inert in the recorded startup smoke tests; 0.162.1 ignored user-configured MCP servers, including trusted-project configuration. `mcp_servers={}` alone does not remove configured servers. Empty `CODEX_HOME` removes user configuration and the usual stored-login location, but retains allowed authentication variables (`CODEX_API_KEY`, `OPENAI_API_KEY`) and explicit `--pass-env` additions. Login-fetched managed MCP policy remains not verified |
 | Environment | Only what it needs to run and log in: `HOME`, `PATH`, user and locale settings, temporary and XDG directories, the session bus, proxy and certificate settings, and `CODEX_HOME`, `CODEX_API_KEY`, `OPENAI_API_KEY`, plus any `--pass-env` names. Cloud credentials, other tools' tokens, the SSH agent, and `NODE_OPTIONS` are dropped. Codex runs its commands in a login shell, which can set variables again from your shell profile | Tested: review calls, setup probes, and version checks receive only these, and no dropped value reaches the audit (fake CLIs); the real CLIs still found their logins and passed preflight with them (macOS and Linux); what the login shell adds is not verified |
-| Network | The CLI talks to OpenAI. Web search is disabled unless `--allow-web` | Configured; network access from sandboxed commands not verified |
+| Network | The CLI talks to OpenAI. Web search is disabled unless `--allow-web` | Configured: `web_search` override supplied. Network denial from sandboxed commands not verified; historical DNS failures alone do not establish it (plan §8) |
 | Authentication | Codex's own stored login. Because reads are unrestricted, its commands can read credential files in your home directory | Not prevented |
 
 ### Claude Code (native)
@@ -50,22 +61,22 @@ Review each provider's data-handling settings before use.
 | Access | Behavior | Evidence |
 | --- | --- | --- |
 | Reading files | `Read`, `Glob`, and `Grep` only. Restricted mode refuses reads outside the working directory, including through a symbolic link inside the repository | Tested (`--confinement`, Linux): `Read` was denied for a file in the temporary directory, one in the home directory, and one through a repository symlink, each listed in Claude Code's `permission_denials`. Tested (`--search-confinement`, Linux): `Glob` and `Grep` were denied for a directory in the temporary directory and one in the home directory; searching the repository did not follow a symbolic link to an outside directory |
-| Writing files | No write or shell tools | Verified each run (required flags present); Tested: plan unchanged in the smoke test |
-| Tools | Only `Read`, `Glob`, `Grep`. Safe and restricted modes, no setting sources, hooks and connector/plugin sync disabled, MCP, Chrome, and slash commands disabled | Verified each run (flags, `claude doctor` remote-policy state, managed-settings files); Tested: hooks and MCP launchers did not run |
+| Writing files | No write or shell tools requested | Configured: explicit tool allowlist. Options checked each run: required names including `--tools` and `--allowedTools`; no effective tool-list or write-denial probe. Tested: document stayed unchanged in the recorded startup smoke tests |
+| Tools | Only `Read`, `Glob`, `Grep` requested. Safe and restricted modes, no setting sources, hooks and connector/plugin sync disabled, MCP, Chrome, and slash commands disabled | Configured: options and settings supplied. Options checked each run: required help names. Metadata checked each run: local managed sources/cache and accepted `claude doctor` remote-policy state. Accepted "not fetched" states do not verify authenticated policy; that remains open in plan §8. Tested: hooks and MCP launchers stayed inert in recorded startup smoke tests; no per-run tool-use test |
 | Environment | Only what it needs to run and log in: `HOME`, `PATH`, user and locale settings, temporary and XDG directories, the session bus, proxy and certificate settings, and `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, plus any `--pass-env` names. Without a shell tool, the model has no direct way to read it | Tested: review calls, setup probes, and version checks receive only these, and no dropped value reaches the audit (fake CLIs); the real CLIs still found their logins and passed preflight with them (macOS and Linux) |
-| Network | The CLI talks to Anthropic. No web tools are available unless `--allow-web` | Configured |
+| Network | The CLI talks to Anthropic. Web tools are excluded unless `--allow-web` | Configured: tool allowlist; no independent network-denial test |
 | Authentication | Claude Code's own login | As for reading files |
 
 ### Copilot (either reviewer)
 
 | Access | Behavior | Evidence |
 | --- | --- | --- |
-| Reading files | `view`, `glob`, `grep`, confined to the repository: fresh home with no trusted folders, temporary directory access disallowed. An outside path needs approval that a non-interactive run cannot give, so it is denied; symbolic links are judged by their target | Tested (`--confinement`, Linux, both models): `view` was denied for a file in the temporary directory, one in the home directory, and one through a repository symlink ("Permission denied because no interactive user response was available"). Tested (`--search-confinement`, Linux, both models): `glob` and `grep` (shown to the Codex model as `rg`) were denied the same way for a directory in the temporary directory and one in the home directory; searching the repository did not follow a symbolic link to an outside directory |
-| Writing files | `write` and `shell` denied; not offered as tools | Verified each run (flags present, isolated settings in effect); Tested: plan unchanged |
-| Tools | Only `view`, `glob`, `grep`. `url` denied, built-in and repository MCP servers disabled; hooks, connectors, memory, project extensions, and the IDE connection off | Verified each run; Tested: hooks and MCP launchers did not run; real runs used only these tools (on Linux they appear as `glob`, `view`, and `rg`, Copilot's name for `grep`) |
+| Reading files | `view`, `glob`, `grep`; repository confinement requested through fresh configuration without trusted folders, `--disallow-temp-dir`, and no interactive approval. Observed outside-path denials judge symlinks by their targets | Tested (`--confinement`, historical Linux matrix): Claude `view` denied temporary, home, and repository-symlink targets; GPT `view` denied the symlink target but did not attempt temporary/home reads, which remain unverified. Tested (`--search-confinement`, same matrix): both models' outside temporary/home searches denied; GPT searched the repository without following the link, while Claude's combined call was denied. Copilot 1.0.105 on Linux denied all 18 outside operations with `claude-sonnet-5.5` in both roles; this does not fill the GPT gap (plan §8) |
+| Writing files | `write` and `shell` denied; excluded from requested tools | Configured: tool allowlist and deny options. Options checked each run: required help names. Metadata checked each run: selected settings, not effective tool permissions. Tested: document stayed unchanged in recorded smoke tests; no per-run write-denial test |
+| Tools | Only `view`, `glob`, `grep` requested. `url` denied, built-in and discovered repository MCP servers disabled; hooks, connectors, memory, project extensions, and the IDE connection off | Configured: CLI options, environment, fresh configuration. Options checked each run: required help names including selected session options. Metadata checked each run: `config --list --json` matches `SETTINGS`; local managed/repository sources checked. Tested: hooks and MCP launchers stayed inert in recorded smoke tests; recorded no-web runs used only inspection tools. Service-side session behavior and every tool restriction are not independently verified |
 | Environment | The same allowlist, `GH_HOST` and `COPILOT_GH_HOST`, and only the token Copilot uses (the first of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`), plus any `--pass-env` names, and the settings Duo sets for it (`COPILOT_HOME`, `COPILOT_ALLOW_ALL=false`, and others). Other tokens, your Copilot settings, and provider overrides are dropped. Without a shell tool, the model has no direct way to read them | Tested: only the chosen token and the host variables are passed, and no other listed secret (fake CLI); real reviews used the token under it (macOS and Linux) |
-| Network | The CLI talks to GitHub Copilot. URL access is denied unless `--allow-web` | Configured |
-| Authentication | A token from the environment; the saved Copilot login is not used. The CLI process necessarily holds the token | Tested: tokens never appear in audit files (macOS and Linux) |
+| Network | The CLI talks to GitHub Copilot. URL access is denied unless `--allow-web` | Configured: `--deny-tool url` without web; no independent network-denial test |
+| Authentication | A token from the environment; the saved Copilot login is not used. The CLI process necessarily holds the token | Tested: no token found in the audit files of the recorded macOS/Linux runs; this is not a guarantee against future disclosure |
 
 ## Web access (`--allow-web`, experimental)
 
@@ -74,7 +85,7 @@ changes nothing else in the inspection policy:
 
 | Reviewer | Web tools | Mechanism |
 | --- | --- | --- |
-| Codex (native) | OpenAI's hosted web search, which can also open pages | `web_search="live"` instead of `"disabled"`; sandboxed commands stay read-only, with no network |
+| Codex (native) | OpenAI's hosted web search, which can also open pages | `web_search="live"` instead of `"disabled"`; read-only sandbox still requested; command network denial remains unverified |
 | Claude Code (native) | `WebSearch`, `WebFetch` | Added to `--tools` and `--allowedTools`; restricted mode otherwise unchanged |
 | Copilot | `web_fetch` only, for any URL | Added to `--available-tools`, `url` no longer denied, `--allow-all-urls`. Copilot's web search comes from its built-in GitHub MCP server, which also offers repository-writing tools, so it stays disabled |
 
@@ -85,28 +96,35 @@ credentials into a query or URL. That is a request to the model, not a control.
 
 What it changes:
 
-- **Prompt injection can now send data out.** Without web tools, a manipulated
-  reviewer can only write a bad document, which Duo validates and you read.
-  With them, text in the repository or on a fetched page can steer a reviewer
-  into encoding what it has read into a search query or a URL it fetches. Native
-  Codex can read any file your user can read, so that includes your home
-  directory; Claude Code and Copilot read only inside the repository.
+- **Web adds disclosure paths.** Even without web tools, prompt injection can
+  steer a reviewer into reading additional accessible information and sending it
+  to its model provider, as well as producing a bad document. Native Codex can
+  read outside the repository, including the home directory. Claude Code and
+  Copilot request confined tools, with the evidence and gaps above. Web adds
+  search-provider and arbitrary-URL disclosure: repository or page text can
+  steer a reviewer into encoding readable information in a query or fetched URL.
 - **Search queries reach search providers**, even when nothing goes wrong.
-- **Web evidence is not in the audit record** as file contents are: pages change,
-  and the run keeps only what each CLI logs. Codex's attempt logs list each search
-  and opened page, and Copilot's each fetched URL. Native Claude's do not: Claude
-  Code's JSON output lists no tool calls, and its usage counters stayed at zero
-  even when it searched and fetched. Claude Code's `WebFetch` also returns a
-  model-written summary of the page rather than the page itself.
+- **File and web audit evidence can be incomplete.** Duo saves snapshots of the
+  document under review, not independent copies of every inspected repository
+  file or fetched page. Tool evidence depends on what each CLI emits. Recorded
+  Codex logs contain command output and web search/open events; Copilot emits
+  tool events and fetched URLs. Neither guarantees complete file/page contents
+  or every internally accessed resource. Native Claude's recorded JSON result
+  includes the answer, token usage, and permission denials, but no successful
+  file-read or web-tool transcript. Its web-search/fetch counters stayed zero in
+  the historical web check despite tool use. `WebFetch` returns a model-written
+  summary, not the page. Plan §2's Claude audit-stream improvement remains open;
+  even emitted tool events would not guarantee complete file or page archives.
 
 Tested (Linux, 2026-10-14; codex-cli 0.162.1, Claude Code 2.1.299, Copilot CLI
 1.0.96): a report-mode check of a three-entry `refs.bib` against DOI records,
 natively (`gpt-6-astra`, `claude-sonnet-5-5`) and through Copilot (`gpt-5.4`,
 `claude-sonnet-5.5`). Both pairs agreed, confirmed the two real entries (noting
 their missing end pages), and reported the invented third DOI as not found; a
-Crossref check confirmed every finding. Native Codex's sandboxed `curl` and
-Python requests failed to resolve hosts, so its web access went only through
-web search. Native Claude, with Duo's exact command line, returned a release
+Crossref check confirmed every finding. Native Codex used web search; its
+sandboxed `curl` and Python requests failed to resolve hosts. These DNS failures
+alone do not establish network denial, which remains unverified. Native Claude,
+with Duo's exact command line, returned a release
 checksum it could only have read by fetching the file. No token in any file.
 Copilot started with `--repo` set to a subfolder of a Git repository was refused
 a file in a sibling folder, by relative and absolute path, so a web-enabled run
@@ -188,7 +206,7 @@ permission-bypass flags.
 ## Not claimed
 
 - Isolation from the rest of your files. Codex can read outside the repository.
-  Claude Code and Copilot refused file reads and searches outside it in tests,
+  Claude Code and Copilot refused the attempted outside operations recorded above,
   but that confines their tools, not the environment or the CLI process itself.
 - Hiding a credential from the CLI process that needs it to authenticate.
 - Protection against a compromised CLI binary or npm package.
@@ -205,7 +223,8 @@ Until an isolation profile exists, for repositories you are less sure of:
 - keep secrets out of your shell profile: Duo already drops unrelated environment
   variables, but Codex's commands run in a login shell that reads the profile;
 - prefer Claude Code or Copilot over native Codex where reads outside the
-  repository matter: both refused outside reads and searches in tests.
+  repository matter: both have recorded outside denials, subject to the GPT
+  temporary/home read gap above.
 
 ## Reproducing the evidence
 
@@ -218,4 +237,6 @@ Until an isolation profile exists, for repositories you are less sure of:
   reports, per file, whether its random phrase reached the response or audit files.
   `--search-confinement` adds two model calls that do the same with the search
   tools, reporting file names and contents separately.
-- Every run's `reviewer-policy.json` records the controls preflight verified.
+- Every run's `reviewer-policy.json` distinguishes supplied restrictions from
+  advertised options and selected metadata checked by preflight; it does not
+  certify per-run behavioral enforcement.

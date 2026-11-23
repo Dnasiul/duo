@@ -1,12 +1,16 @@
 """Check installed reviewer CLIs against Duo's version policy and controls.
 
-For each CLI this runs Duo's own credential-free setup checks (version, help,
+For each CLI this runs Duo's own setup checks without model calls (version, help,
 feature/config probes, managed-policy detection) and compares help flags and
 Codex feature names with the recorded fixtures of the first tested version.
+Allowed authentication may remain. An empty CODEX_HOME for MCP listing removes
+the usual stored-login location, not allowed authentication variables. These
+checks establish option availability and selected metadata, not write/read/tool
+enforcement or network denial; unavailable authenticated policy is unverified.
 
 Result per CLI:
-  compatible        tested version; every control check passed
-  untested-version  controls pass, but the version is outside the tested range
+  compatible        tested version; all configuration probes passed
+  untested-version  probes pass, but the version is outside the tested range
                     (expected after new releases; needs evidence before adoption)
   probe-failure     a control check failed or the CLI could not run
 
