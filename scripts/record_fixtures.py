@@ -1,7 +1,8 @@
 """Record sanitized real-CLI output as offline test fixtures.
 
-  probes:  run the installed CLIs' credential-free probes (version, help,
-           feature/config listings, claude doctor), exactly as preflight does.
+  probes:  run the installed CLIs' production-equivalent probes (version, help,
+           feature/config listings, claude doctor) with preflight's restricted
+           environments, which can retain permitted authentication variables.
   attempt: copy one audited Duo attempt (stdout/stderr/response) from a
            disposable run with synthetic content.
 
@@ -26,7 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from duo import copilot  # noqa: E402
-from duo.policy import CLAUDE_SETTINGS, claude_options, codex_options  # noqa: E402
+from duo.policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options,
+                        codex_options, reviewer_environment)  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "fixtures"
 LIMIT = 300  # characters kept from strings that Duo does not parse
@@ -90,35 +92,42 @@ def version_of(text: str) -> str:
 
 
 def record_probes(args) -> None:
-    def run(argv, env=None):
+    def run(argv, env):
         result = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=env,
                                 stdin=subprocess.DEVNULL)
         if result.returncode:
             raise SystemExit(f"{argv[0]} probe failed: {result.stderr.strip()[:200]}")
         return scrub(result.stdout)
 
+    if "claude" in args.cli:
+        check_claude_managed_files()
     with tempfile.TemporaryDirectory() as scratch:
         scratch = Path(scratch)
         if "codex" in args.cli:
-            version = run([args.codex_bin, "--version"])
+            env = reviewer_environment("codex")
+            version = run([args.codex_bin, "--version"], env)
             target = FIXTURES / f"codex-{version_of(version)}"
             write(target, "version.txt", version)
-            write(target, "exec-help.txt", run([args.codex_bin, "exec", "--help"]))
-            write(target, "features.txt", run([args.codex_bin, *codex_options(), "features", "list"]))
+            write(target, "exec-help.txt", run([args.codex_bin, "exec", "--help"], env))
+            write(target, "features.txt", run([args.codex_bin, *codex_options(), "features", "list"], env))
             # As preflight does: an empty CODEX_HOME loads what a review loads, so
             # the user's own MCP servers (ignored by reviews) stay out of fixtures.
             home = scratch / "codex-home"
             home.mkdir()
             write(target, "mcp-list.json", run([args.codex_bin, *codex_options(), "mcp", "list", "--json"],
-                                               env={**os.environ, "CODEX_HOME": str(home)}))
+                                               env={**env, "CODEX_HOME": str(home)}))
         if "claude" in args.cli:
             settings = scratch / "claude-settings.json"
             settings.write_text(json.dumps(CLAUDE_SETTINGS))
-            version = run([args.claude_bin, "--version"])
+            env = reviewer_environment("claude")
+            version = run([args.claude_bin, "--version"], env)
             target = FIXTURES / f"claude-{version_of(version)}"
             write(target, "version.txt", version)
-            write(target, "help.txt", run([args.claude_bin, "--help"]))
-            write(target, "doctor.txt", run([args.claude_bin, *claude_options(settings), "doctor"]))
+            write(target, "help.txt", run([args.claude_bin, "--help"], env))
+            check_claude_managed_files()
+            doctor = run([args.claude_bin, *claude_options(settings), "doctor"], env)
+            check_claude_managed_files()
+            write(target, "doctor.txt", doctor)
         if "copilot" in args.cli:
             (scratch / "copilot").mkdir()
             env = copilot.environment(scratch / "copilot")
@@ -158,7 +167,7 @@ def record_attempt(args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    probes = sub.add_parser("probes", help="Record credential-free probe output")
+    probes = sub.add_parser("probes", help="Record production-equivalent probe output")
     probes.add_argument("--cli", nargs="+", choices=["codex", "claude", "copilot"],
                         default=["codex", "claude", "copilot"])
     probes.add_argument("--codex-bin", default="codex")

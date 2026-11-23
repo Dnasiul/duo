@@ -22,13 +22,27 @@ replaces home paths, the user and account names, session and request IDs, and
 drops encrypted or reasoning payloads and long tool output; the parsed answer
 stays whole.
 
+The existing fixtures above were captured before the recorder's restricted
+native-probe environment fix. Native probes inherited the full parent
+environment; the Codex MCP probe replaced only `CODEX_HOME`. They are historical
+format and control-check evidence, not evidence of capture under the restricted
+environment. Copilot probes already used `copilot.environment`. No fixtures were
+re-captured for this fix; refresh affected native probes with the corrected
+recorder when a new capture is authorized.
+
 ## Refreshing
 
-When adding a tested version, record its credential-free probes:
+When adding a tested version, record its production-equivalent probes:
 
 ```sh
 DUO_FIXTURE_ACCOUNT=<github-login> python scripts/record_fixtures.py probes
 ```
+
+Native probes now use preflight's restricted `reviewer_environment`, which can
+retain permitted authentication and runtime variables. The Codex MCP probe
+layers an empty `CODEX_HOME` onto that environment; it removes the usual stored
+login location but does not remove permitted authentication variables. These
+probes are not credential-free. Copilot retains its existing environment builder.
 
 Then record responses from a disposable Duo run (synthetic task, scratch
 repository) by attempt directory:
