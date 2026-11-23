@@ -18,7 +18,7 @@ from duo.storage import RunStore
 
 HELP = ('--sandbox --ephemeral --json --output-schema --ignore-rules --ignore-user-config --strict-config '
         '--safe-mode --restricted --setting-sources --settings --strict-mcp-config '
-        '--no-chrome --disable-slash-commands --tools --allowedTools')
+        '--no-chrome --disable-slash-commands --tools --allowedTools --output-format stream-json --verbose --json-schema')
 
 
 class PolicyTests(unittest.TestCase):
@@ -176,6 +176,20 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(failure=failure), patch('duo.policy.check_claude_managed_files'), self.assertRaises(RunError) as caught:
                 verify_controls('codex', 'claude', self.root / 'settings.json', probe)
             self.assertNotIn('SECRET', str(caught.exception))
+
+    def test_stream_json_must_be_an_output_format_value(self):
+        for output_help in ('--output-format json --input-format stream-json',
+                            '--output-format <format>  Output format: "text", "json"\n'
+                            '  --input-format <format>  Input format:\n'
+                            '                                        "text", "stream-json"'):
+            def probe(argv, env=None):
+                text = self.probe(argv, env)
+                if argv[0] == 'claude' and '--help' in argv:
+                    return text.replace('--output-format stream-json', '') + '\n  ' + output_help
+                return text
+            with self.subTest(help=output_help), patch('duo.policy.check_claude_managed_files'), \
+                    self.assertRaisesRegex(RunError, 'required stream-json output'):
+                verify_controls('codex', 'claude', self.root / 'settings.json', probe)
 
     def test_remote_policy_unknown_stale_and_loaded_fail_closed(self):
         for report in ('', 'Managed settings (remote): loaded',

@@ -503,6 +503,7 @@ Each run has a private directory containing:
 - `events.jsonl`: attempts, errors, and accepted reviews with plan hashes.
 - `plan-000.md` and later snapshots: the initial plan and validated proposals.
 - `attempt-*/`: schema, command arguments, response, and raw CLI diagnostics.
+  Native Claude attempts also contain `claude-stream.json` metadata.
   Copilot attempts also contain an isolated `copilot-home/`, cache, and CLI logs.
 - `state.json`: the last audited review state.
 - `result.json` or `error.json`: final outcome.
@@ -512,9 +513,19 @@ Audit files contain task and repository-derived content. They are local records,
 not resumable LangGraph checkpoints, and are never deleted automatically.
 Snapshots save the reviewed document, not every inspected file or page. File and
 web tool evidence depends on emitted CLI logs and may be incomplete. Native
-Claude's recorded JSON result contains the answer, usage, and permission denials
-but no successful tool transcript. Plan §2 tracks that audit improvement; it
-will not guarantee complete file or web archives.
+Claude uses `--output-format stream-json --verbose`; `stdout.log` retains emitted
+requests, inputs, available results, explicit denials, and terminal output,
+including partial bytes after failure, timeout, or interruption. Per-attempt
+`claude-stream.json` records process outcome, stream completion, payload validation,
+and usage availability; missing usage is distinct from reported zero. Only a
+valid successful terminal result at exit zero can supply a review.
+Sanitized Linux captures from Claude Code 2.1.330 (`claude-opus-5-5`) cover
+Read/Glob/Grep both with and without web access, plus WebSearch/WebFetch with
+web enabled; macOS stream behavior remains unverified. These logs are not an
+archive: tool results can be excerpts or summaries, and do not guarantee complete
+file/page contents or every internally accessed resource. See
+[STATUS](docs/STATUS.md#native-claude-audit-stream-unreleased-2026-11-23) and
+[SECURITY](docs/SECURITY.md) for evidence and limitations.
 
 ### Restarting
 

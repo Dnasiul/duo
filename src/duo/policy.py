@@ -266,14 +266,25 @@ def verify_controls(codex: str, claude: str, settings: Path,
         help_text = probe([claude, "--help"])
         flags = ("--safe-mode", "--restricted", "--setting-sources", "--settings",
                  "--strict-mcp-config", "--no-chrome", "--disable-slash-commands",
-                 "--tools", "--allowedTools")
+                 "--tools", "--allowedTools", "--output-format", "--verbose", "--json-schema")
         if any(flag not in help_text for flag in flags):
             raise RunError("Installed claude lacks required inspection options")
+        # Read the output option's own help block, including wrapped choices.
+        # Mentions in --input-format or other option descriptions do not count.
+        output_option = re.search(
+            r"(?m)^[ \t]*--output-format[ \t]+<[^>\n]+>[^\n]*"
+            r"(?:\n[ \t]{8,}\S[^\n]*)*", help_text)
+        paired_value = re.search(r"(?<!\S)--output-format[ \t]+stream-json(?=\s|$)",
+                                 help_text)
+        if not (paired_value or (output_option and
+                                 re.search(r"\bstream-json\b", output_option.group()))):
+            raise RunError("Installed claude lacks required stream-json output")
         check_claude_managed_files()
         remote = verify_claude_remote(probe([claude, *claude_options(settings), "doctor"]))
         check_claude_managed_files()
         policy["claude"] = {
             "settings": CLAUDE_SETTINGS, "settings_sources": [],
+            "output_format": "stream-json", "verbose": True,
             "safe_mode": True, "restricted": True, "tools": list(claude_tools(allow_web)),
             "mcp": "disabled", "managed_settings": remote,
             "preflight_checks": "Required option names advertised; local managed-policy sources "

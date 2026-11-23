@@ -113,6 +113,8 @@ def check(agent: str, binary: str, scratch: Path) -> dict:
                 result["changes"]["features"] = compare(features(fixture(agent, "features.txt")),
                                                         features(listed))
             else:
+                # verify_controls also requires the stream-json format value:
+                # flag-name diffs alone cannot detect its removal from help.
                 result["changes"]["help flags"] = compare(flags(fixture(agent, "help.txt")),
                                                           flags(outputs["--help"]))
     except RunError as exc:

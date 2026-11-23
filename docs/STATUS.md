@@ -65,11 +65,68 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
    denial requires controlled connection attempts and a working comparison path;
    the historical DNS failures alone do not establish it. Managed deployments
    remain unsupported.
-7. **F4: native Claude tool audit** (plan §2): JSON results contain an answer,
-   token usage, and permission denials, but no successful file-read/web-tool
-   transcript. The planned event stream must be validated and retain its observed
-   omissions. Document snapshots archive the reviewed document only; neither
-   current nor proposed emitted logs guarantee complete file/page archives.
+7. **F4: native Claude tool audit** (plan §2): implemented in the working tree;
+   see the stream evidence below. Document snapshots archive the reviewed
+   document only; emitted tool logs do not guarantee complete file/page archives.
+
+## Native Claude audit stream (Unreleased, 2026-11-23)
+
+Native Claude now runs with `--output-format stream-json --verbose`. Raw stdout
+and stderr remain in each attempt directory through errors, limits, timeout,
+and interruption. Only one valid successful terminal result at exit zero can
+supply the structured response; partial assistant output never becomes an
+approval or revision. `claude-stream.json` separates process outcome, stream
+completion, payload validation, and usage availability (missing usage is not
+reported zero). Preflight and drift checks require the stream format and flags.
+Fixture probes still use the restricted reviewer environment introduced in
+0.4.6; smoke denial extraction correlates explicit denial events and terminal
+summaries without treating all tool errors as denials.
+
+Evidence in `tests/fixtures/claude-2.1.330/` is from **Linux, Claude Code 2.1.330,
+model `claude-opus-5-5`**. The four discovery streams supplied for this task
+were captured on 2026-11-23 with Duo's restrictions and schema, then imported
+unchanged into local attempt-shaped directories and sanitized using the repo's
+`record_fixtures.py attempt claude` machinery. These are discovery captures,
+not new end-to-end Duo agreement runs. No process metadata was invented for
+those imported captures.
+
+| Fixture | Observed coverage |
+| --- | --- |
+| `events-noweb.jsonl` | Successful Read, Glob, Grep requests and matching results; missing-file Read error; outside-cwd Read denial with explicit system event, matching error result, and terminal denial summary; successful structured terminal and token usage |
+| `events-web.jsonl` | Successful WebSearch and WebFetch requests, inputs and results; successful structured terminal and token usage; web server-tool counters zero despite those calls |
+| `events-webtools.jsonl` | Additional live capture with web enabled: successful Read, Glob, Grep, and WebSearch requests and matching results; successful structured terminal and token usage; web server-tool counters zero despite WebSearch |
+| `events-maxturns.jsonl` | Read request/result followed by `error_max_turns`, `is_error: true`, no structured review; discovery reported exit 1; replay also rejects an artificial exit zero |
+| `events-timeout-noweb.jsonl`, `events-timeout-web.jsonl` and their metadata | Fresh adapter runs with 150-second bounds: init/API retry events, then timeout; no tool calls, terminal result, or terminal usage; raw events retained and no review accepted |
+| `version.txt`, `help.txt`, `doctor.txt` | Fresh probes through the recorder's restricted environment; stream options advertised; remote managed settings not fetched; feature-flag service unreachable |
+
+The fresh bounded attempts used a copy of the synthetic discovery repository
+inside the working tree. They did not reproduce successful model calls in this
+execution environment, so successful tool coverage comes from the supplied raw
+discovery streams. A third fresh attempt with `--max-turns 1` also timed out
+before tools or a terminal result; it provides no additional turn-limit evidence.
+The live drift check reported 2.1.330 `compatible`, with no help-flag changes
+from the baseline fixtures; this is a probe result, not a live enforcement claim.
+The supplied captures now cover every enabled tool in each configuration:
+Read/Glob/Grep with and without web access, plus WebSearch/WebFetch with web
+enabled. macOS stream behavior remains unverified. Web-disabled init omits
+WebSearch/WebFetch; this is not an independent network-denial test. Tool results
+can be summaries or excerpts, and fixtures
+trim long results and remove identifiers, reasoning payloads, and rate-limit
+account metadata while preserving inputs, correlation, error flags, and
+structured responses. Neither these
+fixtures nor full emitted logs promise complete file or web archives.
+When importing an interrupted stream, the recorder omits an incomplete final
+line and records `fixture_import.truncated_final_line` in fixture metadata;
+raw attempt logs retain that line. The parser's size cap follows the configured
+`--max-output-mb` limit (32 MiB by default), including verbose tool output.
+
+Validation on this Linux working tree: `PYTHONPATH=src python scripts/run_tests.py`
+passed all 229 tests with no skips. The reviewer fixes add eight regressions to
+the 221-test first-round baseline: output-format pairing, interrupted fixture
+imports and malformed-line rejection, account-metadata sanitization, configured
+parser limits, deeply nested JSON, and metadata-write failures during errors and
+success. Existing replay checks also cover the new web-enabled local-tool capture.
+Existing approval, revision, deadline, and interruption checks still pass.
 
 ## Assurance-record correction (plan §9.2)
 
@@ -284,7 +341,8 @@ other modes.
 These logs are partial emitted evidence, not independent archives of files or
 pages. Disabling web still permits readable information to reach model providers;
 web adds search-provider and arbitrary-URL disclosure paths. The native Claude
-audit gap remains open above and in plan §2.
+stream implementation and its observed coverage are recorded above; it does not
+retroactively add tool transcripts to these historical runs.
 
 ## Document modes live verification
 

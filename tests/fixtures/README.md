@@ -14,6 +14,7 @@ so hand-written fakes cannot drift from real formats unnoticed.
 | `codex-0.166.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on Linux |
 | `codex-0.167.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on macOS |
 | `claude-2.1.296` | version, `--help`, `doctor`; success envelope; unrecognized-model envelope (`is_error: true` with `subtype: "success"`) and stderr |
+| `claude-2.1.330` | Linux stream discovery: Read/Glob/Grep with and without web, WebSearch/WebFetch with web, explicit denial versus missing-file error, success and turn-limit terminals; fresh restricted probes and timed-out adapter streams (2026-11-23, `claude-opus-5-5`) |
 | `copilot-1.0.95` | version, `--help`, isolated `config --list --json`; event streams from GPT (`phase: "final_answer"`) and Claude (no `phase`) models; model-unavailable and authentication-failure stderr |
 | `copilot-1.0.105` | version, `--help` (`--sync-session` in place of `--no-remote` and `--no-remote-export`, from 1.0.103), isolated `config --list --json` |
 
@@ -22,13 +23,29 @@ replaces home paths, the user and account names, session and request IDs, and
 drops encrypted or reasoning payloads and long tool output; the parsed answer
 stays whole.
 
-The existing fixtures above were captured before the recorder's restricted
+The historical fixtures above, except `claude-2.1.330`, were captured before the recorder's restricted
 native-probe environment fix. Native probes inherited the full parent
 environment; the Codex MCP probe replaced only `CODEX_HOME`. They are historical
 format and control-check evidence, not evidence of capture under the restricted
 environment. Copilot probes already used `copilot.environment`. No fixtures were
 re-captured for this fix; refresh affected native probes with the corrected
 recorder when a new capture is authorized.
+
+For `claude-2.1.330`, `events-noweb`, `events-web`, `events-webtools`, and
+`events-maxturns` were imported from supplied live discovery streams through
+`record_fixtures.py attempt claude`; no attempt metadata was fabricated for
+them. New adapter captures `events-timeout-noweb` and `events-timeout-web` retain
+init/retry events and actual timeout metadata; they reached no tools or terminal
+results. New probes used the restricted environment. See `docs/STATUS.md` for
+coverage and omissions. Historical `result-*.json` files remain historical
+envelopes; they are not represented as stream recordings.
+
+Claude fixtures keep complete tool inputs and structured responses, correlate
+requests/results/denials with stable replacement IDs, and preserve error flags
+and usage objects. Long result text is shortened; reasoning, signatures, and
+rate-limit account metadata are removed. An incomplete final JSONL line is
+omitted on import and recorded as `fixture_import.truncated_final_line` in the
+fixture metadata. Raw attempt logs are not sanitized or shortened by the runner.
 
 ## Refreshing
 

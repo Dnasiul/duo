@@ -1,0 +1,23 @@
+Claude Code doctor
+
+Running: npm-global (2.1.330)
+Commit: 8c664bec5001
+Platform: linux-x64
+Path: /home/user/.local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+Config install method: not set
+Search: OK (bundled)
+Auto-updates: enabled
+Auto-update channel: latest
+Last update attempt: none recorded
+Managed settings (remote): not fetched — requires an Enterprise or Team subscription
+Organization policy: not applicable to individual subscription plans
+
+Remote Control
+Couldn't verify Remote Control eligibility — the feature-flag service was unreachable (offline or blocked). Retry, or run with --debug / claude doctor for details.
+- Remote Control availability could not be verified (no server response this session)
+
+1 warning found
+- Can't auto-update: npm global folder isn't writable
+  Fix: Run claude install to switch to the native installer (no sudo) Or reinstall with a sudo-free npm (e.g. via nvm) Or npm config set prefix ~/.npm-global, add ~/.npm-global/bin to PATH, then reinstall
+
+For a full setup checkup that can also fix issues, run /doctor in a Claude Code session.

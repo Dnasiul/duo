@@ -35,7 +35,8 @@ LIMIT = 300  # characters kept from strings that Duo does not parse
 # Opaque or bulky payloads with no bearing on Duo's parsing.
 DROP = {"reasoningOpaque", "encryptedContent", "reasoningText", "reasoningBlocks",
         "encrypted_content", "apiCallId", "transformedContent", "contentBlocks",
-        "detailedContent", "toolTelemetry", "restrictedProperties"}
+        "detailedContent", "toolTelemetry", "restrictedProperties", "thinking", "signature",
+        "credential_expires_at"}
 UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 REQUEST_ID = re.compile(r"Request ID: [0-9A-F:]+")
 
@@ -73,8 +74,49 @@ def copilot_event(event: dict) -> dict:
     return trim(event)
 
 
-def jsonl(path: Path, convert) -> str:
-    events = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+def claude_events():
+    """A per-stream sanitizer: preserve tool correlation without original IDs."""
+    identifiers = {}
+
+    def identifier(value):
+        return identifiers.setdefault(value, f"fixture-id-{len(identifiers) + 1}")
+
+    def convert(event):
+        if event.get("type") == "rate_limit_event":
+            event = {k: v for k, v in event.items() if k != "rate_limit_info"}
+        def clean(value, key="", keep=False):
+            if isinstance(value, dict):
+                if key == "wire_tool_inputs":
+                    return {identifier(k): clean(v, keep=True) for k, v in value.items()}
+                return {k: clean(v, k, keep or k in ("structured_output", "input", "tool_input")
+                                 or (k == "result" and value.get("is_error") is True))
+                        for k, v in value.items() if keep or k not in DROP}
+            if isinstance(value, list):
+                return [clean(v, keep=keep) for v in value]
+            if isinstance(value, str) and (key in ("id", "uuid", "session_id", "tool_use_id",
+                                                   "parent_tool_use_id", "request_id")
+                                           or key.endswith("_id")):
+                return identifier(value)
+            return trim(value, keep=keep)
+        return clean(event)
+    return convert
+
+
+def jsonl(path: Path, convert, *, metadata: dict | None = None) -> str:
+    lines = path.read_bytes().splitlines(keepends=True)
+    events = []
+    for index, line in enumerate(lines):
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # Interrupted streams can stop inside JSON or a UTF-8 character.
+            # Never discard malformed complete lines or corruption mid-stream.
+            if index != len(lines) - 1 or line.endswith((b"\n", b"\r")):
+                raise
+            if metadata is not None:
+                metadata["fixture_import"] = {"truncated_final_line": True}
     return "".join(json.dumps(convert(event), ensure_ascii=False) + "\n" for event in events)
 
 
@@ -156,9 +198,13 @@ def record_attempt(args) -> None:
             write(target, f"response-{args.name}.json",
                   json.dumps(trim(response, keep=True), indent=2, ensure_ascii=False) + "\n")
     else:
-        envelope = json.loads(stdout.read_text())
-        kept = {k: trim(v, keep=(k == "structured_output")) for k, v in envelope.items()}
-        write(target, f"result-{args.name}.json", json.dumps(kept, indent=2, ensure_ascii=False) + "\n")
+        metadata = attempt / "claude-stream.json"
+        details = json.loads(metadata.read_text()) if metadata.exists() else {}
+        write(target, f"events-{args.name}.jsonl",
+              jsonl(stdout, claude_events(), metadata=details))
+        if metadata.exists() or details:
+            write(target, f"metadata-{args.name}.json",
+                  json.dumps(trim(details, keep=True), indent=2) + "\n")
     if agent != "codex" and stderr.exists() and stderr.stat().st_size:
         # Codex stderr repeats the prompt; Duo reads only its JSON events.
         write(target, f"stderr-{args.name}.txt", scrub(stderr.read_text()))
