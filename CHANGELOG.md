@@ -25,6 +25,10 @@
 - Credential checking avoids repeated suffix scans for OpenAI- and JWT-shaped
   near-matches and repeated document searches for known credentials, including
   distinct values.
+- The credential-scan growth test tolerates scheduling noise with more timing
+  repetitions and a pooled fourfold growth check in place of per-step checks.
+  A fitted log-log slope replaces the endpoint ratio to reject quadratic growth,
+  retaining all input cases and sizes and the five-second scan limit.
 - Reviews that finish validation after the run deadline now stop with a
   time-limit outcome, preserving the previous document and approvals.
 
