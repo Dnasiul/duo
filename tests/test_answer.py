@@ -251,7 +251,7 @@ class AnswerTests(Fixture):
         with patch('duo.storage.read_input', wraps=read_input) as read:
             self.assertEqual(self.answer(source)[0], 0)
         snapshots_read = [c.args[0].name for c in read.call_args_list
-                          if c.args[0].suffix == '.md' and c.args[0].parent == source]
+                          if c.args[0].suffix == '.md' and c.args[0].parent == source.resolve()]
         self.assertEqual(snapshots_read, ['plan-1001.md', 'plan-1000.md'])
 
     def test_mismatched_source_identity_and_fixed_inputs(self):
