@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `duo --resume RUN_PATH` recovers interrupted document reviews from durable,
+  validated checkpoints, preserving work and budgets while requiring fresh
+  approvals. Earlier audit-only runs and terminal runs cannot be resumed.
+- `duo-clean` protects paused recoverable runs and unreadable checkpoints;
+  `--include-recoverable` explicitly includes them in abandonment/deletion.
+
 ## 0.6.0 (2026-11-23)
 
 ### Added

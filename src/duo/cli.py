@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+import time
 import json
 import os
 from pathlib import Path
@@ -10,13 +13,14 @@ import sys
 import threading
 
 from .adapters import CLIAdapter
+from .checkpoints import Journal, load as load_checkpoint, read_record, utc
 from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLAUDE_MAX_TURNS,
                      DOCUMENT_MODES, DEFAULT_MAX_PROMPT_BYTES, MAX_TEXT_BYTES, Config, RunError,
                      State, Terminated, Turn, new_secret, normalize)
 from .prompts import plan_diff
 from .report import write_report
 from .storage import (PlanFile, RunStore, capture_context, load_blocked_source, read_input,
-                      run_lock, timestamp)
+                      run_lock, timestamp, UserClarification)
 from .verdicts import write_verdict
 from .workflow import Reviewer, build_graph, initial_state
 
@@ -202,10 +206,19 @@ def run(argv: list[str] | None) -> int:
         except (OSError, ValueError, RunError) as exc:
             print(f"Could not render report: {exc}", file=sys.stderr)
             return 1
-    args = parser().parse_args(argv)
+    resume_mode = any(arg == "--resume" or arg.startswith("--resume=") for arg in argv)
+    if resume_mode:
+        resume_parser = argparse.ArgumentParser(description="Resume an interrupted Duo run")
+        resume_parser.add_argument("--resume", type=Path, required=True, metavar="RUN_PATH")
+        resume_parser.add_argument("--allow-untested-cli", action="store_true")
+        resume_parser.add_argument("--json", action="store_true")
+        resume_parser.add_argument("--show-conversation", action="store_true")
+        args = resume_parser.parse_args(argv)
+    else:
+        args = parser().parse_args(argv)
     holder: list[RunStore] = []
     try:
-        return review(args, holder)
+        return resume(args, holder) if resume_mode else review(args, holder)
     finally:
         # Release the run-directory lock once every audit file is written.
         for store in holder:
@@ -221,6 +234,9 @@ def run(argv: list[str] | None) -> int:
 
 def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
     store = None
+    journal = None
+    interrupted = False
+    started = datetime.now(timezone.utc)
     latest_review = None
 
     def completed(number: int, review: Turn, before: str, after: str) -> None:
@@ -306,19 +322,27 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
                 plan.check()  # Bind the recorded current hash to the document at startup.
             store = RunStore(state_dir)
             holder.append(store)
-            adapter = CLIAdapter(config, store)
             state = initial_state(task, criteria, plan.initial, config)
-            store.json("manifest.json", {
+            manifest = {
                 "started_at": timestamp(), "config": {**asdict(config), "repo": str(repo)},
                 "task": task, "criteria": criteria, "document": str(document),
                 **({"answer": asdict(clarification)} if clarification is not None else {}),
-            })
+            }
+            store.json("manifest.json", manifest)
             store.snapshot(0, plan.initial)
             store.context(context)
+            deadline = started + timedelta(seconds=config.max_seconds)
+            journal = Journal.create(store, config, state, manifest,
+                                     read_record(store.path / "context.json"),
+                                     started.isoformat(), deadline.isoformat())
+            store.json("state.json", state)
+            adapter = CLIAdapter(config, store)
             reviewer = Reviewer(config, adapter, plan, store,
                                 progress=lambda message: print(message, file=sys.stderr, flush=True),
                                 on_review=completed, context=context,
-                                user_clarification=clarification)
+                                user_clarification=clarification, checkpoints=journal,
+                                absolute_deadline=time.monotonic() + max(0, (
+                                    deadline - datetime.now(timezone.utc)).total_seconds()))
             reviewer.check_startup_budget(state)
             graph = build_graph(reviewer)
             versions = adapter.preflight()
@@ -332,8 +356,10 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
                 print("Warning: --allow-web gives reviewers web access; what they read can "
                       "reach the web through their queries and fetched URLs",
                       file=sys.stderr, flush=True)
+            journal.write()
             result = graph.invoke(state, config={"recursion_limit": config.max_turns + 5})
             plan.check()
+            journal.terminal(result)
             store.json("result.json", {**result, "untested_cli": adapter.untested})
             write_verdict(store.path)
         emit({**outcome(result, args.mode), "untested_cli": adapter.untested,
@@ -344,7 +370,10 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
         signum = exc.signum if isinstance(exc, Terminated) else signal.SIGINT
         name = signal.Signals(signum).name
         reason = "Interrupted" if signum == signal.SIGINT else f"Terminated by {name}"
-        summary = {"status": "error", "message": f"{reason}; rerun to review the latest saved {args.mode}"}
+        interrupted = journal is not None
+        message = (f"{reason}; run was interrupted and can be resumed with --resume {store.path}"
+                   if interrupted else f"{reason}; rerun to review the latest saved {args.mode}")
+        summary = {"status": "error", "message": message}
         code = 128 + signum
     except Exception as exc:
         # Includes setup, LangGraph, and storage failures; never signal success.
@@ -354,12 +383,121 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
     if store is not None:
         summary["run_dir"] = str(store.path)
         try:
-            store.json("error.json", summary)
-        except OSError:
+            if interrupted:
+                journal.interrupt()
+            else:
+                if journal:
+                    failed = deepcopy(journal.value["state"])
+                    failed["attempts"] += journal.value["attempts_current_turn"]
+                    failed.update(status="error", error=summary["message"])
+                    journal.terminal(failed)
+                store.json("error.json", summary)
+        except (OSError, RunError):
             pass
         try:
             write_verdict(store.path)
         except BaseException:
             pass  # Best effort, like report writing; preserve the original failure.
+    emit(summary, args.json)
+    return code
+
+
+def resume(args: argparse.Namespace, holder: list[RunStore]) -> int:
+    store = None
+    journal = None
+    active = False
+    try:
+        store = RunStore.open_existing(args.resume)
+        # Do not rewrite even reports on a refused recovery.
+        value, config = load_checkpoint(store.path)
+        if value["status"] != "running":
+            hint = "; use --answer with --source-run instead" if value["status"] == "blocked" else ""
+            raise RunError(f"Cannot resume terminal run ({value['status']}){hint}")
+        if config.allow_untested_cli != args.allow_untested_cli:
+            raise RunError("--allow-untested-cli mismatch: changed security settings require a new run")
+        with run_lock(config.repo):
+            document = output_path(Path(config.output), config.mode, config.repo)
+            if str(document) != value["document"]:
+                raise RunError("Checkpoint document identity changed")
+            journal = Journal(store, value)
+            state, context, manifest = journal.recover(config)
+            plan = PlanFile(document.parent, document.name)
+            if plan.initial != state["plan"]:
+                raise RunError("document changed outside Duo")
+            holder.append(store)
+            active = True
+            # Recovery may itself complete a terminal pending transition.
+            effective = min(utc(value["deadline"]), utc(value["created_at"]) +
+                            timedelta(seconds=config.max_seconds))
+            remaining = (effective - datetime.now(timezone.utc)).total_seconds()
+            if state["status"] != "running" or remaining <= 0 or state["turns"] >= config.max_turns:
+                if state["status"] == "running":
+                    state["attempts"] += journal.value["attempts_current_turn"]
+                    state.update(status="limit_reached", error="Original run deadline or turn limit reached")
+                journal.terminal(state)
+                store.json("result.json", state)
+                write_verdict(store.path)
+                emit({**outcome(state, config.mode), "run_dir": str(store.path)}, args.json)
+                return EXIT_CODES[state["status"]]
+            adapter = CLIAdapter(config, store)
+            versions = adapter.preflight()
+            if adapter.untested:
+                versions = {**versions, "untested": sorted(adapter.untested)}
+            store.json(f"versions-resume-{value['segment'] + 1}.json", versions)
+            journal.start_segment(state, manifest)
+            clarification = UserClarification(**manifest["answer"]) if "answer" in manifest else None
+            reviewer = Reviewer(
+                config, adapter, plan, store, checkpoints=journal, context=context,
+                user_clarification=clarification,
+                turn_attempt_offset=journal.value["attempts_current_turn"],
+                absolute_deadline=time.monotonic() + max(0, (
+                    effective - datetime.now(timezone.utc)).total_seconds()),
+                progress=lambda message: print(message, file=sys.stderr, flush=True),
+                on_review=(lambda n, t, b, a: show_review(n, t, b, a, config.mode))
+                if args.show_conversation else None)
+            reviewer.check_startup_budget(state)
+            result = build_graph(reviewer).invoke(state, config={"recursion_limit": config.max_turns + 5})
+            plan.check()
+            journal.terminal(result)
+            store.json("result.json", {**result, "untested_cli": adapter.untested})
+            write_verdict(store.path)
+            emit({**outcome(result, config.mode), "untested_cli": adapter.untested,
+                  "plan_path": str(plan.path), "run_dir": str(store.path)}, args.json)
+            return EXIT_CODES[result["status"]]
+    except KeyboardInterrupt as exc:
+        signum = exc.signum if isinstance(exc, Terminated) else signal.SIGINT
+        summary = {"status": "error", "message":
+                   f"Interrupted; run can be resumed with --resume {args.resume}"}
+        if journal and active:
+            try:
+                journal.interrupt()
+            except (OSError, RunError):
+                pass
+            try:
+                write_verdict(store.path)
+            except BaseException:
+                pass
+        code = 128 + signum
+    except Exception as exc:
+        summary = {"status": "error", "message": str(exc)}
+        code = 1
+        if journal and active:
+            try:
+                failed = deepcopy(journal.value["state"])
+                failed["attempts"] += journal.value["attempts_current_turn"]
+                failed.update(status="error", error=str(exc))
+                journal.terminal(failed)
+                store.json("error.json", summary)
+            except (OSError, RunError):
+                pass
+            try:
+                write_verdict(store.path)
+            except BaseException:
+                pass
+    finally:
+        if store and store not in holder:
+            store.close()
+    if store:
+        summary["run_dir"] = str(store.path)
     emit(summary, args.json)
     return code

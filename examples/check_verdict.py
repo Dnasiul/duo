@@ -181,6 +181,7 @@ def check(value, args):
     current_subject = None
     blocked = False
     previous_role = None
+    epoch = 0
     for item in decisions:
         if (not isinstance(item, dict) or item.get("role") not in ("codex", "claude")
                 or item.get("decision") not in ("approve", "revise", "blocked")
@@ -191,6 +192,12 @@ def check(value, args):
             errors.append("malformed decision")
         else:
             require(approvals != {"codex", "claude"}, "decision after agreement is invalid")
+            next_epoch = item.get("approval_epoch", 0)
+            if type(next_epoch) is not int or next_epoch < epoch:
+                errors.append("invalid approval epoch")
+            elif next_epoch != epoch:
+                approvals.clear()
+                epoch = next_epoch
             require(item["role"] != previous_role, "decision roles must strictly alternate")
             previous_role = item["role"]
             if current_subject is None:

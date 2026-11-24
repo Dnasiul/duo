@@ -10,6 +10,7 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 
 | Area | Where |
 | --- | --- |
+| Persistent checkpoints (Unreleased, plan §12): explicit recovery, durable attempt reservations and publication intents, fresh approval epochs, protected cleanup | `src/duo/checkpoints.py`, `src/duo/workflow.py`, `src/duo/cli.py`, `src/duo/cleanup.py`, `tests/test_resume.py`; "Persistent checkpoints" below |
 | §7.1 snapshot-order test canonicalizes the source path in its read filter (`50705f5`, test-only): production `load_blocked_source` resolves the source run directory before reading snapshots, but the test collected mocked `read_input` calls by comparing each call's parent with the unresolved temporary-directory path, which collects nothing on macOS where the temp directory sits behind the `/var` → `/private/var` symlink (CI run 45282241475 failed all four macOS legs at that assertion while the answer run itself exited 0); reproduced on Linux with `TMPDIR` pointed through a symlinked directory (failed before, passes after), full strict suite 374 tests green; the descending-order assertion is unchanged | `tests/test_answer.py` |
 | Answer a blocked run in a fresh run (Unreleased, plan §7.1): explicit source validation, user clarification, source/current hashes, fresh approvals | `src/duo/storage.py`, `src/duo/cli.py`, `src/duo/prompts.py`, `src/duo/workflow.py`, `tests/test_answer.py`; "Answering blocked runs" below |
 | Structured verdicts and findings (Unreleased, plan §11): versioned artifact, persistent role-owned findings, reference CI gate | `src/duo/verdicts.py`, `src/duo/schemas/`, `examples/check_verdict.py`, `tests/test_verdicts.py`; "Structured verdicts" below |
@@ -938,3 +939,49 @@ injected open `high` finding; exit 2 after the document changed (stale subject).
 
 Recorded locations bind to their own subject SHA-256, including historical locations;
 document sections are supported. Diff old/new-side locations remain section 10 scope.
+
+
+## Persistent checkpoints
+
+Unreleased implementation of plan §12 for document modes. `checkpoint.json` is
+a versioned, bounded JSON journal with a canonical SHA-256 integrity check and
+atomic file plus directory fsync. It binds both normalized review text and exact
+published file bytes, preserving CRLF documents while detecting external byte
+changes. It records exact captured inputs, configuration,
+committed state and findings, captured blocked-run clarification when present,
+run/segment lineage, an absolute deadline, current
+turn reservations, and pending transition intents. JSON contains environment
+variable names only, never credential values or live provider sessions.
+
+A reservation is durable before each adapter call. The committed state's attempt
+count plus `attempts_current_turn` accounts for interrupted work without resetting
+retry allowances. A durable snapshot and intent precede publication; recovery
+uses before/after document hashes to discard an unpublished proposal or finish
+an already-published transition idempotently. Unexpected contents are refused.
+Run and repository locks exclude concurrent recovery. Context, manifest, snapshot,
+audit state, schema, and integrity are validated before adapter construction.
+
+Resume rechecks CLI controls, retains original evidence, appends segment evidence,
+and clears active approvals. Historical decisions remain in the verdict; resumed
+verdicts use the additive 1.1 decision `approval_epoch` field so agreement replay
+requires approvals in the same epoch. Fresh verdicts retain the 1.0 format.
+The package version is unchanged. Original deadlines include downtime; terminal
+runs stay terminal, with blocked clarification remaining a separate new-run flow.
+`duo-clean` protects recoverable and unreadable checkpoints unless explicitly
+included, while permitting runtime-cache cleanup.
+
+Offline evidence in `tests/test_resume.py` covers a full interrupted CLI run
+resuming to agreement in the same directory, prior approval invalidation,
+revision/history/findings retention and continued finding IDs, exhausted attempts,
+publication reconciliation, and faults at reservation, snapshot, intent,
+publication, state, and commit writes. Refusal tests cover corruption, unsupported
+schemas, missing artifacts, divergent audit state, external edits, terminal and
+audit-only runs, clock/turn limits, both locks, security mismatch, manifest mismatch,
+and disk-full reservation failure before any adapter call. Cleanup tests cover
+protected previews, age/size selection, explicit deletion, terminal/unreadable
+checkpoints, locked runs, and runtime-only removal.
+
+Verification: the requested focused suite passed, full unittest discovery passed
+**425 tests**, and `scripts/run_tests.py` passed **425 tests with no skips** against
+a locally built and installed `duo-plan` package. The suite grew from 374 tests;
+package version remains 0.6.0. These are offline results only.

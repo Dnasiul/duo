@@ -355,8 +355,13 @@ class ReportTests(Fixture):
                 self.assertEqual(code, expected)
                 self.assertFalse((run / 'result.json').exists())
                 html = (run / 'report.html').read_text()
-                self.assertIn('<dd>interrupted</dd>', html)
-                self.assertIn(escape(summary['message']), html)
+                if isinstance(exception, KeyboardInterrupt):
+                    self.assertIn('<dd>interrupted</dd>', html)
+                    self.assertIn('--resume', summary['message'])
+                    self.assertFalse((run / 'error.json').exists())
+                else:
+                    self.assertIn('<dd>error</dd>', html)
+                    self.assertIn(escape(summary['message']), html)
 
     def test_auto_emit_when_first_adapter_reply_is_interrupt(self):
         (self.repo / 'plan.md').write_text('Initial document\n')
@@ -368,25 +373,24 @@ class ReportTests(Fixture):
                     [exception], '--task', task, '--criteria', 'Exact evidence')
                 self.assertEqual(code, expected)
                 self.assertFalse((run / 'result.json').exists())
-                self.assertFalse((run / 'state.json').exists())
+                self.assertTrue((run / 'state.json').exists())
                 self.assertTrue((run / 'report.html').exists())
                 self.assertNotIn('could not write HTML report', errors)
                 html = (run / 'report.html').read_text()
                 for text in ('<dd>interrupted</dd>', 'No completed review turns recorded.',
-                             '<dt>Turns</dt><dd>0</dd>', '<dt>Attempts</dt><dd>Not recorded</dd>',
-                             task, 'Exact evidence', 'Initial document\n',
-                             escape(summary['message'])):
+                             '<dt>Turns</dt><dd>0</dd>', '<dt>Attempts</dt><dd>0</dd>',
+                             task, 'Exact evidence', 'Initial document\n'):
                     self.assertIn(text, html)
 
     def test_auto_emit_after_startup_budget_failure(self):
         with patch('duo.cli.Reviewer.check_startup_budget', side_effect=RunError('Startup budget exceeded')):
             code, summary, errors, run = self.review([])
         self.assertEqual(code, 1)
-        self.assertFalse((run / 'state.json').exists())
+        self.assertTrue((run / 'state.json').exists())
         self.assertFalse((run / 'result.json').exists())
         self.assertNotIn('could not write HTML report', errors)
         html = (run / 'report.html').read_text()
-        self.assertIn('<dd>interrupted</dd>', html)
+        self.assertIn('<dd>error</dd>', html)
         self.assertIn('No completed review turns recorded.', html)
         self.assertIn(escape(summary['message']), html)
 

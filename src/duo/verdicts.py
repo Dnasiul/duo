@@ -68,6 +68,60 @@ def _location(value):
     _path(value["path"])
 
 
+def validate_findings(findings: list, path: str, agreed: bool = False, *, extensions=False) -> dict:
+    def check_object(value, keys, label):
+        _object(value, keys, label, extensions=extensions)
+
+    _array(findings, "findings")
+    ids = set()
+    counts = dict.fromkeys(SEVERITIES, 0)
+    for item in findings:
+        check_object(item, FINDING_KEYS, "finding")
+        if not isinstance(item["id"], str) or not re.fullmatch(r"F[1-9][0-9]*", item["id"]):
+            raise ValueError("finding id must be F followed by a positive integer")
+        if item["id"] in ids:
+            raise ValueError("Duplicate finding ID")
+        ids.add(item["id"])
+        _choice(item["severity"], SEVERITIES, "finding severity")
+        _choice(item["status"], FINDING_STATUSES, "finding status")
+        _choice(item["reported_by"], AGENTS, "finding reporting role")
+        for key in ("title", "description"):
+            _string(item[key], "finding " + key)
+        for key in ("reported_turn", "reported_attempt"):
+            _integer(item[key], key, 1)
+        for key in ("first_seen_subject_hash", "last_seen_subject_hash"):
+            _hash(item[key], key)
+        _location(item["location"])
+        if item["location"]["path"] != path:
+            raise ValueError("finding path must match subject path")
+        _array(item["location_history"], "location_history")
+        for entry in item["location_history"]:
+            check_object(entry, {"subject_hash", "location"}, "location history entry")
+            _hash(entry["subject_hash"], "location history subject_hash")
+            _location(entry["location"])
+            if entry["subject_hash"] != entry["location"]["subject_sha256"]:
+                raise ValueError("historical location must bind its recorded subject hash")
+            if entry["location"]["path"] != path:
+                raise ValueError("historical finding path must match subject path")
+        disposition = item["disposition"]
+        if item["status"] == "open":
+            if agreed:
+                raise ValueError("agreed must have no open findings")
+            if disposition is not None:
+                raise ValueError("open finding must have null disposition")
+            counts[item["severity"]] += 1
+        else:
+            check_object(disposition, {"status", "reason", "subject_hash", "turn", "by"}, "disposition")
+            if disposition["status"] != item["status"] or disposition["by"] != item["reported_by"]:
+                raise ValueError("disposition must match finding status and reporting role")
+            _string(disposition["reason"], "disposition reason", nonempty=True)
+            _hash(disposition["subject_hash"], "disposition subject_hash")
+            _integer(disposition["turn"], "disposition turn", 1)
+            if disposition["subject_hash"] != item["last_seen_subject_hash"]:
+                raise ValueError("disposition must bind the last-seen subject")
+    return counts
+
+
 def validate_verdict(value: object) -> dict:
     """Validate the complete 1.x contract, including cross-field bindings."""
     # Minor versions may add optional fields without changing the 1.0 meanings.
@@ -121,6 +175,7 @@ def validate_verdict(value: object) -> dict:
     approvals = set()
     blocked = False
     previous_role = None
+    epoch = 0
     for index, item in enumerate(value["decisions"], 1):
         check_object(item, {"role", "decision", "subject_sha256", "turn", "timestamp"}, "decision")
         _choice(item["role"], AGENTS, "decision role")
@@ -132,6 +187,13 @@ def validate_verdict(value: object) -> dict:
         _string(item["timestamp"], "decision timestamp", nonempty=True)
         if approvals == AGENTS:
             raise ValueError("decision after agreement is invalid")
+        next_epoch = item.get("approval_epoch", 0)
+        _integer(next_epoch, "approval epoch")
+        if next_epoch < epoch:
+            raise ValueError("approval epochs must not decrease")
+        if next_epoch != epoch:
+            approvals.clear()
+            epoch = next_epoch
         if item["role"] == previous_role:
             raise ValueError("decision roles must strictly alternate")
         previous_role = item["role"]
@@ -158,53 +220,8 @@ def validate_verdict(value: object) -> dict:
     if value["completion"] == "blocked" and (
             not value["decisions"] or value["decisions"][-1]["decision"] != "blocked"):
         raise ValueError("blocked completion requires a final blocked decision")
-    _array(value["findings"], "findings")
-    ids = set()
-    counts = dict.fromkeys(SEVERITIES, 0)
-    for item in value["findings"]:
-        check_object(item, FINDING_KEYS, "finding")
-        if not isinstance(item["id"], str) or not re.fullmatch(r"F[1-9][0-9]*", item["id"]):
-            raise ValueError("finding id must be F followed by a positive integer")
-        if item["id"] in ids:
-            raise ValueError("Duplicate finding ID")
-        ids.add(item["id"])
-        _choice(item["severity"], SEVERITIES, "finding severity")
-        _choice(item["status"], FINDING_STATUSES, "finding status")
-        _choice(item["reported_by"], AGENTS, "finding reporting role")
-        for key in ("title", "description"):
-            _string(item[key], "finding " + key)
-        for key in ("reported_turn", "reported_attempt"):
-            _integer(item[key], key, 1)
-        for key in ("first_seen_subject_hash", "last_seen_subject_hash"):
-            _hash(item[key], key)
-        _location(item["location"])
-        if item["location"]["path"] != subject["path"]:
-            raise ValueError("finding path must match subject path")
-        _array(item["location_history"], "location_history")
-        for entry in item["location_history"]:
-            check_object(entry, {"subject_hash", "location"}, "location history entry")
-            _hash(entry["subject_hash"], "location history subject_hash")
-            _location(entry["location"])
-            if entry["subject_hash"] != entry["location"]["subject_sha256"]:
-                raise ValueError("historical location must bind its recorded subject hash")
-            if entry["location"]["path"] != subject["path"]:
-                raise ValueError("historical finding path must match subject path")
-        disposition = item["disposition"]
-        if item["status"] == "open":
-            if value["completion"] == "agreed":
-                raise ValueError("agreed must have no open findings")
-            if disposition is not None:
-                raise ValueError("open finding must have null disposition")
-            counts[item["severity"]] += 1
-        else:
-            check_object(disposition, {"status", "reason", "subject_hash", "turn", "by"}, "disposition")
-            if disposition["status"] != item["status"] or disposition["by"] != item["reported_by"]:
-                raise ValueError("disposition must match finding status and reporting role")
-            _string(disposition["reason"], "disposition reason", nonempty=True)
-            _hash(disposition["subject_hash"], "disposition subject_hash")
-            _integer(disposition["turn"], "disposition turn", 1)
-            if disposition["subject_hash"] != item["last_seen_subject_hash"]:
-                raise ValueError("disposition must bind the last-seen subject")
+    counts = validate_findings(value["findings"], subject["path"], value["completion"] == "agreed",
+                               extensions=extensions)
     summary = value["summary"]
     check_object(summary, {"turns", "attempts", "open_findings", "open_by_severity"}, "summary")
     for key in ("turns", "attempts", "open_findings"):
@@ -279,8 +296,22 @@ def build_verdict(run_dir: Path) -> dict:
         backend = config.get(role + "_backend", "native")
         roster.append({"role": role, "backend": backend, "model": config[role + "_model"],
                        "cli_version": versions.get("copilot" if backend == "copilot" else role)})
+    epochs = {}
+    if manifest.get("segments"):
+        for line in _read(run_dir / "events.jsonl").splitlines():
+            event = json.loads(line)
+            if event.get("event") == "approvals_invalidated":
+                epochs[event["after_turn"] + 1] = event["approval_epoch"]
+    epoch = 0
+    decisions = []
+    for number, item in enumerate(history, 1):
+        epoch = epochs.get(number, epoch)
+        decisions.append({"role": item["agent"], "decision": item["decision"],
+                          "subject_sha256": item["plan_hash"], "turn": number,
+                          "timestamp": item["timestamp"],
+                          **({"approval_epoch": epoch} if epochs else {})})
     return {
-        "schema_version": VERDICT_SCHEMA_VERSION, "run_id": run_dir.name,
+        "schema_version": "1.1" if epochs else VERDICT_SCHEMA_VERSION, "run_id": run_dir.name,
         "started_at": manifest["started_at"], "mode": mode,
         "completion": completion, "complete": completion != "interrupted",
         "subject": {"kind": "document", "path": path.as_posix(), "sha256": final_hash,
@@ -289,9 +320,7 @@ def build_verdict(run_dir: Path) -> dict:
                          "criteria_sha256": content_hash(normalize(manifest.get("criteria", ""))),
                          "context": [{k: item[k] for k in ("label", "sha256", "bytes")} for item in context]},
         "agreement": {"rule": AGREEMENT_RULE, "roster": roster},
-        "decisions": [{"role": item["agent"], "decision": item["decision"],
-                       "subject_sha256": item["plan_hash"], "turn": number,
-                       "timestamp": item["timestamp"]} for number, item in enumerate(history, 1)],
+        "decisions": decisions,
         "approved_subject_sha256": final_hash if completion == "agreed" else None,
         "findings": findings,
         "summary": {"turns": state["turns"], "attempts": state["attempts"],

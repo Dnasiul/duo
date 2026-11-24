@@ -7,7 +7,7 @@ from typing import Callable
 from .models import (MAX_RETRY_AFTER, AgentError, AgentTimeout, Config, RunError, State, Turn,
                      validate_review)
 from .prompts import build_prompt, check_prompt_budget, revision_diff
-from .storage import ContextFile, PlanFile, RunStore, UserClarification, content_hash, timestamp
+from .storage import ContextFile, PlanFile, RunStore, UserClarification, content_hash, timestamp, fsync_directory
 
 
 def initial_state(task: str, criteria: str, plan: str, config: Config) -> State:
@@ -96,13 +96,17 @@ class Reviewer:
                  sleep: Callable = time.sleep,
                  on_review: Callable[[int, Turn, str, str], None] | None = None,
                  context: tuple[ContextFile, ...] = (),
-                 user_clarification: UserClarification | None = None):
+                 user_clarification: UserClarification | None = None, *,
+                 checkpoints=None, absolute_deadline: float | None = None,
+                 turn_attempt_offset: int = 0):
         self.context = context
         self.user_clarification = user_clarification
         self.config, self.adapter, self.plan_file, self.store = config, adapter, plan, store
         self.progress, self.clock, self.sleep = progress, clock, sleep
         self.on_review = on_review
-        self.deadline = clock() + config.max_seconds
+        self.deadline = clock() + config.max_seconds if absolute_deadline is None else absolute_deadline
+        self.checkpoints = checkpoints
+        self.turn_attempt_offset = turn_attempt_offset
 
     def prompt(self, state: State, feedback: str = "") -> tuple[str, dict[str, int]]:
         sizes: dict[str, int] = {}
@@ -125,6 +129,8 @@ class Reviewer:
             self._review(current)
         except (OSError, UnicodeError, RunError) as exc:
             current.update(status="error", error=f"Local run failure: {exc}")
+        if self.checkpoints and current["status"] != "running":
+            self.checkpoints.terminal(current)
         return current
 
     def _review(self, state: State) -> None:
@@ -136,8 +142,16 @@ class Reviewer:
         self.plan_file.check()
         agent = state["next_agent"]
         feedback = ""
+        offset, self.turn_attempt_offset = self.turn_attempt_offset, 0
+        if self.checkpoints:
+            last = self.checkpoints.value["last_attempt"]
+            if last and last["turn"] == state["turns"] + 1:
+                feedback = f"Previous attempt was {last['outcome']}: {last['error']}. Correct the response if necessary."
+        if offset >= self.config.max_attempts:
+            state.update(status="error", error="Review turn attempt limit exhausted by interrupted/failed attempts")
+            return
         result = None
-        for attempt in range(1, self.config.max_attempts + 1):
+        for attempt in range(offset + 1, self.config.max_attempts + 1):
             remaining = self.deadline - self.clock()
             if remaining <= 0:
                 state.update(status="limit_reached", error="Run time limit reached")
@@ -150,6 +164,8 @@ class Reviewer:
                 prompt, sizes = self.prompt(state, feedback)
                 check_prompt_budget(prompt, self.config.max_prompt_bytes,
                                     getattr(self.config, f"{agent}_backend"), sizes)
+                if self.checkpoints:
+                    self.checkpoints.reserve(state, agent, attempt)
                 state["attempts"] += 1
                 called = True
                 self.store.event({"event": "attempt", "agent": agent,
@@ -170,6 +186,8 @@ class Reviewer:
                     return
                 break
             except AgentError as exc:
+                if self.checkpoints and called:
+                    self.checkpoints.failed(str(exc))
                 self.plan_file.check()
                 self.store.event({"event": "attempt_failed" if called else "prompt_rejected",
                                   "agent": agent,
@@ -199,6 +217,9 @@ class Reviewer:
                 feedback = f"Previous attempt failed: {exc}. Correct the response if necessary."
 
         assert result is not None
+        live_state = state
+        if self.checkpoints:
+            state = deepcopy(state)
         previous_plan = state["plan"]
         approved = set(state["approved"])
         if result["decision"] == "revise":
@@ -206,7 +227,8 @@ class Reviewer:
             diff = revision_diff(state["plan"], revised, agent, result["reason"])
             # Keep the validated proposal even if plan publication fails.
             self.store.snapshot(state["turns"] + 1, revised)
-            self.plan_file.write(revised)
+            if not self.checkpoints:
+                self.plan_file.write(revised)
             state.update(plan=revised, last_diff=diff, approved=[])
             approved.clear()
         elif result["decision"] == "approve":
@@ -228,10 +250,18 @@ class Reviewer:
                 state["status"] = "agreed"
             elif state["turns"] >= self.config.max_turns:
                 state.update(status="limit_reached", error="Review turn limit reached")
+        if self.checkpoints:
+            self.checkpoints.intent(live_state, state, agent, result["decision"], finding_events)
+            if result["decision"] == "revise":
+                self.plan_file.write(state["plan"])
+                fsync_directory(self.plan_file.path.parent)
         for event in finding_events:
             self.store.event(event)
         self.store.event({"event": "review", "turn": state["turns"], **turn})
         self.store.json("state.json", state)
+        if self.checkpoints:
+            self.checkpoints.commit(state)
+            live_state.update(state)
         if self.on_review:
             self.on_review(state["turns"], turn, previous_plan, state["plan"])
 
