@@ -38,6 +38,14 @@ def utc(value: str) -> datetime:
     return result
 
 
+def remaining_seconds(value: dict, now: datetime) -> float:
+    if now < utc(value['updated_at']) or now < utc(value['segments'][-1]['started_at']):
+        raise RunError('Inconsistent clock state: recorded update or segment is in the future')
+    effective = min(utc(value['deadline']), utc(value['created_at']) +
+                    timedelta(seconds=value['max_seconds']))
+    return min(value['max_seconds'], (effective - now).total_seconds())
+
+
 def canonical(value: dict) -> bytes:
     return json.dumps({k: v for k, v in value.items() if k != 'integrity'},
                       sort_keys=True, separators=(',', ':'), ensure_ascii=False,
@@ -486,9 +494,6 @@ class Journal:
         actual_hash = hashlib.sha256(data).hexdigest()
         audit_path = path / 'state.json'
         audit = read_record(audit_path) if audit_path.exists() or audit_path.is_symlink() else None
-        recovered, events = reconcile(value, actual_hash, audit)
-        if normalize(data.decode('utf-8')) != recovered['state']['plan']:
-            raise RunError('Published bytes do not match the committed normalized document')
         # Parse the bounded event log before any mutations. A torn tail is refused.
         recorded = []
         if (path / 'events.jsonl').exists() or (path / 'events.jsonl').is_symlink():
@@ -500,6 +505,20 @@ class Journal:
                     raise ValueError('event must be an object')
             except (ValueError, UnicodeError) as exc:
                 raise RunError(f'Invalid events.jsonl: {exc}') from exc
+        # A segment checkpoint precedes its audit-state write. Accept only the
+        # old approval list explicitly invalidated at this exact boundary.
+        if isinstance(audit, dict) and value['state']['approved'] == []:
+            for event in recorded:
+                if (event.get('event') == 'approvals_invalidated'
+                        and event.get('approval_epoch') == value['approval_epoch']
+                        and event.get('after_turn') == value['state']['turns']
+                        and event.get('agents') == audit.get('approved')
+                        and {**audit, 'approved': []} == value['state']):
+                    audit = {**audit, 'approved': []}
+                    break
+        recovered, events = reconcile(value, actual_hash, audit)
+        if normalize(data.decode('utf-8')) != recovered['state']['plan']:
+            raise RunError('Published bytes do not match the committed normalized document')
         epochs = {}
         invalidated = {}
         for event in recorded:
@@ -526,6 +545,8 @@ class Journal:
                     approvals.clear()
                 elif turn['decision'] == 'approve':
                     approvals.add(turn['agent'])
+            if len(checked['history']) + 1 in epochs:
+                approvals.clear()
             if approvals != set(checked['approved']):
                 raise RunError('Recorded approvals do not match history and approval epochs')
         review_turns = set()
@@ -561,8 +582,9 @@ class Journal:
         self.store.event({'event': 'resumed', **entry})
         self.store.event({'event': 'approvals_invalidated', 'agents': historical,
                           'approval_epoch': segment, 'after_turn': state['turns']})
-        self.write(segment=segment, approval_epoch=segment,
-                   segments=[*self.value['segments'], entry])
-        self.store.json('manifest.json', {**manifest, 'segments': self.value['segments']})
         state['approved'] = []
+        self.write(state=state, segment=segment, approval_epoch=segment,
+                   segments=[*self.value['segments'], entry])
+        self.store.json('state.json', self.value['state'])
+        self.store.json('manifest.json', {**manifest, 'segments': self.value['segments']})
         state['attempts'] += self.value['attempts_current_turn']

@@ -806,6 +806,11 @@ place; run the command again to finish. Runs from Duo versions before the
 runtime cleanup may each hold several hundred MiB of Copilot runtime copies;
 `--copilot-runtime` reclaims that space without losing audit records.
 
+`--max-total-mb` counts protected recoverable runs and unreadable checkpoints
+toward the total, but does not select them unless `--include-recoverable` is given.
+If protected runs alone exceed the limit, every unprotected run is selected and
+the remaining total still exceeds the limit.
+
 An OS lock on the repository directory excludes other Duo runs on the same
 repository, whatever their `--state-dir` or the path used to name it. It creates
 no file and is released when the process exits, even after a crash.

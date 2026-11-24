@@ -190,6 +190,11 @@ duo-clean --copilot-runtime --delete        # runtimes left by older Duo version
 It never deletes a run in progress and never follows symbolic links. If cleanup
 is interrupted, run it again.
 
+`--max-total-mb` includes protected recoverable runs and unreadable checkpoints
+in its total. Without `--include-recoverable`, those runs cannot be selected.
+If they alone exceed the limit, all unprotected runs are selected and the total
+remains over the limit after deletion.
+
 ## Rollback
 
 Each release is tested with the `constraints.txt` from the same revision. To roll

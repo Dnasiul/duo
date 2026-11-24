@@ -17,11 +17,12 @@ except ImportError:
     from test_duo import Fixture, response
 
 from duo.adapters import CLIAdapter
-from duo.checkpoints import Journal, canonical, load, reconcile
+from duo.checkpoints import Journal, canonical, load, reconcile, remaining_seconds
 from duo.cli import main
 from duo.models import AgentError, RunError, Terminated
 from duo.storage import PlanFile, RunStore, content_hash, run_lock
 from duo.verdicts import validate_verdict
+from duo.workflow import Reviewer
 
 
 class Crash(BaseException):
@@ -140,9 +141,12 @@ class ResumeTests(Fixture):
         checkpoint = self.record(path)
         self.assertEqual(checkpoint['attempts_current_turn'], 1)
         self.assertIsNotNone(checkpoint['in_flight'])
-        code, summary, adapter, _ = self.resume(path)
-        self.assertEqual(code, 1, summary)
-        adapter.assert_not_called()
+        with patch('duo.cli.CLIAdapter') as factory, redirect_stdout(io.StringIO()):
+            code = main(['--resume', str(path), '--json'])
+        self.assertEqual(code, 4)
+        factory.assert_not_called()
+        self.assertEqual(self.record(path, 'result.json')['status'], 'limit_reached')
+        self.assertEqual(self.record(path, 'result.json')['untested_cli'], {})
         self.assertEqual(self.record(path)['state']['attempts'], 1)
         self.assertTrue(any(e['event'] == 'attempt_interrupted' for e in self.events(path)))
 
@@ -331,12 +335,57 @@ class ResumeTests(Fixture):
                 self.assertEqual(code, 4)
                 factory.assert_not_called()
                 self.assertEqual(self.record(path)['status'], 'limit_reached')
+                self.assertEqual(self.record(path, 'result.json')['untested_cli'], {})
                 self.assertEqual(self.record(path, 'verdict.json')['completion'], 'limit')
 
     def test_inconsistent_clock_refused(self):
         path = self.paused()
         self.edit(path, lambda v: v.update(deadline='2020-01-01T00:00:00+00:00'))
         self.refused(path, 'clock state')
+
+    def test_future_timestamps_refused_before_recovery_or_adapter(self):
+        for kind in ('all', 'updated_at', 'latest_segment'):
+            with self.subTest(kind=kind):
+                path = self.paused()
+                future = datetime.now(timezone.utc) + timedelta(days=1)
+                def change(value):
+                    if kind == 'all':
+                        for key in ('created_at', 'updated_at', 'deadline'):
+                            value[key] = (datetime.fromisoformat(value[key]) +
+                                          timedelta(days=1)).isoformat()
+                        for segment in value['segments']:
+                            segment['started_at'] = future.isoformat()
+                    elif kind == 'updated_at':
+                        value['updated_at'] = future.isoformat()
+                    else:
+                        value['segments'][-1]['started_at'] = future.isoformat()
+                self.edit(path, change)
+                before = (path / 'checkpoint.json').read_bytes()
+                with patch.object(Journal, 'recover') as recover:
+                    self.refused(path, 'clock state')
+                recover.assert_not_called()
+                self.assertEqual((path / 'checkpoint.json').read_bytes(), before)
+
+    def test_remaining_seconds_is_capped_independently_of_deadline(self):
+        now = datetime.now(timezone.utc)
+        value = {'created_at': (now + timedelta(days=1)).isoformat(),
+                 'deadline': (now + timedelta(days=2)).isoformat(),
+                 'updated_at': now.isoformat(), 'max_seconds': 10,
+                 'segments': [{'started_at': now.isoformat()}]}
+        self.assertEqual(remaining_seconds(value, now), 10)
+
+    def test_reviewer_remaining_never_exceeds_max_seconds(self):
+        path = self.paused()
+        observed = []
+        def reviewer(*args, **kwargs):
+            instance = Reviewer(*args, **kwargs)
+            observed.append(instance.deadline - instance.clock())
+            self.assertLessEqual(observed[-1], instance.config.max_seconds)
+            return instance
+        with patch('duo.cli.Reviewer', side_effect=reviewer):
+            code, summary, _, _ = self.resume(path)
+        self.assertEqual(code, 0, summary)
+        self.assertEqual(len(observed), 1)
 
     def test_run_and_repository_locks(self):
         path = self.paused()
@@ -390,6 +439,10 @@ class ResumeTests(Fixture):
         self.assertEqual(code, 130, summary)
         self.assertEqual(adapter.call_count, 1)
         self.assertEqual(self.record(path)['attempts_current_turn'], 2)
+        self.assertEqual(self.record(path)['approval_epoch'], 1)
+        self.assertEqual(self.record(path)['state']['approved'], [])
+        self.assertEqual(self.record(path, 'state.json')['approved'], [])
+        self.assertEqual(self.record(path)['state']['history'][0]['decision'], 'approve')
         code, summary, adapter, _ = self.resume(path)
         self.assertEqual(code, 0, summary)
         self.assertEqual(self.record(path)['approval_epoch'], 2)
@@ -493,6 +546,24 @@ class ResumeTests(Fixture):
         code, summary, _, _ = self.resume(path)
         self.assertEqual(code, 0, summary)
 
+    def test_crash_during_initial_preflight_leaves_resumable_checkpoint(self):
+        with patch.object(CLIAdapter, 'preflight', side_effect=Crash()), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), \
+                self.assertRaises(Crash):
+            main(['--repo', str(self.repo), '--state-dir', str(self.audit),
+                  '--task', 'Task', '--codex-model', 'c', '--claude-model', 'a'])
+        path = next(p.parent for p in self.audit.rglob('manifest.json'))
+        self.assertEqual(self.record(path)['segment'], 0)
+        self.assertEqual(self.record(path)['state']['turns'], 0)
+        self.assertTrue((path / 'plan-000.md').exists())
+        self.assertTrue((path / 'context.json').exists())
+        self.assertFalse((path / 'versions.json').exists())
+        code, summary, adapter, preflight = self.resume(path)
+        self.assertEqual(code, 0, summary)
+        preflight.assert_called_once()
+        self.assertEqual(adapter.call_count, 2)
+        self.assertTrue((path / 'versions-resume-1.json').exists())
+
     def test_publication_io_error_is_terminal_without_promoting_proposal(self):
         with patch.object(PlanFile, 'write', side_effect=OSError('Publication failed')):
             code, summary, _, _ = self.fresh([response('revise', 'Proposal\n')])
@@ -529,17 +600,70 @@ class ResumeTests(Fixture):
         code, summary, _, _ = self.resume(path)
         self.assertEqual(code, 0, summary)
 
-    def test_resume_preflight_failure_is_terminal_and_preserves_original_versions(self):
+    def test_resume_preflight_failure_is_resumable_and_preserves_original_versions(self):
         path = self.paused()
         before = (path / 'versions.json').read_bytes()
         with patch.object(CLIAdapter, 'preflight', side_effect=RunError('Controls rejected')), \
                 patch.object(CLIAdapter, '__call__') as adapter, \
-                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            code = main(['--resume', str(path)])
+                redirect_stdout(output := io.StringIO()), redirect_stderr(io.StringIO()):
+            code = main(['--resume', str(path), '--json'])
         self.assertEqual(code, 1)
+        self.assertIn('Controls rejected', json.loads(output.getvalue())['message'])
         adapter.assert_not_called()
         self.assertEqual((path / 'versions.json').read_bytes(), before)
-        self.refused(path, 'terminal')
+        self.assertEqual(self.record(path)['status'], 'running')
+        self.assertEqual(self.record(path, 'state.json')['status'], 'running')
+        self.assertFalse((path / 'result.json').exists())
+        self.assertFalse((path / 'error.json').exists())
+        code, summary, _, preflight = self.resume(path)
+        self.assertEqual(code, 0, summary)
+        preflight.assert_called_once()
+        self.assertEqual((path / 'versions.json').read_bytes(), before)
+
+    def test_resume_startup_failure_leaves_approvals_cleared_and_run_resumable(self):
+        for stage in ('budget', 'graph'):
+            with self.subTest(stage=stage):
+                path = self.paused()
+                target = ('duo.cli.Reviewer.check_startup_budget' if stage == 'budget'
+                          else 'duo.cli.build_graph')
+                with patch(target, side_effect=RunError('Startup rejected')):
+                    code, summary, adapter, _ = self.resume(path)
+                self.assertEqual(code, 1, summary)
+                self.assertIn('Startup rejected', summary['message'])
+                adapter.assert_not_called()
+                checkpoint = self.record(path)
+                self.assertEqual(checkpoint['approval_epoch'], 1)
+                self.assertEqual(checkpoint['status'], 'running')
+                self.assertEqual(checkpoint['state']['approved'], [])
+                self.assertEqual(self.record(path, 'state.json'), checkpoint['state'])
+                self.assertFalse((path / 'result.json').exists())
+                self.assertFalse((path / 'error.json').exists())
+                code, summary, _, _ = self.resume(path)
+                self.assertEqual(code, 0, summary)
+
+    def test_segment_checkpoint_survives_crash_before_audit_write(self):
+        path = self.paused()
+        original = Journal.write
+        def crash(journal, **changes):
+            original(journal, **changes)
+            if changes.get('approval_epoch') == 1:
+                raise Crash()
+        with patch.object(Journal, 'write', crash), self.assertRaises(Crash):
+            self.resume(path)
+        self.assertEqual(self.record(path)['state']['approved'], [])
+        self.assertEqual(self.record(path, 'state.json')['approved'], ['codex'])
+        code, summary, _, _ = self.resume(path)
+        self.assertEqual(code, 0, summary)
+
+    def test_resume_graph_error_does_not_restore_historical_approvals(self):
+        path = self.paused()
+        with patch('duo.cli.build_graph') as build:
+            build.return_value.invoke.side_effect = RunError('Graph failed')
+            code, summary, _, _ = self.resume(path)
+        self.assertEqual(code, 1, summary)
+        self.assertEqual(self.record(path)['status'], 'error')
+        self.assertEqual(self.record(path)['state']['approved'], [])
+        self.assertEqual(self.record(path, 'state.json')['approved'], [])
 
     def test_partial_finding_event_batch_is_recovered_without_duplicates(self):
         original = RunStore.event
@@ -582,6 +706,7 @@ class ResumeTests(Fixture):
         self.assertEqual(code, 3)
         factory.assert_not_called()
         self.assertEqual(self.record(path)['status'], 'blocked')
+        self.assertEqual(self.record(path, 'result.json')['untested_cli'], {})
 
     def test_recovery_can_itself_be_interrupted_between_audit_and_checkpoint(self):
         path = self.pending(after=True)

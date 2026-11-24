@@ -13,7 +13,7 @@ import sys
 import threading
 
 from .adapters import CLIAdapter
-from .checkpoints import Journal, load as load_checkpoint, read_record, utc
+from .checkpoints import Journal, load as load_checkpoint, read_record, remaining_seconds
 from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLAUDE_MAX_TURNS,
                      DOCUMENT_MODES, DEFAULT_MAX_PROMPT_BYTES, MAX_TEXT_BYTES, Config, RunError,
                      State, Terminated, Turn, new_secret, normalize)
@@ -335,6 +335,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             journal = Journal.create(store, config, state, manifest,
                                      read_record(store.path / "context.json"),
                                      started.isoformat(), deadline.isoformat())
+            journal.write()
             store.json("state.json", state)
             adapter = CLIAdapter(config, store)
             reviewer = Reviewer(config, adapter, plan, store,
@@ -356,7 +357,6 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
                 print("Warning: --allow-web gives reviewers web access; what they read can "
                       "reach the web through their queries and fetched URLs",
                       file=sys.stderr, flush=True)
-            journal.write()
             result = graph.invoke(state, config={"recursion_limit": config.max_turns + 5})
             plan.check()
             journal.terminal(result)
@@ -406,6 +406,7 @@ def resume(args: argparse.Namespace, holder: list[RunStore]) -> int:
     store = None
     journal = None
     active = False
+    invoking = False
     try:
         store = RunStore.open_existing(args.resume)
         # Do not rewrite even reports on a refused recovery.
@@ -415,6 +416,7 @@ def resume(args: argparse.Namespace, holder: list[RunStore]) -> int:
             raise RunError(f"Cannot resume terminal run ({value['status']}){hint}")
         if config.allow_untested_cli != args.allow_untested_cli:
             raise RunError("--allow-untested-cli mismatch: changed security settings require a new run")
+        remaining = remaining_seconds(value, datetime.now(timezone.utc))
         with run_lock(config.repo):
             document = output_path(Path(config.output), config.mode, config.repo)
             if str(document) != value["document"]:
@@ -427,15 +429,15 @@ def resume(args: argparse.Namespace, holder: list[RunStore]) -> int:
             holder.append(store)
             active = True
             # Recovery may itself complete a terminal pending transition.
-            effective = min(utc(value["deadline"]), utc(value["created_at"]) +
-                            timedelta(seconds=config.max_seconds))
-            remaining = (effective - datetime.now(timezone.utc)).total_seconds()
-            if state["status"] != "running" or remaining <= 0 or state["turns"] >= config.max_turns:
+            remaining = min(remaining, remaining_seconds(journal.value, datetime.now(timezone.utc)))
+            if (state["status"] != "running" or remaining <= 0 or state["turns"] >= config.max_turns
+                    or journal.value["attempts_current_turn"] >= config.max_attempts):
                 if state["status"] == "running":
                     state["attempts"] += journal.value["attempts_current_turn"]
-                    state.update(status="limit_reached", error="Original run deadline or turn limit reached")
+                    state.update(status="limit_reached",
+                                 error="Original run deadline, turn limit, or attempt limit reached")
                 journal.terminal(state)
-                store.json("result.json", state)
+                store.json("result.json", {**state, "untested_cli": {}})
                 write_verdict(store.path)
                 emit({**outcome(state, config.mode), "run_dir": str(store.path)}, args.json)
                 return EXIT_CODES[state["status"]]
@@ -450,13 +452,15 @@ def resume(args: argparse.Namespace, holder: list[RunStore]) -> int:
                 config, adapter, plan, store, checkpoints=journal, context=context,
                 user_clarification=clarification,
                 turn_attempt_offset=journal.value["attempts_current_turn"],
-                absolute_deadline=time.monotonic() + max(0, (
-                    effective - datetime.now(timezone.utc)).total_seconds()),
+                absolute_deadline=time.monotonic() + max(0, min(remaining,
+                    remaining_seconds(journal.value, datetime.now(timezone.utc)))),
                 progress=lambda message: print(message, file=sys.stderr, flush=True),
                 on_review=(lambda n, t, b, a: show_review(n, t, b, a, config.mode))
                 if args.show_conversation else None)
             reviewer.check_startup_budget(state)
-            result = build_graph(reviewer).invoke(state, config={"recursion_limit": config.max_turns + 5})
+            graph = build_graph(reviewer)
+            invoking = True
+            result = graph.invoke(state, config={"recursion_limit": config.max_turns + 5})
             plan.check()
             journal.terminal(result)
             store.json("result.json", {**result, "untested_cli": adapter.untested})
@@ -481,7 +485,7 @@ def resume(args: argparse.Namespace, holder: list[RunStore]) -> int:
     except Exception as exc:
         summary = {"status": "error", "message": str(exc)}
         code = 1
-        if journal and active:
+        if journal and invoking:
             try:
                 failed = deepcopy(journal.value["state"])
                 failed["attempts"] += journal.value["attempts_current_turn"]

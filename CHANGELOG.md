@@ -7,6 +7,8 @@
 - `duo --resume RUN_PATH` recovers interrupted document reviews from durable,
   validated checkpoints, preserving work and budgets while requiring fresh
   approvals. Earlier audit-only runs and terminal runs cannot be resumed.
+- Verdict schema 1.1 records `approval_epoch` in verdict decisions, with a
+  matching update to the reference gate in `examples/check_verdict.py`.
 - `duo-clean` protects paused recoverable runs and unreadable checkpoints;
   `--include-recoverable` explicitly includes them in abandonment/deletion.
 
