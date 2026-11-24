@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import tempfile
 import time
 import unittest
@@ -147,6 +148,21 @@ class CleanupTests(unittest.TestCase):
         _, text = self.clean("--max-total-mb", "0", "--delete")
         self.assertIn("[checkpoint unreadable]", text)
         self.assertTrue(path.exists())
+
+    def test_protected_runs_count_toward_total_without_being_selected(self):
+        for content in ('{"status": "running"}', '{'):
+            with self.subTest(checkpoint=content):
+                protected = self.checkpoint_run(content, runtime=2 * 1024 * 1024)
+                ordinary = [self.run_dir('run-old', 50), self.run_dir('run-new', 1)]
+                _, text = self.clean('--max-total-mb', '1')
+                for path in ordinary:
+                    self.assertIn('Would delete ' + path.name, text)
+                    self.assertTrue(path.exists())
+                self.assertNotIn('Would delete run-paused', text)
+                self.clean('--max-total-mb', '1', '--delete')
+                self.assertTrue(protected.exists())
+                self.assertTrue(all(not path.exists() for path in ordinary))
+                shutil.rmtree(protected)
 
     def test_terminal_checkpoint_is_ordinary(self):
         path = self.checkpoint_run(json.dumps({"status": "agreed"}))
