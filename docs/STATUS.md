@@ -981,7 +981,40 @@ and disk-full reservation failure before any adapter call. Cleanup tests cover
 protected previews, age/size selection, explicit deletion, terminal/unreadable
 checkpoints, locked runs, and runtime-only removal.
 
-Verification: the requested focused suite passed, full unittest discovery passed
-**425 tests**, and `scripts/run_tests.py` passed **425 tests with no skips** against
-a locally built and installed `duo-plan` package. The suite grew from 374 tests;
-package version remains 0.6.0. These are offline results only.
+Verification: the requested focused suite passed, full unittest discovery passed,
+and `scripts/run_tests.py` passed with no skips against a locally built and
+installed `duo-plan` package: **425 tests** for the initial implementation, **433
+tests** after the review round that fixed the resume clock checks, the persisted
+approval clearing, non-destructive resume startup refusals, and the
+exhausted-attempts limit outcome. The suite grew from 374 tests; package version
+remains 0.6.0.
+
+Live evidence (2026-11-24, Linux, native pair: Codex `gpt-6-astra` high via
+Codex CLI 0.171.0 with `--allow-untested-cli`, Claude `claude-opus-5-5` high):
+run `run-37q0ew0e` (syncnote plan, seeded rough draft) committed three turns —
+codex revise, claude revise, codex approve — and was then SIGKILLed mid-call
+during claude's turn-4 attempt 1, with the attempt reservation and
+`approved == ["codex"]` durable in the checkpoint. `duo --resume` recorded the
+attempt as interrupted (consumed, not erased), opened segment 1 from sequence
+12, and recorded `approvals_invalidated` for codex at approval epoch 1. Claude
+approved turn 4 on attempt 2 against the unchanged document hash, so agreement
+still required fresh approvals from both reviewers; codex revised (turn 5),
+claude approved (turn 6), codex approved (turn 7): agreed, 7 turns, 8 attempts
+total, with the checkpoint deadline byte-identical across the crash
+(`2026-11-24T16:55:50.932837+00:00`, created_at + 7200 s; downtime counted).
+The final `plan.md` hash matches the result's plan hash, and `verdict.json`
+(schema 1.1) records completion `agreed`. A companion uninterrupted run
+(`run-szr3h767`) agreed in 3 turns. Refusals, each before any model call: a
+checkpoint copy with one tampered state field failed with "Checkpoint
+integrity mismatch"; resuming either agreed run failed with "Cannot resume
+terminal run (agreed)"; resuming a pre-§12 run (`run-esc_oi2o`, 0.6.0) failed
+with "Audit-only run recorded before checkpoints; not resumable (no silent
+import)".
+
+Known limitations left by review: each resume attempt that fails its startup
+budget check still opens a new segment and approval epoch (growth is bounded
+by the checkpoint size cap); the future-timestamp check covers `updated_at`
+and the latest segment's `started_at` only, which is sufficient because the
+budget derives from `created_at`, `deadline`, and `max_seconds`; and after a
+small backward clock correction, resume refuses as inconsistent until the
+wall clock passes the recorded `updated_at` (conservative by design).
