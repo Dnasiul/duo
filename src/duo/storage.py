@@ -191,6 +191,20 @@ def atomic_write(path: Path, data: bytes, mode: int = 0o600) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def durable_write(path: Path, data: bytes, mode: int = 0o600) -> None:
+    """Atomic replacement whose directory entry also survives system loss."""
+    atomic_write(path, data, mode)
+    fsync_directory(path.parent)
+
+
 def new_file_mode() -> int:
     """The mode a new file would get from the user's umask (0644 for umask 022)."""
     mask = os.umask(0)
@@ -270,7 +284,10 @@ def run_lock(repo: Path):
 
 
 class RunStore:
-    """Audit artifacts; these are deliberately not resumable graph checkpoints."""
+    """Audit artifacts plus checkpoints for new runs (see checkpoints.py).
+
+    Earlier run directories remain audit-only and cannot be resumed.
+    """
 
     def __init__(self, state_dir: Path):
         state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -281,6 +298,25 @@ class RunStore:
         import fcntl
         self._lock = os.open(self.path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
         fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    @classmethod
+    def open_existing(cls, path: Path) -> RunStore:
+        import fcntl
+
+        path = path.expanduser().resolve()
+        if not path.is_dir():
+            raise RunError("Run path must be an existing directory")
+        store = cls.__new__(cls)
+        store.path = path
+        store._lock = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            fcntl.flock(store._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            store.close()
+            if isinstance(exc, BlockingIOError):
+                raise RunError("Another Duo run holds the run-directory lock (active run or concurrent resume)") from exc
+            raise
+        return store
 
     def close(self) -> None:
         if self._lock is not None:

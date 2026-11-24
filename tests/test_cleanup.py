@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import redirect_stdout
 import io
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -121,3 +122,47 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("No runs directory", text)
 
+
+    def checkpoint_run(self, content, runtime=0):
+        path = self.run_dir("run-paused", 40, runtime=runtime)
+        (path / "checkpoint.json").write_text(content)
+        stamp = time.time() - 40 * DAY
+        for item in (path, path / "checkpoint.json"):
+            os.utime(item, (stamp, stamp))
+        return path
+
+    def test_recoverable_protected_from_age_and_size_pruning(self):
+        path = self.checkpoint_run(json.dumps({"status": "running"}))
+        for selection in (("--older-than", "30"), ("--max-total-mb", "0")):
+            _, text = self.clean(*selection, "--delete")
+            self.assertIn("Protected run-paused", text)
+            self.assertIn("[recoverable]", text)
+            self.assertTrue(path.exists())
+        _, text = self.clean("--older-than", "30", "--include-recoverable", "--delete")
+        self.assertIn("Deleted run-paused", text)
+        self.assertFalse(path.exists())
+
+    def test_unreadable_checkpoint_is_protected(self):
+        path = self.checkpoint_run("{")
+        _, text = self.clean("--max-total-mb", "0", "--delete")
+        self.assertIn("[checkpoint unreadable]", text)
+        self.assertTrue(path.exists())
+
+    def test_terminal_checkpoint_is_ordinary(self):
+        path = self.checkpoint_run(json.dumps({"status": "agreed"}))
+        self.clean("--older-than", "30", "--delete")
+        self.assertFalse(path.exists())
+
+    def test_locked_recoverable_run_skipped(self):
+        path = self.checkpoint_run(json.dumps({"status": "running"}))
+        store = RunStore.open_existing(path)
+        self.addCleanup(store.close)
+        _, text = self.clean("--older-than", "30", "--include-recoverable", "--delete")
+        self.assertIn("in use by a running Duo", text)
+        self.assertTrue(path.exists())
+
+    def test_recoverable_runtime_can_be_removed(self):
+        path = self.checkpoint_run(json.dumps({"status": "running"}), runtime=1024)
+        self.clean("--copilot-runtime", "--delete")
+        self.assertFalse((path / "attempt-1" / "copilot-cache" / "pkg").exists())
+        self.assertTrue((path / "checkpoint.json").exists())

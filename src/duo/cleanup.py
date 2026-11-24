@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import fcntl
+import json
 import os
 from pathlib import Path
 import shutil
@@ -16,7 +17,9 @@ import stat
 import sys
 import time
 
-from .storage import run_usage
+from .models import RunError
+from .storage import read_input, run_usage
+from .checkpoints import MAX_CHECKPOINT_BYTES
 
 MIB = 1024 * 1024
 
@@ -27,6 +30,8 @@ class Run:
     modified: float  # newest of the directory and its top-level files
     size: int        # bytes, including any leftover Copilot runtime
     runtime: int     # bytes in leftover copilot-cache/pkg directories
+    recoverable: bool = False
+    checkpoint_note: str = ""
 
 
 def default_state_dir() -> Path:
@@ -70,7 +75,20 @@ def scan(runs_dir: Path) -> tuple[list[Run], list[str]]:
         modified = max([info.st_mtime] + [child.lstat().st_mtime for child in path.iterdir()])
         size = run_usage(path)
         leftover = sum(tree_size(item) for item in runtimes(path))
-        runs.append(Run(path, modified, size + leftover, leftover))
+        protected, note = False, ""
+        checkpoint = path / "checkpoint.json"
+        if checkpoint.exists() or checkpoint.is_symlink():
+            try:
+                value = json.loads(read_input(checkpoint, follow_symlinks=False,
+                                              max_bytes=MAX_CHECKPOINT_BYTES))
+                if not isinstance(value, dict) or value.get("status") not in (
+                        "running", "agreed", "blocked", "error", "limit_reached"):
+                    raise ValueError("Invalid checkpoint status")
+                protected = value["status"] == "running"
+                note = "recoverable" if protected else ""
+            except (OSError, ValueError, RunError, RecursionError):
+                protected, note = True, "checkpoint unreadable"
+        runs.append(Run(path, modified, size + leftover, leftover, protected, note))
     return runs, skipped
 
 
@@ -86,13 +104,15 @@ def try_lock(path: Path) -> int | None:
 
 
 def select(runs: list[Run], older_than_days: float | None, max_total_mb: float | None,
-           now: float) -> list[Run]:
+           now: float, include_recoverable: bool = False) -> list[Run]:
     chosen = []
     if older_than_days is not None:
-        chosen = [run for run in runs if now - run.modified > older_than_days * 86400]
+        chosen = [run for run in runs if now - run.modified > older_than_days * 86400
+                  and (include_recoverable or not run.recoverable)]
     if max_total_mb is not None:
         kept = sorted((run for run in runs if run not in chosen), key=lambda run: run.modified)
         total = sum(run.size for run in kept)
+        kept = [run for run in kept if include_recoverable or not run.recoverable]
         while kept and total > max_total_mb * MIB:
             oldest = kept.pop(0)  # oldest first
             chosen.append(oldest)
@@ -102,7 +122,8 @@ def select(runs: list[Run], older_than_days: float | None, max_total_mb: float |
 
 def describe(run: Run, now: float) -> str:
     age = (now - run.modified) / 86400
-    return f"{run.path.name}  {run.size / MIB:8.1f} MiB  {age:6.1f} days old"
+    return (f"{run.path.name}  {run.size / MIB:8.1f} MiB  {age:6.1f} days old"
+            + (f" [{run.checkpoint_note}]" if run.checkpoint_note else ""))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -116,6 +137,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--copilot-runtime", action="store_true",
                         help="Remove leftover Copilot runtime copies (copilot-cache/pkg) from all "
                              "inactive runs, keeping their audit files")
+    parser.add_argument("--include-recoverable", action="store_true",
+                        help="Explicitly abandon paused runs, including unreadable checkpoints")
     parser.add_argument("--delete", action="store_true", help="Delete; without it, only report")
     args = parser.parse_args(argv)
     if args.older_than is None and args.max_total_mb is None and not args.copilot_runtime:
@@ -131,20 +154,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     runs, skipped = scan(runs_dir)
     now = time.time()
-    chosen = select(runs, args.older_than, args.max_total_mb, now)
+    chosen = select(runs, args.older_than, args.max_total_mb, now, args.include_recoverable)
     verb = "Deleted" if args.delete else "Would delete"
     freed = 0
     for line in skipped:
         print(f"Skipped {line}")
     for run in runs:
         delete_run = run in chosen
-        if not delete_run and not (args.copilot_runtime and run.runtime):
+        protected = run.recoverable and not args.include_recoverable
+        if not delete_run and not (args.copilot_runtime and run.runtime) and not protected:
             continue
         lock = try_lock(run.path)
         if lock is None:
             print(f"Skipped {run.path.name}: in use by a running Duo")
             continue
         try:
+            if protected:
+                print(f"Protected {describe(run, now)}; add --include-recoverable to abandon")
+                if not (args.copilot_runtime and run.runtime):
+                    continue
             if delete_run:
                 print(f"{verb} {describe(run, now)}")
                 if args.delete:

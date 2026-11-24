@@ -61,9 +61,55 @@ revision is validated, replacing it atomically, so an interrupted, failed, or
 killed run never leaves a partial plan. Stopping Duo with Ctrl-C, SIGTERM, or
 SIGHUP also stops the reviewer CLI and everything it started.
 
-To continue, run the same command again. The new run reviews the saved plan with
-fresh approvals; there is nothing to repair. Do not edit audit files to resume:
-they are records, not checkpoints.
+To start over, run the same command again: the new run reviews the saved plan
+with fresh approvals. To recover an interrupted run recorded by this version,
+use the explicit audit directory printed by Duo:
+
+```sh
+duo --resume ~/.local/state/duo/runs/run-EXAMPLE --show-conversation
+```
+
+Resume retains the document, diff, review history, findings, and reserved attempts,
+but clears approvals and requires both reviewers to approve again. The original
+absolute deadline still applies, including downtime. Preflight checks current
+binaries and controls; `versions-resume-N.json` records each segment's evidence
+without replacing `versions.json`. Run-defining settings cannot be overridden;
+`--allow-untested-cli` must match the original setting. `--json` is also accepted.
+
+Recovery refusals and outcomes:
+
+- **Audit-only / no checkpoint:** older directories are records and cannot be
+  imported. Start a new run on the saved document.
+- **Terminal run:** agreement, error, and limit outcomes are final. A blocked
+  outcome requires a fresh `--answer` / `--source-run` invocation.
+- **Integrity, unsupported schema, missing artifacts, or divergent audit state:**
+  do not edit records to bypass validation. Preserve them for diagnosis and start
+  a new run if needed.
+- **Document changed outside Duo:** recovery leaves it untouched. Choose the
+  desired document and start a new run. A pending proposal is committed only if
+  the actual document matches its recorded published hash; otherwise a matching
+  pre-publication document discards the proposal without inventing a review.
+- **Inconsistent clock state:** timestamps cannot establish a safe deadline.
+  Start a new run. An expired or conservatively clamped deadline, or exhausted
+  turn budget, instead records a limit outcome (exit 4) without model calls.
+- **Run-directory lock:** another invocation is using that run. Wait or stop it.
+  The repository lock also excludes simultaneous runs in other audit directories.
+- **Attempt allowance exhausted:** an interrupted call consumed the final
+  reservation; recovery makes no additional call for that turn.
+
+Ctrl-C/SIGTERM/SIGHUP leave a checkpointed run interrupted, with no terminal
+`result.json` or `error.json`. Its verdict/report remains labeled interrupted.
+Cleanup protects these paused runs, including unreadable checkpoints. To abandon
+selected runs explicitly, preview then delete with, for example:
+
+```sh
+duo-clean --older-than 30 --include-recoverable
+duo-clean --older-than 30 --include-recoverable --delete
+```
+
+Active locked runs remain protected even with this flag. `--copilot-runtime`
+may remove rebuildable runtime caches from paused runs while retaining recovery
+artifacts.
 
 If a run reports `plan.md changed outside Duo`, someone edited the plan during the
 review. Duo stopped rather than overwrite the edit. Keep the version you want in

@@ -1,0 +1,902 @@
+{
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.1"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "started_at": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "mode": {
+      "enum": [
+        "plan",
+        "report",
+        "description",
+        "review"
+      ]
+    },
+    "completion": {
+      "enum": [
+        "agreed",
+        "blocked",
+        "limit",
+        "error",
+        "interrupted"
+      ]
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "subject": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "document"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!\\.$)(?!.*\\\\).+$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "kind",
+        "path",
+        "sha256",
+        "bytes"
+      ],
+      "additionalProperties": false
+    },
+    "fixed_inputs": {
+      "type": "object",
+      "properties": {
+        "task_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "criteria_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "context": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "label",
+              "sha256",
+              "bytes"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "task_sha256",
+        "criteria_sha256",
+        "context"
+      ],
+      "additionalProperties": false
+    },
+    "agreement": {
+      "type": "object",
+      "properties": {
+        "rule": {
+          "const": "both-reviewers-approve-same-subject"
+        },
+        "roster": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "enum": [
+                  "codex",
+                  "claude"
+                ]
+              },
+              "backend": {
+                "enum": [
+                  "native",
+                  "copilot"
+                ]
+              },
+              "model": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "cli_version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "role",
+              "backend",
+              "model",
+              "cli_version"
+            ],
+            "additionalProperties": false
+          },
+          "allOf": [
+            {
+              "contains": {
+                "properties": {
+                  "role": {
+                    "const": "codex"
+                  }
+                }
+              },
+              "minContains": 1,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "properties": {
+                  "role": {
+                    "const": "claude"
+                  }
+                }
+              },
+              "minContains": 1,
+              "maxContains": 1
+            }
+          ]
+        }
+      },
+      "required": [
+        "rule",
+        "roster"
+      ],
+      "additionalProperties": false
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "enum": [
+              "codex",
+              "claude"
+            ]
+          },
+          "decision": {
+            "enum": [
+              "approve",
+              "revise",
+              "blocked"
+            ]
+          },
+          "subject_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "turn": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "approval_epoch": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "role",
+          "decision",
+          "subject_sha256",
+          "turn",
+          "timestamp"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "approved_subject_sha256": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^F[1-9][0-9]*$"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "location": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "lines",
+                    "type": "string"
+                  },
+                  "start_line": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "end_line": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!\\.$)(?!.*\\\\).+$"
+                  },
+                  "subject_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "start_line",
+                  "end_line",
+                  "path",
+                  "subject_sha256"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "subject",
+                    "type": "string"
+                  },
+                  "explanation": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!\\.$)(?!.*\\\\).+$"
+                  },
+                  "subject_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "explanation",
+                  "path",
+                  "subject_sha256"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "section",
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!\\.$)(?!.*\\\\).+$"
+                  },
+                  "subject_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "section": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "section",
+                  "path",
+                  "subject_sha256"
+                ],
+                "additionalProperties": false
+              }
+            ],
+            "description": "A location's line numbers refer to the subject identified by its subject_sha256; sections and whole-subject explanations bind to that subject too."
+          },
+          "status": {
+            "enum": [
+              "open",
+              "resolved",
+              "dismissed"
+            ]
+          },
+          "reported_by": {
+            "enum": [
+              "codex",
+              "claude"
+            ]
+          },
+          "reported_turn": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reported_attempt": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "first_seen_subject_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "last_seen_subject_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "location_history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subject_hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "location": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "lines",
+                          "type": "string"
+                        },
+                        "start_line": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "end_line": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!\\.$)(?!.*\\\\).+$"
+                        },
+                        "subject_sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "start_line",
+                        "end_line",
+                        "path",
+                        "subject_sha256"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "subject",
+                          "type": "string"
+                        },
+                        "explanation": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!\\.$)(?!.*\\\\).+$"
+                        },
+                        "subject_sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "explanation",
+                        "path",
+                        "subject_sha256"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "section",
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!\\.$)(?!.*\\\\).+$"
+                        },
+                        "subject_sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "section": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "section",
+                        "path",
+                        "subject_sha256"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "A location's line numbers refer to the subject identified by its subject_sha256; sections and whole-subject explanations bind to that subject too."
+                }
+              },
+              "required": [
+                "subject_hash",
+                "location"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "disposition": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "resolved",
+                      "dismissed"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "pattern": "\\S"
+                  },
+                  "subject_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "turn": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "by": {
+                    "enum": [
+                      "codex",
+                      "claude"
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "reason",
+                  "subject_hash",
+                  "turn",
+                  "by"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "severity",
+          "title",
+          "description",
+          "location",
+          "status",
+          "reported_by",
+          "reported_turn",
+          "reported_attempt",
+          "first_seen_subject_hash",
+          "last_seen_subject_hash",
+          "location_history",
+          "disposition"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "open"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "disposition": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "disposition": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "resolved",
+                        "dismissed"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "pattern": "\\S"
+                    },
+                    "subject_hash": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "turn": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "by": {
+                      "enum": [
+                        "codex",
+                        "claude"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "reason",
+                    "subject_hash",
+                    "turn",
+                    "by"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "resolved"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "disposition": {
+                  "properties": {
+                    "status": {
+                      "const": "resolved"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "dismissed"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "disposition": {
+                  "properties": {
+                    "status": {
+                      "const": "dismissed"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "reported_by": {
+                  "const": "codex"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "disposition": {
+                  "properties": {
+                    "by": {
+                      "const": "codex"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "reported_by": {
+                  "const": "claude"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "disposition": {
+                  "properties": {
+                    "by": {
+                      "const": "claude"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "open_findings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "open_by_severity": {
+          "type": "object",
+          "properties": {
+            "info": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "low": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "medium": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "high": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "critical": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "turns",
+        "attempts",
+        "open_findings",
+        "open_by_severity"
+      ],
+      "additionalProperties": false
+    },
+    "audit": {
+      "type": "object",
+      "properties": {
+        "manifest": {
+          "const": "manifest.json"
+        },
+        "result": {
+          "const": "result.json"
+        },
+        "state": {
+          "const": "state.json"
+        },
+        "events": {
+          "const": "events.jsonl"
+        },
+        "report": {
+          "const": "report.html"
+        },
+        "verdict": {
+          "const": "verdict.json"
+        }
+      },
+      "required": [
+        "manifest",
+        "result",
+        "state",
+        "events",
+        "report",
+        "verdict"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "started_at",
+    "mode",
+    "completion",
+    "complete",
+    "subject",
+    "fixed_inputs",
+    "agreement",
+    "decisions",
+    "approved_subject_sha256",
+    "findings",
+    "summary",
+    "audit"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:duo:verdict:1.1",
+  "title": "Duo verdict 1.1",
+  "$comment": "Resumed runs add approval_epoch to decisions. validate_verdict enforces fresh agreement within an epoch in addition to the 1.0 cross-field checks.",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "completion": {
+            "const": "interrupted"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "complete": {
+            "const": false
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "complete": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "completion": {
+            "const": "agreed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "approved_subject_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "decisions": {
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "role": {
+                      "const": "codex"
+                    },
+                    "decision": {
+                      "const": "approve"
+                    }
+                  }
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "role": {
+                      "const": "claude"
+                    },
+                    "decision": {
+                      "const": "approve"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "findings": {
+            "items": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "resolved",
+                    "dismissed"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "approved_subject_sha256": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}

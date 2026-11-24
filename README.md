@@ -615,12 +615,14 @@ are frozen within a major version. Additive optional fields use minor versions,
 including at the verdict and finding levels. Location objects retain their exact
 key sets throughout 1.x; minor versions cannot add fields inside locations.
 Incompatible changes require a new major version and migration notes. The schema
-ships as `duo/schemas/verdict-1.0.json`; example artifacts are in
-[`tests/fixtures/verdicts`](tests/fixtures/verdicts).
-`validate_verdict` is the authoritative 1.0 checker; the JSON Schema is the published
+ships as `duo/schemas/verdict-1.0.json`; resumed runs use
+`duo/schemas/verdict-1.1.json`, adding a decision `approval_epoch` so historical
+approvals cannot satisfy agreement after recovery. Fresh runs retain 1.0.
+Example artifacts are in [`tests/fixtures/verdicts`](tests/fixtures/verdicts).
+`validate_verdict` is the authoritative 1.x checker; the JSON Schema is the published
 description of the same contract. JSON Schema `integer` also accepts integral floats
 such as `4.0`, while Duo's validator requires true integers. Agreement requires both
-roles' approvals on the final subject after the last revision, a final approve
+roles' approvals on the final subject after the last revision and resume, a final approve
 decision, no blocked decision, and no open findings.
 
 Use the standalone, stdlib-only reference gate in CI:
@@ -681,8 +683,37 @@ run tests on behalf of reviewers or imply the saved test output proves the diff.
 
 A rerun starts a new review of whatever `plan.md` (or the mode's document) holds,
 which is always the last accepted version: Duo saves a revision only after validating it. Approvals are not
-carried over, so both reviewers must approve again. Audit directories are
-records, not checkpoints; a run cannot be resumed from one.
+carried over, so both reviewers must approve again. This rerun behavior is unchanged.
+
+#### Resuming an interrupted run
+
+To continue the same run, choose its directory explicitly:
+
+```sh
+duo --resume ~/.local/state/duo/runs/run-EXAMPLE --show-conversation
+```
+
+Only runs recorded by this version with `checkpoint.json` are recoverable.
+Earlier audit directories remain records, not checkpoints, and are never
+silently imported. Resume preserves the saved document, history, diff, findings,
+and consumed attempts. Every active approval is cleared, even if the document
+has not changed: both reviewers must approve again in the new approval epoch.
+
+The original absolute deadline and budgets are preserved; downtime counts.
+An expired deadline or exhausted turn budget returns exit 4 without model calls.
+An interrupted call consumes its reserved attempt. Current CLI versions and
+inspection controls are checked again before new calls.
+
+Terminal runs (agreed, blocked, error, or limit) cannot be reopened. For a blocked
+run, use `--answer` and `--source-run` as described below. Changed task, context,
+models, repository, limits, or security settings require a new run. Resume accepts
+only `--resume`, `--json`, `--show-conversation`, and `--allow-untested-cli`; that
+last flag must match the original run's setting.
+
+Duo refuses missing, corrupt, incompatible, or externally changed recovery state
+without overwriting the document. `duo-clean` protects paused recoverable runs
+and unreadable checkpoints from routine pruning. Add `--include-recoverable`
+with your selection to explicitly abandon them (`--delete` still controls deletion).
 
 ### Answering a blocked run
 
