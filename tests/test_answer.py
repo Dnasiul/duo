@@ -240,7 +240,7 @@ class AnswerTests(Fixture):
             (source / f'plan-{number:03d}.md').write_text('Earlier document\n')
         with patch('duo.storage.read_input', wraps=read_input) as read:
             self.refuse_source(source, f'{MAX_SOURCE_SNAPSHOTS} snapshot limit')
-        self.assertFalse(any(c.args[0].suffix == '.md' and c.args[0].parent == source
+        self.assertFalse(any(c.args[0].suffix == '.md' and c.args[0].parent == source.resolve()
                              for c in read.call_args_list))
 
     def test_snapshots_read_in_descending_numeric_order_until_match(self):
