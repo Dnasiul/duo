@@ -293,6 +293,15 @@ reply({'decision': 'approve', 'plan': '', 'reason': 'Ready', 'findings': [], 'fi
         self.assertEqual(json.loads((run / 'result.json').read_text())['untested_cli'],
                          {'copilot': 'GitHub Copilot CLI 1.2.0.'})
 
+    def test_preflight_rejects_ambiguous_multiline_version_output(self):
+        binary = self.fake("sys.stdin.read()\nreply({'decision':'approve','plan':'','reason':'Ready', 'findings': [], 'finding_updates': []})\n")
+        path = Path(binary)
+        path.write_text(path.read_text().replace(
+            "print('GitHub Copilot CLI 1.0.95.'); sys.exit(0)",
+            "print('Update available: 1.0.120'); print('GitHub Copilot CLI 1.0.95.'); sys.exit(0)"))
+        with self.assertRaisesRegex(RunError, 'Cannot parse the copilot version'):
+            CLIAdapter(self.copilot_config(binary), self.store).preflight()
+
     def test_preflight_rejects_missing_controls(self):
         binary = self.fake('')
         # Remove a required flag from only the advertised help.

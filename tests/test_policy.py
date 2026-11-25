@@ -69,6 +69,24 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(allow=allow), self.assertRaisesRegex(RunError, 'Cannot parse'):
                 verify_version('claude', 'unrecognized', allow)
 
+    def test_version_parser_rejects_ambiguous_distinct_versions(self):
+        text = ('Update available: 1.0.120\n'
+                'GitHub Copilot CLI 1.0.95.\n')
+        with self.assertRaisesRegex(RunError, 'Cannot parse.*ambiguous'):
+            verify_version('copilot', text)
+        with self.assertRaisesRegex(RunError, 'Cannot parse.*ambiguous'):
+            verify_version('copilot', '\n'.join(reversed(text.splitlines())))
+
+    def test_version_parser_accepts_single_distinct_triple_with_prose(self):
+        self.assertEqual(verify_version(
+            'copilot',
+            'GitHub Copilot CLI 1.0.95.\n(official build, release channel)\n'),
+            'tested')
+        self.assertEqual(verify_version(
+            'copilot',
+            'GitHub Copilot CLI 1.0.95.\nLatest installed: 1.0.95\n'),
+            'tested')
+
     def test_untested_versions_are_recorded_when_allowed(self):
         def run(argv, **kwargs):
             if '--version' in argv:
