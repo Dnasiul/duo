@@ -10,7 +10,9 @@ symbolic link inside the repository. A file counts as read when its random phras
 appears in the response or in that call's audit files. --search-confinement does
 the same for the search tools (two more model calls): each outside directory holds
 a file whose name and content carry separate random phrases, so listing and
-content search are reported apart.
+content search are reported apart. --login-shell adds one authenticated model
+call (native Codex only) to check that disposable login-profile sentinels stay
+out of the command environment; the .bashrc sentinel is informational only.
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ import tempfile
 
 from duo.adapters import CLIAdapter
 from duo.models import Config, validate_review
+from duo.policy import codex_options, reviewer_environment
 from duo.prompts import build_prompt
 from duo.storage import RunStore
 from duo.workflow import initial_state
@@ -47,7 +50,11 @@ def main() -> int:
                         help='also test whether reviewers can read files outside the repository')
     parser.add_argument('--search-confinement', action='store_true',
                         help='also test whether reviewer search tools reach outside the repository')
+    parser.add_argument('--login-shell', action='store_true',
+                        help='also test login-profile exclusion (one native Codex model call)')
     args = parser.parse_args()
+    if args.login_shell and args.codex_backend != 'native':
+        parser.error('--login-shell requires --codex-backend native')
     with tempfile.TemporaryDirectory(prefix='duo-inspection-smoke-') as directory:
         root = Path(directory)
         repo = root / 'repo'
@@ -108,7 +115,88 @@ def main() -> int:
             confinement(adapter, config, store, root, plan, versions)
         if args.search_confinement:
             search_confinement(adapter, config, store, root, plan, versions)
+        if args.login_shell:
+            login_shell(config)
     return 0
+
+
+def login_shell(config: Config) -> None:
+    """Check plan §7.2 using Duo's policy functions and native exec argv shape."""
+    codex_home = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')).resolve()
+    suffix = secrets.token_hex(8)
+    profile = (f'DUO_SMOKE_PROFILE_{suffix}', f'DUO_SMOKE_PROFILE_TOKEN_{suffix}')
+    nonlogin = f'DUO_SMOKE_NONLOGIN_{suffix}'
+    with tempfile.TemporaryDirectory(prefix='duo-login-shell-smoke-') as directory:
+        home = Path(directory)
+        (home / '.bash_profile').write_text(''.join(f'export {name}=profile\n' for name in profile))
+        (home / '.bashrc').write_text(f'export {nonlogin}=bashrc\n')
+        env = reviewer_environment('codex', config.pass_env)
+        env.update(HOME=str(home), CODEX_HOME=str(codex_home))
+        # As in the investigation probe, omit the review schema for a verbatim reply.
+        argv = [config.codex_bin, '--no-daemon', 'exec', '--sandbox', 'read-only',
+                '--ignore-user-config', '--ignore-rules', '--strict-config',
+                '--ephemeral', '--json', '-m', config.codex_model]
+        if config.codex_effort is not None:
+            argv += ['-c', f'model_reasoning_effort="{config.codex_effort}"']
+        argv += codex_options(config.allow_web)
+        if config.skip_git_repo_check:
+            argv.append('--skip-git-repo-check')
+        argv.append('-')
+        requested_command = "env | grep '^DUO_SMOKE' | sort"
+        prompt = ("Run exactly this shell command and no other command: "
+                  f"{requested_command}\n"
+                  "Then reply with the command's output verbatim.")
+        try:
+            proc = subprocess.run(argv, input=prompt, capture_output=True, text=True,
+                                  cwd=config.repo, env=env, timeout=300)
+        except (OSError, UnicodeError, subprocess.TimeoutExpired):
+            raise RuntimeError('codex login-shell: invocation did not complete') from None
+    present = set()
+    completed = failed = False
+    completed_commands = []
+    for line in proc.stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        completed |= event.get('type') == 'turn.completed'
+        failed |= event.get('type') in ('turn.failed', 'error')
+        item = event.get('item') or {}
+        if item.get('type') == 'command_execution':
+            present.update(output_line.split('=', 1)[0]
+                           for output_line in (item.get('aggregated_output') or '').splitlines()
+                           if output_line.startswith('DUO_SMOKE'))
+            if event.get('type') == 'item.completed' and item.get('exit_code') == 0:
+                completed_commands.append(item.get('command') or '')
+    requested_shells = []
+    for command in completed_commands:
+        try:
+            shell_argv = shlex.split(command)
+        except ValueError:
+            shell_argv = []
+        options = shell_argv[1:-1]
+        login_form = any(option == '--login' or
+                         (option.startswith('-') and not option.startswith('--') and 'l' in option[1:])
+                         for option in options)
+        form = ('login (-l/-lc/--login)' if login_form
+                else 'non-login (-c)' if '-c' in options else 'unknown form')
+        print(f'codex login-shell: command: {command} ({form})')
+        if shell_argv and requested_command in shell_argv[-1]:
+            requested_shells.append(Path(shell_argv[0]).name)
+    if any(name in present for name in profile):
+        raise RuntimeError('codex login-shell: login-profile sentinel reached command environment')
+    if proc.returncode or failed or not completed:
+        raise RuntimeError('codex login-shell: turn did not complete successfully')
+    if not requested_shells:
+        raise RuntimeError('codex login-shell: inconclusive; requested command did not complete successfully')
+    if any(shell != 'bash' for shell in requested_shells):
+        raise RuntimeError('codex login-shell: inconclusive; executed shell is not bash; planted files are for bash')
+    for name in (*profile, nonlogin):
+        state = 'present' if name in present else 'absent'
+        note = ' (informational; .bashrc presence expected)' if name == nonlogin else ''
+        print(f'codex login-shell: {name}: {state}{note}')
 
 
 def confinement(adapter: CLIAdapter, config: Config, store: RunStore, root: Path,

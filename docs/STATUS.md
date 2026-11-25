@@ -84,18 +84,12 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 7. **F4: native Claude tool audit** (plan §2): implemented in the working tree;
    see the stream evidence below. Document snapshots archive the reviewed
    document only; emitted tool logs do not guarantee complete file/page archives.
-8. **Codex login-shell environment reintroduction** (plan §7.2): investigated
-   on Linux on 2026-11-25 (see "Codex login-shell environment reintroduction"
-   below). The live sentinel probe has now run (the owner reset the account
-   usage limit on 2026-11-25): under Duo's previous invocation the login
-   profile's sentinels reached the reviewer's command environment
-   (reintroduction confirmed), `shell_environment_policy` alone does not
-   prevent it, and `allow_login_shell=false` demonstrably does — the profile
-   sentinels stay absent in a completed authenticated turn. Adoption of
-   `allow_login_shell=false` follows from this demonstrated result.
-   Residuals: the non-login shell still sources `.bashrc`, and macOS is an
-   untested platform for this question. The remaining boundary passes to
-   section 4.
+8. **Codex login-shell environment reintroduction** (plan §7.2): resolved.
+   The Linux live sentinel probe completed on 2026-11-25, and
+   `allow_login_shell=false` is adopted for native Codex invocations (see
+   "Codex login-shell environment reintroduction" below). Residuals pass to
+   section 4: the non-login shell still sources `.bashrc`; macOS is untested
+   (see (a)–(c) below).
 
 ## HTML agreement reports (Unreleased, 2026-11-23)
 
@@ -1117,7 +1111,7 @@ Mac); the shell under test is bash (the account's passwd shell and the owner's
 deferred by the native Codex account usage limit (which named 2026-11-29
 13:11), and the owner reset that limit on 2026-11-25. The probe results are
 recorded in this section as the investigation's evidence; the adoption they
-justify lands as a separate commit (code, tests, smoke tooling,
+justify has landed as a separate commit (code, tests, smoke tooling,
 `docs/SECURITY.md`, and CHANGELOG updated there).
 
 **The supported controls (vendor documentation).** OpenAI's Codex
@@ -1221,16 +1215,22 @@ Reading of the result:
 **Conclusion and adoption.** Plan §7.2's acceptance is met for
 `allow_login_shell=false` on Linux/bash: the profile sentinels remain
 absent despite the startup file attempting to set them, in a completed
-authenticated turn in which the command executed. Adoption follows as a
-separate commit: Duo passes `allow_login_shell=false` as a per-invocation
-`-c` override under `--strict-config` on every native Codex invocation —
-review calls and preflight probes alike, via `codex_options` — with
-argv/configuration tests. Note that `verify_controls` has no metadata
-surface for this key (it is not a feature flag): verification rests on
-`--strict-config` acceptance (an unrecognized key fails the preflight
-probes) plus this probe, which is promoted into the smoke tooling
+authenticated turn in which the command executed. Adoption has landed:
+Duo passes `allow_login_shell=false` as a per-invocation `-c` override on
+every native Codex invocation via `codex_options`, with argv/configuration
+tests. The review call uses `--strict-config`; preflight probes (`features
+list` and `mcp list`) pass the same overrides without `--strict-config`.
+Note that `verify_controls` has no metadata surface for this key (it is not
+a feature flag): verification rests on `--strict-config` acceptance on the
+review call (an unrecognized key fails the review call, fail-closed) plus
+this probe, now promoted into the smoke tooling
 (`scripts/smoke_inspection.py --login-shell`) so the demonstrated behavior
-can be re-checked against future CLI versions.
+can be re-checked against future CLI versions. First live re-check with
+the adopted code (2026-11-25, `--login-shell`, native Codex 0.171.0): the
+executed command was `/bin/bash -c "env | grep '^DUO_SMOKE' | sort"`
+(non-login form), both profile sentinels were absent, and the `.bashrc`
+sentinel was present as expected; the base inspection passed for both
+native reviewers in the same run.
 
 **Handed to section 4:** the isolation feasibility gate inherits a
 narrowed, evidenced boundary. With `allow_login_shell=false` adopted, a
