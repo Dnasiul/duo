@@ -238,7 +238,8 @@ def verify_controls(codex: str, claude: str, settings: Path,
             if state not in {"true", "false"}:
                 raise RunError("Cannot verify Codex feature states in features list output")
             if " ".join(parts[1:-1]) not in known_stages:
-                raise RunError("Cannot verify Codex feature layout in features list output")
+                raise RunError("Cannot verify Codex feature layout in features list output "
+                               f"(unrecognized stage: {' '.join(parts[1:-1])!r})")
             if name in features:
                 raise RunError(f"Codex features list contains duplicate feature row: {name}")
             features[name] = state

@@ -132,7 +132,9 @@ def copilot_reply(path: Path) -> object:
                     continue
                 if not isinstance(event, dict):
                     continue
-                if event.get("type") == "result" and event.get("exitCode") == 0:
+                exit_code = event.get("exitCode")
+                if (event.get("type") == "result" and isinstance(exit_code, int)
+                        and not isinstance(exit_code, bool) and exit_code == 0):
                     success_result = True
                 if event.get("type") != "assistant.message":
                     continue

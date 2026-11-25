@@ -153,7 +153,6 @@ else:
                      f"reply({ready!r}); sys.exit(1)"):
             binary = self.fake(body)
             adapter = CLIAdapter(self.copilot_config(binary), self.store)
-            adapter.policy_verified = True
             with self.subTest(body=body), self.assertRaises(AgentError):
                 adapter('codex', 'Review', 5)
         stream = self.root / 'missing-terminal.jsonl'
