@@ -86,12 +86,16 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
    document only; emitted tool logs do not guarantee complete file/page archives.
 8. **Codex login-shell environment reintroduction** (plan §7.2): investigated
    on Linux on 2026-11-25 (see "Codex login-shell environment reintroduction"
-   below). The supported controls are identified and the probe harness is
-   built and verified up to the model-call boundary, but the decisive live
-   sentinel probe is deferred until after 2026-11-29 13:11, when the native
-   Codex account usage limit resets; no control is adopted yet, so what the
-   login shell adds remains unverified. macOS is an untested platform for
-   this question. The unresolved boundary passes to section 4.
+   below). The live sentinel probe has now run (the owner reset the account
+   usage limit on 2026-11-25): under Duo's previous invocation the login
+   profile's sentinels reached the reviewer's command environment
+   (reintroduction confirmed), `shell_environment_policy` alone does not
+   prevent it, and `allow_login_shell=false` demonstrably does — the profile
+   sentinels stay absent in a completed authenticated turn. Adoption of
+   `allow_login_shell=false` follows from this demonstrated result.
+   Residuals: the non-login shell still sources `.bashrc`, and macOS is an
+   untested platform for this question. The remaining boundary passes to
+   section 4.
 
 ## HTML agreement reports (Unreleased, 2026-11-23)
 
@@ -1109,10 +1113,12 @@ remains a coordinator verification step.
 Investigation run 2026-11-25 on Linux (Ubuntu 24.04, x86-64) with codex-cli
 0.171.0. macOS is an untested platform for this question (it needs the owner's
 Mac); the shell under test is bash (the account's passwd shell and the owner's
-`SHELL`). No code or behavior changed, so there is no CHANGELOG entry and
-`docs/SECURITY.md` is unchanged: its Codex environment row still stands —
-Codex's commands run in a login shell that can set variables again from the
-shell profile, and what the login shell adds is not verified.
+`SHELL`). The live probe below ran the same day: it had initially been
+deferred by the native Codex account usage limit (which named 2026-11-29
+13:11), and the owner reset that limit on 2026-11-25. The probe results are
+recorded in this section as the investigation's evidence; the adoption they
+justify lands as a separate commit (code, tests, smoke tooling,
+`docs/SECURITY.md`, and CHANGELOG updated there).
 
 **The supported controls (vendor documentation).** OpenAI's Codex
 configuration documentation (Config basics and Advanced Configuration,
@@ -1159,7 +1165,7 @@ on the environment handed to a spawned command. It does not by itself say
 anything about a login profile, which executes inside the spawned shell
 after that environment is established.
 
-**The decisive probe is built and deferred.** Harness:
+**The decisive probe has run.** Harness:
 `~/workspace/duo-runs/duo-login-shell/probe/probe.py` (README alongside it
 records the exact run sequence and interpretation key). It builds the exact
 reviewer environment and argv Duo uses for native Codex
@@ -1170,38 +1176,72 @@ disposable directory whose `.bash_profile` exports `DUO_PROBE_PROFILE` and
 (attribution control), keeps `CODEX_HOME` at the real `~/.codex` so the
 stored ChatGPT login is used through the supported config-home mechanism
 (no credential copied or printed), and asserts a parent-only
-`DUO_PROBE_DROPPED` never enters the constructed environment. Dry runs
-verify argv and environment construction for all four variants (baseline;
-`allow_login_shell=false`; policy-only; combined). Two live attempts on
-2026-11-25 (baseline and `allow_login_shell=false`) both failed in seconds
-with the account usage-limit error ("You've hit your usage limit … try
-again at Nov 29th, 2026 1:11 PM"), after configuration acceptance and
-authentication — so authentication survives the disposable-HOME setup up to
-the model-call boundary, and no sentinel result exists yet. The four runs
-execute verbatim from the probe README once the limit resets; Copilot
-evidence is not a substitute, as this behavior is Codex-specific.
+`DUO_PROBE_DROPPED` never enters the constructed environment. Two earlier
+live attempts (baseline and `allow_login_shell=false`) failed in seconds
+with the account usage-limit error, after configuration acceptance and
+authentication — so authentication survives the disposable-HOME setup.
+After the owner reset the limit, all four variants ran live on 2026-11-25.
+Every variant completed its turn (`turn.completed`, authenticated, usage
+recorded) and its command executed with exit 0; the raw JSONL events are
+retained in the probe workspace's `results/` directory. Sentinels observed
+in the command's environment:
 
-**Adoption: none.** Plan §7.2's acceptance requires a prevention claim to
-show the sentinel absent despite the startup file attempting to set it; that
-demonstration does not exist yet, so no control is adopted and nothing in
-Duo's overrides changes. `allow_login_shell=false` is the candidate control;
-whether `shell_environment_policy` alone leaves profile sentinels in place
-(the ordering question) is exactly what the deferred policy-only run
-decides. If a control is adopted later, note that `verify_controls` has no
-metadata surface for it (it is not a feature flag): verification would rest
-on `--strict-config` acceptance plus this probe, and the probe should then
-be promoted into the test/smoke tooling with argv/configuration tests.
+| Variant | `DUO_PROBE_PROFILE` | `DUO_PROBE_PROFILE_TOKEN` | `DUO_PROBE_NONLOGIN` |
+| --- | --- | --- | --- |
+| baseline | present | present | absent |
+| `allow_login_shell=false` | absent | absent | present |
+| policy-only | present | present | absent |
+| combined | absent | absent | present |
 
-**Handed to section 4:** the isolation feasibility gate inherits this
-unresolved boundary in full — under Duo's current invocation, a native
-Codex review's command shell is a login shell whose startup files execute
-after all of Duo's and Codex's environment filtering, so the effective
-command environment can include variables from the user's shell profile
-that neither Duo's allowlist nor `shell_environment_policy` admitted; §4's
-boundary definition must either (a) incorporate a demonstrated control
-(the deferred §7.2 probe result, starting with `allow_login_shell=false`),
-or (b) treat profile-set variables as inside the boundary for native Codex
-on each platform (Linux/bash evidenced as the open question; macOS
-untested). §4 should also account for non-login startup mechanisms the
-§7.2 probe does not cover (`BASH_ENV`, zsh's `ZDOTDIR`/`.zshenv` class) —
-noted here as analysis, not evidence.
+Reading of the result:
+
+- **Baseline confirms reintroduction.** Under Duo's previous invocation,
+  the login profile's variables reach the reviewer's command environment
+  after all of Duo's and Codex's filtering; the absent `NONLOGIN` sentinel
+  attributes this to the login startup file (`.bash_profile`) specifically.
+- **`allow_login_shell=false` demonstrates prevention.** Both profile
+  sentinels stay absent despite the profile attempting to set them, in a
+  completed authenticated turn in which the command still executed — plan
+  §7.2's acceptance criterion is met on Linux/bash. The combined variant
+  matches it.
+- **Policy-only confirms the ordering limit.** With
+  `ignore_default_excludes=false` and exact-name `filters` excluding both
+  profile sentinels by name, the sentinels still appear:
+  `shell_environment_policy` filters the environment Codex passes to the
+  spawned process, and the login profile runs inside that process
+  afterwards and re-sets them. The policy alone cannot prevent profile
+  reintroduction.
+- **Residual: `.bashrc` is still sourced.** In both
+  `allow_login_shell=false` variants the `NONLOGIN` sentinel appears: with
+  login shells disallowed, the shell runs as a non-login interactive shell
+  and reads `.bashrc`. The adopted control closes the login-profile hole;
+  startup-file reintroduction is narrowed to non-login startup files, not
+  eliminated.
+
+**Conclusion and adoption.** Plan §7.2's acceptance is met for
+`allow_login_shell=false` on Linux/bash: the profile sentinels remain
+absent despite the startup file attempting to set them, in a completed
+authenticated turn in which the command executed. Adoption follows as a
+separate commit: Duo passes `allow_login_shell=false` as a per-invocation
+`-c` override under `--strict-config` on every native Codex invocation —
+review calls and preflight probes alike, via `codex_options` — with
+argv/configuration tests. Note that `verify_controls` has no metadata
+surface for this key (it is not a feature flag): verification rests on
+`--strict-config` acceptance (an unrecognized key fails the preflight
+probes) plus this probe, which is promoted into the smoke tooling
+(`scripts/smoke_inspection.py --login-shell`) so the demonstrated behavior
+can be re-checked against future CLI versions.
+
+**Handed to section 4:** the isolation feasibility gate inherits a
+narrowed, evidenced boundary. With `allow_login_shell=false` adopted, a
+native Codex review's command shell no longer runs the login profile
+(demonstrated on Linux/bash; macOS untested), so variables set by login
+startup files stay out of the effective command environment. What remains
+inside the boundary until §4 addresses it: (a) non-login startup files —
+the probe demonstrates `.bashrc` is still sourced by the non-login shell,
+so variables set there can still enter; (b) non-login startup mechanisms
+the probe does not cover (`BASH_ENV`, zsh's `ZDOTDIR`/`.zshenv` class) —
+noted as analysis, not evidence; (c) the macOS platform, where neither
+the reintroduction nor the control has been exercised. §4's boundary
+definition should treat (a)–(c) explicitly rather than assuming the
+login-shell result generalizes.
