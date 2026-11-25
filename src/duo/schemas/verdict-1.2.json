@@ -224,7 +224,7 @@
         "properties": {
           "role": {
             "type": "string",
-            "pattern": "\\S"
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$"
           },
           "decision": {
             "enum": [
@@ -628,10 +628,8 @@
                       "minimum": 1
                     },
                     "by": {
-                      "enum": [
-                        "codex",
-                        "claude"
-                      ]
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_-]{0,31}$"
                     }
                   },
                   "required": [
@@ -877,34 +875,6 @@
           "approved_subject_sha256": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"
-          },
-          "decisions": {
-            "allOf": [
-              {
-                "contains": {
-                  "properties": {
-                    "role": {
-                      "const": "codex"
-                    },
-                    "decision": {
-                      "const": "approve"
-                    }
-                  }
-                }
-              },
-              {
-                "contains": {
-                  "properties": {
-                    "role": {
-                      "const": "claude"
-                    },
-                    "decision": {
-                      "const": "approve"
-                    }
-                  }
-                }
-              }
-            ]
           },
           "findings": {
             "items": {

@@ -227,8 +227,7 @@ class PanelWorkflowTests(Fixture):
         for _ in range(5):
             state = node(state)
         self.assertEqual(state["status"], "running")
-        self.assertEqual(set(state["approved"]), {"codex", "claude"})
-        self.assertNotIn("gptx", state["approved"])
+        self.assertEqual(state["approved"], ["claude", "codex"])
 
     def test_blocked_and_nonretryable_error_are_terminal(self):
         node, state, _ = self.node(
@@ -410,6 +409,12 @@ class PanelVerdictAndGateTests(Fixture):
                 result = self.gate(verdict, "--rule", PANEL_RULE)
                 self.assertEqual(result.returncode, 2, result.stderr)
 
+    def test_gate_non_dict_roster_member_fails_closed_for_all_rules(self):
+        verdict = json.loads((FIXTURES / "valid-panel-agreed.json").read_text())
+        verdict["agreement"]["roster"].append("x")
+        self.assertEqual(self.gate(verdict).returncode, 2)
+        self.assertEqual(self.gate(verdict, "--rule", PANEL_RULE).returncode, 2)
+
 
 class PanelResumeTests(Fixture):
     def run_cli(self, args, replies):
@@ -482,13 +487,8 @@ class PanelResumeTests(Fixture):
         checkpoint = json.loads((run / "checkpoint.json").read_text())
         self.assertEqual(checkpoint["schema_version"], 1)
         self.assertNotIn("reviewers", checkpoint["config"])
-        checkpoint["config"].pop("reviewers", None)
-        checkpoint["integrity"] = hashlib.sha256(canonical(checkpoint)).hexdigest()
-        (run / "checkpoint.json").write_text(json.dumps(checkpoint))
         manifest = json.loads((run / "manifest.json").read_text())
         self.assertNotIn("reviewers", manifest["config"])
-        manifest["config"].pop("reviewers", None)
-        (run / "manifest.json").write_text(json.dumps(manifest))
         code, summary, _, _ = self.run_cli(
             ["--resume", str(run), "--json"],
             [response("approve"), response("approve")],
