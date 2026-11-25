@@ -162,6 +162,13 @@ else:
         }) + '\n')
         with self.assertRaisesRegex(AgentError, 'terminal result event'):
             copilot_reply(stream)
+        stream = self.root / 'false-terminal.jsonl'
+        stream.write_text(json.dumps({
+            'type': 'assistant.message',
+            'data': {'content': json.dumps(ready), 'toolRequests': []},
+        }) + '\n' + json.dumps({'type': 'result', 'exitCode': False}) + '\n')
+        with self.assertRaisesRegex(AgentError, 'terminal result event'):
+            copilot_reply(stream)
 
     def test_copilot_final_answer_is_read_from_events(self):
         # Multi-line plans and progress lines broke the terminal text format.

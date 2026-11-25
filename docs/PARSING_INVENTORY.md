@@ -6,7 +6,7 @@ Scope: inventory with in-cycle remediation notes. This records current parsing d
 
 Method: plan-listed sites plus targeted review of `src/duo` and `scripts/` parser paths, with provenance from fixtures/tests (`tests/fixtures/`, `tests/test_policy.py`, `tests/test_copilot.py`, `tests/test_fixtures.py`, `tests/test_duo.py`, `tests/test_claude_stream.py`).
 
-OS provenance note: many fixture artifacts (especially help/version/features/config probes) do not carry per-file OS metadata in-repo. Where no explicit source exists, this inventory states **OS: not recorded**. Recorded facts: `tests/fixtures/claude-2.1.330/doctor.txt` line 5 is `Platform: linux-x64`; `tests/fixtures/README.md` records `claude-2.1.330` as Linux capture with restricted probes, Codex 0.164.0-0.166.0 event streams as Linux and Codex 0.167.0 as macOS (site 7a). Historical fixtures predate the restricted-native-probe recorder fix **except** `claude-2.1.330`, which was captured after that fix.
+OS provenance note: many fixture artifacts (especially help/version/features/config probes) do not carry per-file OS metadata in-repo. Where no explicit source exists, this inventory states **OS: not recorded**. Recorded facts: `tests/fixtures/claude-2.1.330/doctor.txt` line 5 is `Platform: linux-x64` and `tests/fixtures/claude-2.1.296/doctor.txt` line 5 is `Platform: darwin-arm64` (macOS); `tests/fixtures/README.md` records `claude-2.1.330` as Linux capture with restricted probes, Codex 0.164.0-0.166.0 event streams as Linux and Codex 0.167.0 as macOS (site 7a). Historical fixtures predate the restricted-native-probe recorder fix **except** `claude-2.1.330`, which was captured after that fix.
 
 ## Summary table
 
@@ -40,7 +40,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 - **Location:** `src/duo/policy.py:131-139`; used by native Claude and Copilot source checks (`src/duo/policy.py:175`, `src/duo/copilot.py:76`).
 - **Parsing dependency:** regex over `defaults read` stderr plus required return code `1`.
-- **Provenance:** wording pinned in `tests/test_policy.py:264` and `tests/test_copilot.py:372` (`test_mac_preferences_must_be_absent` in both domains). **OS:** macOS by command semantics.
+- **Provenance:** wording pinned in `tests/test_policy.py:264` and `tests/test_copilot.py:379` (`test_mac_preferences_must_be_absent` in both domains). **OS:** macOS by command semantics.
 - **Fallback:** non-match/non-`1` result refuses with `RunError`.
 - **Classification:** **SAFE REFUSAL**.
 
@@ -48,7 +48,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 - **Location:** `src/duo/policy.py:192-204`.
 - **Parsing dependency:** exact line prefix `Managed settings (remote): ` and allow-list state matching.
-- **Provenance:** `tests/fixtures/claude-2.1.296/doctor.txt`, `tests/fixtures/claude-2.1.330/doctor.txt`, `tests/test_policy.py:242`. **OS:** Linux for `claude-2.1.330` (`doctor.txt` line 5 is `Platform: linux-x64`); not recorded for `claude-2.1.296`.
+- **Provenance:** `tests/fixtures/claude-2.1.296/doctor.txt`, `tests/fixtures/claude-2.1.330/doctor.txt`, `tests/test_policy.py:242`. **OS:** Linux for `claude-2.1.330` (`doctor.txt` line 5 is `Platform: linux-x64`); macOS for `claude-2.1.296` (its `doctor.txt` line 5 is `Platform: darwin-arm64`).
 - **Fallback:** zero/multiple/unknown states refuse.
 - **Classification:** **SAFE REFUSAL**.
 
@@ -58,7 +58,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 - **Location:** parser `src/duo/policy.py:112-129`; call site `src/duo/adapters.py:391-393` using `version_text.strip()[:200]`.
 - **Parsing dependency:** semver scan `\b(\d+)\.(\d+)\.(\d+)\b` across the supplied text.
-- **Provenance:** tested ranges in `src/duo/policy.py:100-104`; fixture `version.txt` probes across codex/claude/copilot. **OS:** Linux for the `claude-2.1.330` probes; not recorded for the rest.
+- **Provenance:** tested ranges in `src/duo/policy.py:100-104`; fixture `version.txt` probes across codex/claude/copilot. **OS:** Linux for the `claude-2.1.330` probes, macOS for `claude-2.1.296`; not recorded for the rest.
 - **Consequence chain (historical):** wrong semver match could return `"tested"` and suppress `untested_cli` recording after preflight acceptance.
 - **In-cycle remediation:** `verify_version` now collects all matched triples and refuses when more than one distinct version is present (`RunError` on ambiguous output). A single distinct triple (including repeats) still behaves as before.
 - **Residuals accepted:** (1) output whose only triple is not the CLI's own version — the installed version absent from the output — is still accepted; the recorded CLIs always print their own version, so this requires a CLI that prints a foreign version and not its own. (2) The native call site truncates to `[:200]`, so a second distinct triple beyond character 200 is never seen; the Copilot path (3b) passes the full output and has no such truncation.
@@ -102,8 +102,8 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 - **Location:** `src/duo/policy.py:281-286`.
 - **Parsing dependency:** required option names are checked by substring presence in `claude --help`.
-- **Provenance:** `tests/fixtures/claude-2.1.296/help.txt`, `tests/fixtures/claude-2.1.330/help.txt`; fixture replay tests. **OS:** Linux for `claude-2.1.330`; not recorded for `claude-2.1.296`.
-- **Consequence chain split:** preflight doctor probe is `probe([claude, *claude_options(settings), "doctor"])` (`policy.py:298`), so removal of any of `--safe-mode`, `--restricted`, `--setting-sources`, `--settings`, `--strict-mcp-config`, `--no-chrome`, `--disable-slash-commands` fails **at preflight** when `doctor` rejects the option (assumes unknown top-level options are rejected) and `probe()` raises `RunError` (`adapters.py:362-364`). Removal of `--tools`, `--allowedTools`, `--output-format`, `--verbose`, or `--json-schema` fails **late** on review argv (`adapters.py:461-466`), then `claude_attempt` classifies failure via `classify_failure` at `adapters.py:580` (not the Codex/Copilot path at `adapters.py:536`).
+- **Provenance:** `tests/fixtures/claude-2.1.296/help.txt`, `tests/fixtures/claude-2.1.330/help.txt`; fixture replay tests. **OS:** Linux for `claude-2.1.330`; macOS for `claude-2.1.296`.
+- **Consequence chain split:** preflight doctor probe is `probe([claude, *claude_options(settings), "doctor"])` (`policy.py:298`), so removal of any of `--safe-mode`, `--restricted`, `--setting-sources`, `--settings`, `--strict-mcp-config`, `--no-chrome`, `--disable-slash-commands` fails **at preflight** when `doctor` rejects the option (assumes unknown top-level options are rejected) and `probe()` raises `RunError` (`adapters.py:362-364`). Removal of `--tools`, `--allowedTools`, `--output-format`, `--verbose`, or `--json-schema` fails **late** on review argv (`adapters.py:461-466`), then `claude_attempt` classifies failure via `classify_failure` at `adapters.py:576` (not the Codex/Copilot path at `adapters.py:536`).
 - **Excluded behavioral risk:** hidden accepted aliases are enforcement changes outside wording standard.
 - **Classification:** **RETRY/COST CHANGE**.
 
@@ -111,7 +111,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 - **Location:** `src/duo/policy.py:289-296`.
 - **Parsing dependency:** regex pairing accepts either explicit `--output-format stream-json` mention or `stream-json` inside the `--output-format` help block.
-- **Provenance:** claude help fixtures and `tests/test_policy.py:228`. **OS:** Linux for `claude-2.1.330`; not recorded for `claude-2.1.296`.
+- **Provenance:** claude help fixtures and `tests/test_policy.py:228`. **OS:** Linux for `claude-2.1.330`; macOS for `claude-2.1.296`.
 - **Consequence chain:** prose example text like `claude -p --output-format stream-json` can satisfy the regex even if the real value is unsupported; runtime later rejects the value or `claude_result` rejects output, producing late failure.
 - **Classification:** **RETRY/COST CHANGE**.
 
@@ -121,7 +121,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 - **Location:** `src/duo/copilot.py:22-25`, `32-34`, `220-228`.
 - **Parsing dependency:** `options()` uses regex token extraction from help and is reused for required `FLAGS`, `--allow-all-urls`, and `--reasoning-effort`.
-- **Provenance:** `tests/fixtures/copilot-1.0.95/help.txt`, `tests/fixtures/copilot-1.0.105/help.txt`, `tests/test_fixtures.py:98`, `tests/test_copilot.py:244`. **OS:** not recorded.
+- **Provenance:** `tests/fixtures/copilot-1.0.95/help.txt`, `tests/fixtures/copilot-1.0.105/help.txt`, `tests/test_fixtures.py:98`, `tests/test_copilot.py:270`. **OS:** not recorded.
 - **Consequence chain:** `--no-auto-update` is passed on every Copilot probe (`copilot.py:208`), so its removal fails at preflight probe. Other stale-prose false matches follow the same late-failure path as 4a/4c when review argv includes removed options (`copilot.py:179-190`, with `--reasoning-effort` at `189-190`) and runtime rejects them.
 - **Fixture gap:** no fixture currently records unknown-option rejection from Copilot CLI.
 - **Step-3 fixture proposal:** add one fixture attempt where Copilot rejects an unknown option (stderr and/or events) to pin this failure classification path.
@@ -157,7 +157,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 - **Location:** `src/duo/adapters.py:163-170`.
 - **Parsing dependency:** structured envelope fields (`subtype`, optional `result` when `is_error`).
-- **Provenance:** claude result fixtures/tests. **OS:** Linux for the `claude-2.1.330` fixtures; not recorded for earlier ones.
+- **Provenance:** claude result fixtures/tests. **OS:** Linux for the `claude-2.1.330` fixtures; macOS for the `claude-2.1.296` envelopes.
 - **Classification:** **RETRY/COST CHANGE**.
 
 ### 7c) `claude_stream_error_text`
@@ -169,7 +169,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 ## 8) `retry_delay` regex and consumption/cap
 
-- **Location:** parser `src/duo/adapters.py:321-335`; consumer `classify_failure` (`315`); cap handling in `src/duo/models.py:90-91` and retry loop `src/duo/workflow.py:213-219`.
+- **Location:** parser `src/duo/adapters.py:318-335`; consumer `classify_failure` (`315`); cap handling in `src/duo/models.py:90-91` and retry loop `src/duo/workflow.py:213-219`.
 - **Parsing dependency:** free-text regex for retry-after phrases and units.
 - **Provenance:** unit tests plus timeout fixtures `tests/fixtures/claude-2.1.330/events-timeout-noweb.jsonl` and `events-timeout-web.jsonl`.
 - **OS:** Linux (`claude-2.1.330` fixture set).
@@ -190,9 +190,9 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 ## 10) `claude_result` terminal-envelope checks
 
-- **Location:** `src/duo/adapters.py:201-241`, consumed at `576-581`.
+- **Location:** `src/duo/adapters.py:201-241`, consumed at `568-581`.
 - **Parsing dependency:** structured stream validation requires exactly one terminal `result`, no trailing events, and typed `subtype`/`is_error` envelope before success acceptance.
-- **Provenance:** claude stream fixtures and `tests/test_claude_stream.py`. **OS:** Linux for the `claude-2.1.330` fixtures; not recorded for earlier ones.
+- **Provenance:** claude stream fixtures and `tests/test_claude_stream.py`. **OS:** Linux for the `claude-2.1.330` fixtures; macOS for the `claude-2.1.296` envelopes.
 - **Classification:** **SAFE REFUSAL**.
 
 ## 11) `scripts/check_drift.py` extraction (tooling)
@@ -257,5 +257,5 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 2. **Landed this cycle (sites 3a/3b):** ambiguous multi-version output now fails closed, and Copilot version gating parses full `--version` output. Follow-up for plan §6 step 2: tighten to CLI-specific anchored formats (`codex-cli X`, `X (Claude Code)`, `GitHub Copilot CLI X`).
 3. **Landed this cycle (site 9, partial):** Copilot replies now require a `result` event with `exitCode == 0` somewhere in the stream, which closes chain (b) only for streams lacking that event; chain (a) remains open. Follow-up for plan §6 step 2: bind answer acceptance to a stricter final-message contract (not just last qualifying message + terminal success).
 4. **Sites 11a/11b (small):** improve drift visibility (report parser confidence/unknown-format and include state-aware feature diffs).
-5. **Retry/cost group (medium):** sites `6`, `7a`, `7b`, `7c`, `8`, `4a`, `4c`, `5a`, `4d`, `5b` should prioritize structured fields before text fragments and separate retry policy from human wording.
+5. **Retry/cost group (medium):** sites `6`, `7a`, `7b`, `7c`, `8`, `4a`, `4c`, `5a`, `4d`, `5b`, plus the `type:"result"`/`exitCode` field-name dependency that site 9's remediation created, should prioritize structured fields before text fragments and separate retry policy from human wording.
 6. **Fixture retention/expansion (small/medium):** add fixture-backed tests for unknown/shifted messages, Copilot field/key drift, and at least one unknown-option rejection fixture (requested in 5a) to pin the late-failure classification path.
