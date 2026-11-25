@@ -54,10 +54,6 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 | Release 0.4.2 (2026-10-21): Codex CLI 0.163.x supported, `certifi` 2026.10.19 (PYSEC-2026-4320) with the newest dependencies, the release tooling, and the codebase-review example; tag `v0.4.2` on `3461739`; the first release built, attested, and drafted by `.github/workflows/release.yml`; downloaded files install-tested on Linux and verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.4.2 |
 | `--allow-web` (experimental, released in 0.4.0; `b98dd5c`): reviewers may search and fetch web pages (Copilot: fetch only). Owner decision (2026-10-14): allowed with native Codex too, with a warning and documentation rather than a refusal | "Web access live verification" below; `docs/SECURITY.md` |
 
-## Parsing dependency inventory (plan §6 step 1, 2026-11-25)
-
-Added `docs/PARSING_INVENTORY.md` with a repository-grounded inventory of parsing dependencies on external CLI wording/shape, including per-site location/patterns, recorded-version provenance, fallback behavior, and risk classification. This is inventory-only; section 6 steps 2-4 are not implemented in this update.
-
 ## Open
 
 1. **Document modes** (released in 0.2.0 as experimental): every mode ran live on
