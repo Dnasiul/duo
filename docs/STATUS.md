@@ -24,6 +24,7 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 | Version policy: only tested CLI ranges; `--allow-untested-cli` runs others as experimental | `src/duo/policy.py` (`TESTED_VERSIONS`) |
 | Sanitized real-CLI fixtures replayed through the parsers | `tests/fixtures/`, `scripts/record_fixtures.py` |
 | Weekly CLI drift check, with an issue opened when action is needed | `.github/workflows/drift.yml`, `scripts/check_drift.py` |
+| Parsing-dependency inventory for plan §6 step 1 ("Dependence on message wording"): runtime and tooling parser sites, fallback behavior, and risk classifications | `docs/PARSING_INVENTORY.md` |
 | SIGTERM/SIGHUP stop the reviewer; lock per repository; accurate failure status; capped retry delays | `src/duo/cli.py`, `storage.py`, `workflow.py` |
 | Output and run-storage limits enforced while reviewers run; 1 MiB input limits; `duo-clean` | `src/duo/adapters.py`, `src/duo/cleanup.py` |
 | Deployment contract, compatibility matrix, restart behavior | README "Supported deployment" |
@@ -52,6 +53,10 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 | Release 0.4.3 (2026-10-28): Copilot CLI 1.0.103+ supported (`--sync-session=off` chosen from the installed CLI's help), Codex CLI 0.164.x, and the codebase-improvement example; tag `v0.4.3` on `16a08c1`; built, attested, and drafted by the release workflow; downloaded files install-tested on Linux and verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.4.3 |
 | Release 0.4.2 (2026-10-21): Codex CLI 0.163.x supported, `certifi` 2026.10.19 (PYSEC-2026-4320) with the newest dependencies, the release tooling, and the codebase-review example; tag `v0.4.2` on `3461739`; the first release built, attested, and drafted by `.github/workflows/release.yml`; downloaded files install-tested on Linux and verified against `SHA256SUMS` | https://github.com/Dnasiul/duo/releases/tag/v0.4.2 |
 | `--allow-web` (experimental, released in 0.4.0; `b98dd5c`): reviewers may search and fetch web pages (Copilot: fetch only). Owner decision (2026-10-14): allowed with native Codex too, with a warning and documentation rather than a refusal | "Web access live verification" below; `docs/SECURITY.md` |
+
+## Parsing dependency inventory (plan §6 step 1, 2026-11-25)
+
+Added `docs/PARSING_INVENTORY.md` with a repository-grounded inventory of parsing dependencies on external CLI wording/shape, including per-site location/patterns, recorded-version provenance, fallback behavior, and risk classification. This is inventory-only; section 6 steps 2-4 are not implemented in this update.
 
 ## Open
 
