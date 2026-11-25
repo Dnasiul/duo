@@ -24,6 +24,11 @@ CODEX_DISABLED = (
 CODEX_OVERRIDES = (
     "mcp_servers={}", "notify=[]", 'approval_policy="never"',
     'sandbox_mode="read-only"', 'web_search="disabled"',
+    # Prevent login-shell profile reintroduction (plan §7.2) on every native call.
+    # No metadata surface: rely on review --strict-config acceptance (unknown
+    # keys fail closed) and the smoke check; preflight uses these overrides
+    # without --strict-config.
+    "allow_login_shell=false",
     *(f"features.{name}=false" for name in CODEX_DISABLED),
 )
 # Claude Code tools: read-only inspection, plus web search and fetch with --allow-web.

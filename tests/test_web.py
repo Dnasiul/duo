@@ -40,6 +40,8 @@ class WebTests(Fixture):
 
     def test_default_keeps_web_tools_off(self):
         codex, claude, via = self.commands(False)
+        self.assertIn(('-c', 'allow_login_shell=false'), zip(codex, codex[1:]))
+        self.assertNotIn('allow_login_shell=false', via)
         self.assertIn('web_search="disabled"', codex)
         self.assertEqual(claude[claude.index('--tools') + 1], 'Read,Glob,Grep')
         self.assertEqual(claude[claude.index('--allowedTools') + 1], 'Read,Glob,Grep')
@@ -51,6 +53,8 @@ class WebTests(Fixture):
 
     def test_allow_web_adds_only_web_tools(self):
         codex, claude, via = self.commands(True)
+        self.assertIn(('-c', 'allow_login_shell=false'), zip(codex, codex[1:]))
+        self.assertNotIn('allow_login_shell=false', via)
         self.assertIn('web_search="live"', codex)
         self.assertNotIn('web_search="disabled"', codex)
         # Everything else in the inspection policy is unchanged.
