@@ -6,8 +6,9 @@ import json
 from pathlib import Path, PurePosixPath
 import re
 
-from .models import (AGENTS, DECISIONS, DOCUMENT_MODES, FINDING_STATUSES, SEVERITIES,
-                     AgentError, RunError, normalize, validate_location)
+from .models import (AGENTS, CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DECISIONS,
+                     DOCUMENT_MODES, FINDING_STATUSES, SEVERITIES, AgentError, RunError,
+                     normalize, validate_location)
 from .report import _json, _read
 from .storage import atomic_write, content_hash
 
@@ -162,11 +163,22 @@ def _validate_panel_verdict(value: dict) -> dict:
     for item in agreement["roster"]:
         check_object(item, {"role", "kind", "backend", "model", "effort", "cli_version"}, "roster item")
         _string(item["role"], "roster role", nonempty=True)
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", item["role"]):
+            raise ValueError(f"Invalid reviewer id: {item['role']!r}")
         _choice(item["kind"], AGENTS, "roster kind")
+        if item["role"] == "codex" and item["kind"] != "codex":
+            raise ValueError("Reviewer id codex must use kind codex")
+        if item["role"] == "claude" and item["kind"] != "claude":
+            raise ValueError("Reviewer id claude must use kind claude")
         _choice(item["backend"], ("native", "copilot"), "backend")
         _string(item["model"], "model", nonempty=True)
         if item["effort"] is not None:
-            _string(item["effort"], "effort")
+            _string(item["effort"], "effort", nonempty=True)
+            choices = (COPILOT_EFFORTS if item["backend"] == "copilot" else
+                       CODEX_EFFORTS if item["kind"] == "codex" else CLAUDE_EFFORTS)
+            if item["effort"] not in choices:
+                raise ValueError(
+                    f"reviewer effort for {item['role']} must be one of: {', '.join(choices)}")
         if item["cli_version"] is not None:
             _string(item["cli_version"], "cli_version")
         roles.append(item["role"])
@@ -439,7 +451,9 @@ def build_verdict(run_dir: Path) -> dict:
             not isinstance(approved, list) or any(not isinstance(role, str) for role in approved)
             or set(approved) != required or not isinstance(history, list) or not history
             or not isinstance(history[-1], dict) or history[-1].get("plan_hash") != final_hash):
-        raise RunError("Agreed records lack the full required approvals on the final subject")
+        raise RunError("Agreed records lack the full required approvals on the final subject"
+                       if panel else
+                       "Agreed records lack both approvals on the final subject")
     mode = config.get("mode", "plan")
     document = manifest.get("document") or config.get("output") or mode + ".md"
     path = Path(document)

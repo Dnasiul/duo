@@ -148,7 +148,8 @@ def render_report(run_dir: Path) -> str:
         raise RunError("Invalid versions.json: untested must be a list or object")
     reviewer_specs = {}
     reviewers = config.get("reviewers")
-    if isinstance(reviewers, list) and reviewers:
+    panel_run = isinstance(reviewers, list) and bool(reviewers)
+    if panel_run:
         for item in reviewers:
             if not isinstance(item, dict) or not isinstance(item.get("id"), str):
                 raise RunError("Invalid manifest.json: reviewers must contain objects with id")
@@ -220,10 +221,10 @@ def render_report(run_dir: Path) -> str:
     parts.append(_fields([("Final state", status), ("Approved agents", ", ".join(map(str, state["approved"])))]))
     if status == "agreed":
         if all(approvals.get(agent) == final_hash for agent in roster_ids):
-            if len(roster_ids) == 2 and roster_ids == ["codex", "claude"]:
-                parts.append("<p>Both reviewers approved the same unchanged document.</p>")
-            else:
+            if panel_run:
                 parts.append(f"<p>All {len(roster_ids)} reviewers approved the same unchanged document.</p>")
+            else:
+                parts.append("<p>Both reviewers approved the same unchanged document.</p>")
             parts.append("<p>Shared approval plan_hash: <code>" + _text(final_hash) + "</code></p>")
         else:
             parts.append("<p>The record reports agreement, but the shared approval hash cannot be confirmed from its history.</p>")

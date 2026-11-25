@@ -21,6 +21,8 @@
 
 - `--start` now validates against the active roster (default pair or explicit
   panel roster) instead of argparse choices.
+- Missing `--codex-model`/`--claude-model` and invalid `--start` values are now
+  run errors (exit 1) instead of argparse usage errors (exit 2).
 - `examples/check_verdict.py` now validates panel verdicts with
   `--rule unanimous-roster-approve-same-subject` and optional
   `--roster-sha256` pinning while preserving pair fail-closed behavior.

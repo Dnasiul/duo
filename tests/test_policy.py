@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from duo.adapters import CLIAdapter, classify_failure
-from duo.models import Config, RunError
+from duo.models import Config, ReviewerSpec, RunError
 from duo.policy import (CLAUDE_SETTINGS, CODEX_DISABLED, check_claude_managed_files,
                         claude_options, codex_options, verify_claude_remote,
                         verify_controls, verify_version)
@@ -256,6 +256,41 @@ class PolicyTests(unittest.TestCase):
                 for flag in claude_options(adapter.settings_path):
                     self.assertIn(flag, argv)
                 self.assertEqual(argv[argv.index('--tools') + 1], 'Read,Glob,Grep')
+
+    def test_panel_preflight_records_member_reviewers_and_diversity(self):
+        config = Config(
+            self.repo, '', '', start='codex', skip_git_repo_check=True,
+            reviewers=(
+                ReviewerSpec('codex', 'codex', 'native', 'gpt-5', 'high'),
+                ReviewerSpec('claude', 'claude', 'native', 'claude-sonnet-5.5', 'max'),
+                ReviewerSpec('gptx', 'codex', 'copilot', 'gpt-5.6', 'medium'),
+            ))
+
+        def run(argv, **kwargs):
+            if '--version' in argv:
+                return subprocess.CompletedProcess(
+                    argv, 0, 'codex-cli 0.162.1' if argv[0] == 'codex' else '2.1.296 (Claude Code)', '')
+            return subprocess.CompletedProcess(argv, 0, self.probe(argv), '')
+
+        adapter = CLIAdapter(config, self.store)
+        with patch('duo.adapters.shutil.which', side_effect=lambda name: name), \
+                patch('duo.adapters.subprocess.run', side_effect=run), \
+                patch('duo.adapters.check_claude_managed_files'), \
+                patch('duo.policy.check_claude_managed_files'), \
+                patch('duo.adapters.copilot.require_auth'), \
+                patch('duo.adapters.copilot.preflight', return_value=('GitHub Copilot CLI 1.0.95.', {
+                    'session_flags': [], 'version_status': 'tested',
+                })), \
+                patch('duo.adapters.copilot.environment', return_value={'PATH': '/usr/bin'}), \
+                patch('duo.adapters.copilot.command', return_value=['copilot']):
+            adapter.preflight()
+        policy = json.loads((self.store.path / 'reviewer-policy.json').read_text())
+        self.assertEqual(set(policy['reviewers']), {'codex', 'claude', 'gptx'})
+        self.assertEqual(policy['reviewers']['codex']['kind'], 'codex')
+        self.assertEqual(policy['reviewers']['claude']['kind'], 'claude')
+        self.assertEqual(policy['reviewers']['gptx']['backend'], 'copilot')
+        self.assertIn('members', policy['diversity'])
+        self.assertIn('pairs', policy['diversity'])
 
     def test_setup_failure_prevents_any_review_invocation(self):
         adapter = CLIAdapter(self.config, self.store)

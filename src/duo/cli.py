@@ -13,7 +13,7 @@ import sys
 import threading
 
 from .adapters import CLIAdapter
-from .checkpoints import Journal, load as load_checkpoint, read_record, remaining_seconds
+from .checkpoints import Journal, config_payload, load as load_checkpoint, read_record, remaining_seconds
 from .diversity import classify_roster
 from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLAUDE_MAX_TURNS,
                      DOCUMENT_MODES, DEFAULT_MAX_PROMPT_BYTES, MAX_TEXT_BYTES, Config, ReviewerSpec, RunError,
@@ -377,7 +377,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             holder.append(store)
             state = initial_state(task, criteria, plan.initial, config)
             manifest = {
-                "started_at": timestamp(), "config": {**asdict(config), "repo": str(repo)},
+                "started_at": timestamp(), "config": config_payload(config),
                 "task": task, "criteria": criteria, "document": str(document),
                 **({"answer": asdict(clarification)} if clarification is not None else {}),
             }

@@ -203,11 +203,28 @@ def check(value, args):
     roster = agreement.get("roster")
     require(isinstance(roster, list), "malformed reviewer roster")
     roster = roster if isinstance(roster, list) else []
-    roster_ids = [item.get("role") for item in roster if isinstance(item, dict)]
+    roster_ids = []
+    malformed_roles = False
+    for item in roster:
+        if not isinstance(item, dict):
+            malformed_roles = True
+            continue
+        role = item.get("role")
+        if isinstance(role, str):
+            roster_ids.append(role)
+        else:
+            malformed_roles = True
     panel = args.rule == PANEL_RULE
     if panel:
-        require(len(roster) >= 2, "malformed reviewer roster")
-        require(len(set(roster_ids)) == len(roster_ids), "malformed reviewer roster")
+        require(len(roster) >= 2 and not malformed_roles, "malformed reviewer roster")
+        seen = set()
+        duplicate_roles = False
+        for role in roster_ids:
+            if role in seen:
+                duplicate_roles = True
+                break
+            seen.add(role)
+        require(not duplicate_roles and len(roster_ids) == len(roster), "malformed reviewer roster")
         for item in roster:
             valid = (isinstance(item, dict) and isinstance(item.get("role"), str)
                      and item["role"].strip()
@@ -232,13 +249,27 @@ def check(value, args):
         else:
             errors.append("missing roster_sha256")
     else:
-        valid_roster = (len(roster) == 2
-                        and all(isinstance(r, dict) and r.get("role") in ("codex", "claude")
-                                and r.get("backend") in ("native", "copilot")
-                                and isinstance(r.get("model"), str) and r["model"].strip()
-                                and (r.get("cli_version") is None or isinstance(r["cli_version"], str))
-                                for r in roster)
-                        and {r["role"] for r in roster} == {"codex", "claude"})
+        valid_roster = len(roster) == 2
+        if valid_roster:
+            roles = set()
+            for item in roster:
+                if not isinstance(item, dict):
+                    valid_roster = False
+                    break
+                role = item.get("role")
+                if role not in ("codex", "claude"):
+                    valid_roster = False
+                    break
+                if role in roles:
+                    valid_roster = False
+                    break
+                roles.add(role)
+                if (item.get("backend") not in ("native", "copilot")
+                        or not isinstance(item.get("model"), str) or not item["model"].strip()
+                        or (item.get("cli_version") is not None and not isinstance(item["cli_version"], str))):
+                    valid_roster = False
+                    break
+            valid_roster = valid_roster and roles == {"codex", "claude"}
         require(valid_roster, "malformed reviewer roster")
         if args.roster_sha256:
             errors.append("--roster-sha256 requires --rule unanimous-roster-approve-same-subject")
@@ -357,7 +388,7 @@ def main(argv=None):
     try:
         value = json.loads(args.verdict.read_text(encoding="utf-8"))
         errors = check(value, args)
-    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
+    except (OSError, TypeError, UnicodeError, ValueError, RecursionError) as exc:
         errors = [f"cannot read verdict: {exc}"]
     if errors:
         for error in errors:

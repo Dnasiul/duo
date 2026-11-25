@@ -21,8 +21,10 @@ from duo.checkpoints import canonical
 from duo.cli import main, parse_reviewer
 from duo.diversity import classify_roster
 from duo.models import AgentError, Config, ReviewerSpec
-from duo.storage import content_hash
+from duo.prompts import build_prompt
+from duo.storage import UserClarification, content_hash
 from duo.verdicts import PANEL_RULE, validate_verdict
+from duo.workflow import initial_state
 
 FIXTURES = Path(__file__).parent / "fixtures" / "verdicts"
 GATE = Path(__file__).resolve().parents[1] / "examples" / "check_verdict.py"
@@ -94,18 +96,34 @@ class PanelConfigAndDiversityTests(Fixture):
             ReviewerSpec("a", "claude", "native", "claude-sonnet-5.5"),
             ReviewerSpec("b", "claude", "native", "claude-sonnet-5-5"),
             ReviewerSpec("c", "codex", "native", "gpt-5"),
+            ReviewerSpec("e", "claude", "native", "claude-opus-5-5"),
             ReviewerSpec("d", "codex", "native", "other-model"),
         )
         diversity = classify_roster(roster)
         pairs = {(item["a"], item["b"]): item["relation"] for item in diversity["pairs"]}
         self.assertEqual(pairs[("a", "b")], "identical")
         self.assertEqual(pairs[("a", "c")], "different-family")
+        self.assertEqual(pairs[("a", "e")], "same-family")
         self.assertEqual(pairs[("a", "d")], "unknown")
         self.assertIn("d", diversity["unknown"])
         warnings = "\n".join(diversity["warnings"])
         self.assertIn("same model", warnings)
         self.assertIn("Same-family concentration", warnings)
         self.assertIn("family for d is unknown", warnings)
+
+    def test_panel_prompt_wording_and_default_prompt_remain_distinct(self):
+        state = initial_state("Task", "", "Old\n", self.config)
+        clarification = UserClarification(
+            source_run="run", source_run_id="run", question="Question?",
+            blocked_document_sha256=content_hash("Old\n"),
+            current_document_sha256=content_hash("Old\n"), answer="Answer.")
+        pair_prompt = build_prompt(state, user_clarification=clarification)
+        panel_prompt = build_prompt(state, user_clarification=clarification, panel=True)
+        self.assertIn("other reviewer's findings", pair_prompt)
+        self.assertNotIn("other reviewers' findings", pair_prompt)
+        self.assertIn("both reviewers must approve the current document independently.", pair_prompt)
+        self.assertIn("other reviewers' findings", panel_prompt)
+        self.assertIn("every reviewer must approve the current document independently.", panel_prompt)
 
     def test_default_pair_same_model_warns(self):
         config = Config(self.repo, "gpt-5", "gpt-5", skip_git_repo_check=True)
@@ -166,6 +184,15 @@ class PanelCLITests(Fixture):
 
 
 class PanelWorkflowTests(Fixture):
+    def test_round_robin_order_extends_beyond_one_roster_cycle(self):
+        node, state, adapter = self.node(
+            [response("revise", "Draft\n"), response("approve"), response("approve"), response("approve")],
+            plan="Old\n", reviewers=panel_roster(), start="codex", max_turns=4)
+        result = self.run_turns(node, state)
+        self.assertEqual(result["status"], "agreed")
+        self.assertEqual(result["turns"], 4)
+        self.assertEqual([call.args[0] for call in adapter.call_args_list], ["codex", "claude", "gptx", "codex"])
+
     def test_three_member_unanimity_and_round_robin(self):
         node, state, adapter = self.node(
             [response("approve"), response("approve"), response("approve")],
@@ -191,6 +218,17 @@ class PanelWorkflowTests(Fixture):
         state = node(state)
         self.assertEqual(state["approved"], [])
         self.assertEqual(state["next_agent"], "codex")
+
+    def test_repeated_member_approvals_do_not_double_count_for_unanimity(self):
+        node, state, _ = self.node(
+            [response("approve"), response("approve"), response("revise", "New\n"),
+             response("approve"), response("approve")],
+            plan="Old\n", reviewers=panel_roster(), start="codex", max_turns=6)
+        for _ in range(5):
+            state = node(state)
+        self.assertEqual(state["status"], "running")
+        self.assertEqual(set(state["approved"]), {"codex", "claude"})
+        self.assertNotIn("gptx", state["approved"])
 
     def test_blocked_and_nonretryable_error_are_terminal(self):
         node, state, _ = self.node(
@@ -299,6 +337,26 @@ class PanelVerdictAndGateTests(Fixture):
         with self.assertRaisesRegex(ValueError, "every roster approval"):
             validate_verdict(missing)
 
+    def test_panel_verdict_enforces_reviewer_id_kind_and_effort_contract(self):
+        valid = json.loads((FIXTURES / "valid-panel-agreed.json").read_text())
+        bad_id = json.loads((FIXTURES / "valid-panel-agreed.json").read_text())
+        bad_id["agreement"]["roster"][0]["role"] = "BadID"
+        with self.assertRaisesRegex(ValueError, "Invalid reviewer id"):
+            validate_verdict(bad_id)
+        bad_kind = json.loads((FIXTURES / "valid-panel-agreed.json").read_text())
+        bad_kind["agreement"]["roster"][0]["kind"] = "claude"
+        with self.assertRaisesRegex(ValueError, "id codex must use kind codex"):
+            validate_verdict(bad_kind)
+        bad_effort = json.loads((FIXTURES / "valid-panel-agreed.json").read_text())
+        bad_effort["agreement"]["roster"][0]["effort"] = "not-a-choice"
+        with self.assertRaisesRegex(ValueError, "reviewer effort"):
+            validate_verdict(bad_effort)
+        empty_effort = json.loads((FIXTURES / "valid-panel-agreed.json").read_text())
+        empty_effort["agreement"]["roster"][0]["effort"] = " "
+        with self.assertRaisesRegex(ValueError, "effort must be a nonempty string"):
+            validate_verdict(empty_effort)
+        self.assertEqual(validate_verdict(valid)["schema_version"], "1.2")
+
     def test_cli_panel_run_emits_schema_1_2(self):
         (self.repo / "plan.md").write_text("Existing\n")
         args = [
@@ -343,6 +401,14 @@ class PanelVerdictAndGateTests(Fixture):
         pair = json.loads((FIXTURES / "valid-agreed.json").read_text())
         result = self.gate(pair, "--rule", PANEL_RULE)
         self.assertEqual(result.returncode, 2)
+
+    def test_gate_panel_rule_rejects_panel_invalid_fixtures(self):
+        for name in ("invalid-panel-order.json", "invalid-panel-missing-approval.json",
+                     "invalid-panel-roster-hash.json"):
+            verdict = json.loads((FIXTURES / name).read_text())
+            with self.subTest(name=name):
+                result = self.gate(verdict, "--rule", PANEL_RULE)
+                self.assertEqual(result.returncode, 2, result.stderr)
 
 
 class PanelResumeTests(Fixture):
@@ -415,14 +481,75 @@ class PanelResumeTests(Fixture):
         run = Path(summary["run_dir"])
         checkpoint = json.loads((run / "checkpoint.json").read_text())
         self.assertEqual(checkpoint["schema_version"], 1)
-        del checkpoint["config"]["reviewers"]
+        self.assertNotIn("reviewers", checkpoint["config"])
+        checkpoint["config"].pop("reviewers", None)
         checkpoint["integrity"] = hashlib.sha256(canonical(checkpoint)).hexdigest()
         (run / "checkpoint.json").write_text(json.dumps(checkpoint))
         manifest = json.loads((run / "manifest.json").read_text())
-        del manifest["config"]["reviewers"]
+        self.assertNotIn("reviewers", manifest["config"])
+        manifest["config"].pop("reviewers", None)
         (run / "manifest.json").write_text(json.dumps(manifest))
         code, summary, _, _ = self.run_cli(
             ["--resume", str(run), "--json"],
             [response("approve"), response("approve")],
         )
         self.assertEqual(code, 0, summary)
+
+    def test_checkpoint_schema_refuses_mismatched_roster_shapes_and_policy_hash(self):
+        pair_code, pair_summary, _, _ = self.run_cli([
+            "--repo", str(self.repo), "--state-dir", str(self.audit), "--task", "Task", "--json",
+            "--codex-model", "gpt-5", "--claude-model", "claude-sonnet-5.5",
+        ], [response("approve"), KeyboardInterrupt()])
+        self.assertEqual(pair_code, 130, pair_summary)
+        pair_run = Path(pair_summary["run_dir"])
+        pair_checkpoint = json.loads((pair_run / "checkpoint.json").read_text())
+        pair_checkpoint["config"]["reviewers"] = [
+            {"id": "codex", "kind": "codex", "backend": "native", "model": "gpt-5", "effort": None},
+            {"id": "claude", "kind": "claude", "backend": "native", "model": "claude-sonnet-5.5", "effort": None},
+        ]
+        pair_checkpoint["integrity"] = hashlib.sha256(canonical(pair_checkpoint)).hexdigest()
+        (pair_run / "checkpoint.json").write_text(json.dumps(pair_checkpoint))
+        output = io.StringIO()
+        with patch("duo.cli.CLIAdapter") as factory, redirect_stdout(output), redirect_stderr(io.StringIO()):
+            code = main(["--resume", str(pair_run), "--json"])
+        self.assertEqual(code, 1)
+        self.assertIn("default reviewer pair", json.loads(output.getvalue())["message"])
+        factory.assert_not_called()
+
+        panel_args = [
+            "--repo", str(self.repo), "--state-dir", str(self.audit), "--task", "Task", "--json",
+            "--reviewer", "codex:codex:native:gpt-5:high",
+            "--reviewer", "claude:claude:native:claude-sonnet-5.5:max",
+            "--reviewer", "gptx:codex:copilot:gpt-5.6:medium",
+        ]
+        panel_code, panel_summary, _, _ = self.run_cli(panel_args, [response("approve"), KeyboardInterrupt()])
+        self.assertEqual(panel_code, 130, panel_summary)
+        panel_run = Path(panel_summary["run_dir"])
+        panel_checkpoint = json.loads((panel_run / "checkpoint.json").read_text())
+        panel_checkpoint["config"]["reviewers"] = []
+        panel_checkpoint["config"]["codex_model"] = "gpt-5"
+        panel_checkpoint["config"]["claude_model"] = "claude-sonnet-5.5"
+        panel_checkpoint["integrity"] = hashlib.sha256(canonical(panel_checkpoint)).hexdigest()
+        (panel_run / "checkpoint.json").write_text(json.dumps(panel_checkpoint))
+        output = io.StringIO()
+        with patch("duo.cli.CLIAdapter") as factory, redirect_stdout(output), redirect_stderr(io.StringIO()):
+            code = main(["--resume", str(panel_run), "--json"])
+        self.assertEqual(code, 1)
+        self.assertIn("non-empty reviewer roster", json.loads(output.getvalue())["message"])
+        factory.assert_not_called()
+
+        panel_checkpoint = json.loads((panel_run / "checkpoint.json").read_text())
+        panel_checkpoint["config"]["reviewers"] = [
+            {"id": "codex", "kind": "codex", "backend": "native", "model": "gpt-5", "effort": "high"},
+            {"id": "claude", "kind": "claude", "backend": "native", "model": "claude-sonnet-5.5", "effort": "max"},
+            {"id": "gptx", "kind": "codex", "backend": "copilot", "model": "gpt-5.6", "effort": "medium"},
+        ]
+        panel_checkpoint["policy_sha256"] = "0" * 64
+        panel_checkpoint["integrity"] = hashlib.sha256(canonical(panel_checkpoint)).hexdigest()
+        (panel_run / "checkpoint.json").write_text(json.dumps(panel_checkpoint))
+        output = io.StringIO()
+        with patch("duo.cli.CLIAdapter") as factory, redirect_stdout(output), redirect_stderr(io.StringIO()):
+            code = main(["--resume", str(panel_run), "--json"])
+        self.assertEqual(code, 1)
+        self.assertIn("policy hash mismatch", json.loads(output.getvalue())["message"].lower())
+        factory.assert_not_called()
