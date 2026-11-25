@@ -69,6 +69,11 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(allow=allow), self.assertRaisesRegex(RunError, 'Cannot parse'):
                 verify_version('claude', 'unrecognized', allow)
 
+    def test_codex_options_disable_login_shell_in_both_web_modes(self):
+        for options in (codex_options(), codex_options(allow_web=True)):
+            with self.subTest(options=options):
+                self.assertIn(('-c', 'allow_login_shell=false'), zip(options, options[1:]))
+
     def test_untested_versions_are_recorded_when_allowed(self):
         def run(argv, **kwargs):
             if '--version' in argv:
@@ -250,6 +255,7 @@ class PolicyTests(unittest.TestCase):
                 self.assertIn('--ignore-rules', argv)
                 self.assertIn('--no-daemon', argv)
                 self.assertIn('notify=[]', argv)
+                self.assertIn(('-c', 'allow_login_shell=false'), zip(argv, argv[1:]))
                 for flag in codex_options():
                     self.assertIn(flag, argv)
             else:
