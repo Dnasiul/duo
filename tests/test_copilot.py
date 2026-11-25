@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from test_duo import Fixture, response
 from duo import copilot
-from duo.adapters import CLIAdapter
+from duo.adapters import CLIAdapter, copilot_reply
 from duo.cli import main
 from duo.models import AgentError, Config, RunError
 
@@ -153,8 +153,16 @@ else:
                      f"reply({ready!r}); sys.exit(1)"):
             binary = self.fake(body)
             adapter = CLIAdapter(self.copilot_config(binary), self.store)
+            adapter.policy_verified = True
             with self.subTest(body=body), self.assertRaises(AgentError):
                 adapter('codex', 'Review', 5)
+        stream = self.root / 'missing-terminal.jsonl'
+        stream.write_text(json.dumps({
+            'type': 'assistant.message',
+            'data': {'content': json.dumps(ready), 'toolRequests': []},
+        }) + '\n')
+        with self.assertRaisesRegex(AgentError, 'terminal result event'):
+            copilot_reply(stream)
 
     def test_copilot_final_answer_is_read_from_events(self):
         # Multi-line plans and progress lines broke the terminal text format.
@@ -166,6 +174,18 @@ else:
             adapter = CLIAdapter(self.copilot_config(binary), self.store)
             with self.subTest(text=text):
                 self.assertEqual(adapter('codex', 'Review', 5)['plan'], plan)
+
+    def test_copilot_accepts_stream_with_final_message_and_terminal_result(self):
+        reply = {'decision': 'approve', 'plan': '', 'reason': 'Ready',
+                 'findings': [], 'finding_updates': []}
+        stream = self.root / 'terminal-success.jsonl'
+        stream.write_text(
+            json.dumps({
+                'type': 'assistant.message',
+                'data': {'content': json.dumps(reply), 'phase': 'final_answer', 'toolRequests': []},
+            }) + '\n' +
+            json.dumps({'type': 'result', 'exitCode': 0}) + '\n')
+        self.assertEqual(copilot_reply(stream), reply)
 
     def test_model_text_on_stdout_never_marks_failure_permanent(self):
         binary = self.fake("print('The plan handles unauthorized access with no authentication bypass')\n"
