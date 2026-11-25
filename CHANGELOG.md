@@ -9,11 +9,13 @@
   validates the full `--version` output while preserving the first line as the
   recorded version string.
 - Refuse ambiguous Codex feature listings during control verification: duplicate
-  feature rows now fail closed, and feature rows with unknown middle-column
-  layout are rejected instead of being accepted by first/last-token parsing.
-- Refuse Copilot reply streams that do not end in a successful terminal result:
-  `copilot_reply` now requires at least one `{"type":"result","exitCode":0}`
-  event before accepting any assistant JSON reply content.
+  feature rows now fail closed, rows whose state token is not exactly `true` or
+  `false` are rejected, and feature rows with unknown middle-column layout are
+  rejected instead of being accepted by first/last-token parsing.
+- Refuse Copilot reply streams that do not contain a successful terminal
+  result: `copilot_reply` now requires at least one
+  `{"type":"result","exitCode":0}` event before accepting any assistant JSON
+  reply content.
 
 ## 0.8.0 (2026-11-25)
 
