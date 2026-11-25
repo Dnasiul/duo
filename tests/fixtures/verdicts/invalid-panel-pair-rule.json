@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.2",
+  "run_id": "run-panel",
+  "started_at": "2026-11-23T00:00:00+00:00",
+  "mode": "plan",
+  "completion": "agreed",
+  "complete": true,
+  "subject": {
+    "kind": "document",
+    "path": "plan.md",
+    "sha256": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81",
+    "bytes": 4
+  },
+  "fixed_inputs": {
+    "task_sha256": "fcfd2c90c99943783f109b5df9e3af2697dc12a6102030512f15e79b6db4383e",
+    "criteria_sha256": "93b9a9f3e634b7aa80af3d0331e0b7e50c505e6a27125979321781a3d754295f",
+    "context": []
+  },
+  "agreement": {
+    "rule": "both-reviewers-approve-same-subject",
+    "roster": [
+      {
+        "role": "codex",
+        "kind": "codex",
+        "backend": "native",
+        "model": "gpt-5",
+        "effort": "high",
+        "cli_version": null
+      },
+      {
+        "role": "claude",
+        "kind": "claude",
+        "backend": "native",
+        "model": "claude-sonnet-5.5",
+        "effort": "max",
+        "cli_version": null
+      },
+      {
+        "role": "copilot-gpt",
+        "kind": "codex",
+        "backend": "copilot",
+        "model": "gpt-5.6",
+        "effort": "medium",
+        "cli_version": null
+      }
+    ],
+    "roster_sha256": "eabdcb8469652e7810edb28f22c5e0c81be7de7d6247f9fcaf22bdef94eba0e2",
+    "policy_sha256": "2c4e037a9112070ccdc24b05c29877cbb98865b3979f45feeed16c5dadbde2a5"
+  },
+  "decisions": [
+    {
+      "role": "codex",
+      "decision": "approve",
+      "subject_sha256": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81",
+      "turn": 1,
+      "timestamp": "2026-11-23T00:00:00+00:00"
+    },
+    {
+      "role": "claude",
+      "decision": "approve",
+      "subject_sha256": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81",
+      "turn": 2,
+      "timestamp": "2026-11-23T00:00:01+00:00"
+    },
+    {
+      "role": "copilot-gpt",
+      "decision": "approve",
+      "subject_sha256": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81",
+      "turn": 3,
+      "timestamp": "2026-11-23T00:00:02+00:00"
+    }
+  ],
+  "approved_subject_sha256": "4e82898f7e3ddcf8d4782cee34d28cb9ce960afa34d1494e333a42a2f206fa81",
+  "findings": [],
+  "summary": {
+    "turns": 3,
+    "attempts": 3,
+    "open_findings": 0,
+    "open_by_severity": {
+      "info": 0,
+      "low": 0,
+      "medium": 0,
+      "high": 0,
+      "critical": 0
+    }
+  },
+  "audit": {
+    "manifest": "manifest.json",
+    "result": "result.json",
+    "state": "state.json",
+    "events": "events.jsonl",
+    "report": "report.html",
+    "verdict": "verdict.json"
+  }
+}

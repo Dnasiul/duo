@@ -223,11 +223,12 @@ else:
 
     def test_workspace_mcp_servers_explicitly_disabled(self):
         (self.repo / '.mcp.json').write_text(json.dumps({'mcpServers': {'sample': {'command': 'bad'}}}))
-        argv = copilot.command(self.copilot_config('copilot'), 'codex', self.store.attempt_dir(), [])
+        config = self.copilot_config('copilot')
+        argv = copilot.command(config, config.spec('codex'), self.store.attempt_dir(), [])
         self.assertIn('--disable-mcp-server=sample', argv)
         (self.repo / '.mcp.json').write_text('invalid')
         with self.assertRaises(RunError):
-            copilot.command(self.copilot_config('copilot'), 'codex', self.store.attempt_dir(), [])
+            copilot.command(config, config.spec('codex'), self.store.attempt_dir(), [])
 
     def test_session_flags_follow_the_installed_copilot(self):
         legacy = '--no-remote\n    Disable remote control\n--no-remote-export\n    Disable export'

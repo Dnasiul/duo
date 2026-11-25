@@ -33,8 +33,9 @@ class WebTests(Fixture):
         config = replace(self.config, allow_web=allow_web)
         adapter = CLIAdapter(config, self.store)
         native = {agent: adapter.command(agent, self.store.attempt_dir()) for agent in ('codex', 'claude')}
-        via = copilot.command(replace(config, codex_backend='copilot', copilot_bin='copilot'),
-                              'codex', self.store.attempt_dir(), ['--sync-session=off'])
+        copilot_config = replace(config, codex_backend='copilot', copilot_bin='copilot')
+        via = copilot.command(copilot_config, copilot_config.spec('codex'),
+                              self.store.attempt_dir(), ['--sync-session=off'])
         return native['codex'], native['claude'], via
 
     def test_default_keeps_web_tools_off(self):

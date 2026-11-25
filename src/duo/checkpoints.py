@@ -15,19 +15,22 @@ import os
 from pathlib import Path
 
 from . import __version__
-from .models import AGENTS, DECISIONS, MAX_CONTEXT_BYTES, MAX_TEXT_BYTES, Config, RunError, State, normalize
+from .models import DECISIONS, MAX_CONTEXT_BYTES, MAX_TEXT_BYTES, Config, ReviewerSpec, RunError, State, normalize
 from .storage import (ContextFile, RunStore, content_hash, durable_write, fsync_directory,
                       read_input, timestamp, UserClarification)
-from .verdicts import (_array, _choice, _hash, _integer, _object, _path, _string,
+from .verdicts import (PANEL_RULE, _array, _choice, _hash, _integer, _object, _path, _string,
+                       policy_sha256, roster_sha256,
                        validate_findings)
 
 CHECKPOINT_SCHEMA_VERSION = 1
+PANEL_CHECKPOINT_SCHEMA_VERSION = 2
 MAX_CHECKPOINT_BYTES = 16 * 1024 * 1024
 STATUSES = ('running', 'agreed', 'blocked', 'error', 'limit_reached')
 KEYS = set('schema_version duo_version run_id segment sequence created_at updated_at deadline '
            'max_seconds status repo document output config inputs state document_sha256 '
            'attempts_current_turn in_flight last_attempt pending approval_epoch segments integrity '
            'document_bytes_sha256'.split())
+PANEL_KEYS = KEYS | {'roster_sha256', 'policy_sha256'}
 
 
 def utc(value: str) -> datetime:
@@ -97,13 +100,17 @@ def read_record(path: Path):
 
 
 def config_from(value: dict) -> Config:
-    _object(value, {f.name for f in fields(Config)}, 'config')
+    expected = {f.name for f in fields(Config)}
+    payload = dict(value)
+    payload.setdefault('reviewers', [])
+    _object(payload, expected, 'config')
     booleans = {'skip_git_repo_check', 'allow_untested_cli', 'allow_web'}
     integers = {'max_turns', 'max_attempts', 'history_limit', 'max_output_mb', 'max_run_mb',
                 'max_prompt_bytes', 'claude_max_turns'}
     numbers = {'timeout', 'max_seconds', 'claude_max_budget_usd'}
     nullable = {'claude_max_turns', 'claude_max_budget_usd', 'codex_effort', 'claude_effort'}
-    for key, item in value.items():
+    reviewers = []
+    for key, item in payload.items():
         if item is None and key in nullable:
             continue
         if key in booleans:
@@ -118,9 +125,19 @@ def config_from(value: dict) -> Config:
             _array(item, key)
             for name in item:
                 _string(name, 'environment name', nonempty=True)
+        elif key == 'reviewers':
+            _array(item, key)
+            for reviewer in item:
+                _object(reviewer, {'id', 'kind', 'backend', 'model', 'effort'}, 'reviewer')
+                for field in ('id', 'kind', 'backend', 'model'):
+                    _string(reviewer[field], 'reviewer ' + field, nonempty=True)
+                if reviewer['effort'] is not None and not isinstance(reviewer['effort'], str):
+                    raise ValueError('reviewer effort must be a string or null')
+                reviewers.append(ReviewerSpec(**reviewer))
         else:
             _string(item, key)
-    return Config(**{**value, 'repo': Path(value['repo']), 'pass_env': tuple(value['pass_env'])})
+    return Config(**{**payload, 'repo': Path(payload['repo']), 'pass_env': tuple(payload['pass_env']),
+                     'reviewers': tuple(reviewers)})
 
 
 def validate_state(state: dict, config: Config) -> None:
@@ -140,27 +157,30 @@ def validate_state(state: dict, config: Config) -> None:
     _choice(state['status'], STATUSES, 'status')
     if state['status'] == 'running' and state['attempts'] > state['turns'] * config.max_attempts:
         raise ValueError('Committed attempt count exceeds accepted turn allowances')
-    _choice(state['next_agent'], AGENTS, 'next agent')
+    roster = config.roster_ids()
+    roster_set = set(roster)
+    _choice(state['next_agent'], roster, 'next agent')
     _array(state['approved'], 'approved')
     for role in state['approved']:
-        _choice(role, AGENTS, 'approval')
+        _choice(role, roster, 'approval')
     if len(set(state['approved'])) != len(state['approved']):
         raise ValueError('Duplicate approval')
-    if state['status'] == 'agreed' and set(state['approved']) != AGENTS:
-        raise ValueError('Agreement requires both live approvals')
+    if state['status'] == 'agreed' and set(state['approved']) != roster_set:
+        raise ValueError('Agreement requires all live approvals')
     _array(state['history'], 'history')
     if len(state['history']) != state['turns']:
         raise ValueError('History length must equal turns')
     if state['status'] == 'blocked' and (not state['history'] or state['history'][-1]['decision'] != 'blocked'):
         raise ValueError('Blocked state requires a final blocked decision')
     role = config.start
+    index = {member: position for position, member in enumerate(roster)}
     blocked = False
     subject = None
     for turn in state['history']:
         _object(turn, {'agent', 'decision', 'reason', 'plan_hash', 'timestamp', 'backend', 'model'}, 'turn')
         if turn['agent'] != role:
-            raise ValueError('History roles must alternate from the configured start')
-        role = 'claude' if role == 'codex' else 'codex'
+            raise ValueError('History roles must follow the configured roster order')
+        role = roster[(index[role] + 1) % len(roster)]
         _choice(turn['decision'], DECISIONS, 'decision')
         if blocked:
             raise ValueError('Review after blocked decision')
@@ -171,14 +191,15 @@ def validate_state(state: dict, config: Config) -> None:
         _string(turn['reason'], 'reason', nonempty=True)
         _hash(turn['plan_hash'], 'turn hash')
         utc(turn['timestamp'])
-        for key in ('backend', 'model'):
-            if turn[key] != getattr(config, turn['agent'] + '_' + key):
-                raise ValueError('History roster mismatch')
+        spec = config.spec(turn['agent'])
+        if turn['backend'] != spec.backend or turn['model'] != spec.model:
+            raise ValueError('History roster mismatch')
     if state['next_agent'] != role:
         raise ValueError('Next agent disagrees with history')
     if state['history'] and state['history'][-1]['plan_hash'] != content_hash(state['plan']):
         raise ValueError('History does not bind the committed plan')
-    validate_findings(state['findings'], config.output, state['status'] == 'agreed')
+    validate_findings(state['findings'], config.output, state['status'] == 'agreed',
+                      roster=set(config.roster_ids()))
     for finding in state['findings']:
         if finding['reported_turn'] > state['turns'] or finding['reported_attempt'] > config.max_attempts:
             raise ValueError('Finding exceeds recorded turn/attempt limits')
@@ -190,13 +211,29 @@ def validate(value: dict, path: Path) -> Config:
     if not isinstance(value, dict):
         raise ValueError('Checkpoint must be an object')
     version = value.get('schema_version')
-    if type(version) is not int or version != CHECKPOINT_SCHEMA_VERSION:
+    if type(version) is not int or version not in (CHECKPOINT_SCHEMA_VERSION, PANEL_CHECKPOINT_SCHEMA_VERSION):
         raise ValueError(f'Unsupported checkpoint schema_version: {version!r}')
-    _object(value, KEYS, 'checkpoint')
+    _object(value, PANEL_KEYS if version == PANEL_CHECKPOINT_SCHEMA_VERSION else KEYS, 'checkpoint')
     _hash(value['integrity'], 'integrity')
     if hashlib.sha256(canonical(value)).hexdigest() != value['integrity']:
         raise ValueError('Checkpoint integrity mismatch')
     config = config_from(value['config'])
+    if version == CHECKPOINT_SCHEMA_VERSION and config.reviewers:
+        raise ValueError('Schema version 1 checkpoints require the default reviewer pair')
+    if version == PANEL_CHECKPOINT_SCHEMA_VERSION:
+        if not config.reviewers:
+            raise ValueError('Schema version 2 checkpoints require a non-empty reviewer roster')
+        _hash(value['roster_sha256'], 'roster_sha256')
+        _hash(value['policy_sha256'], 'policy_sha256')
+        members = [{"id": spec.id, "kind": spec.kind, "backend": spec.backend,
+                    "model": spec.model, "effort": spec.effort}
+                   for spec in config.roster()]
+        expected_roster = roster_sha256(members)
+        if value['roster_sha256'] != expected_roster:
+            raise ValueError('Checkpoint roster hash mismatch')
+        expected_policy = policy_sha256(PANEL_RULE, expected_roster)
+        if value['policy_sha256'] != expected_policy:
+            raise ValueError('Checkpoint policy hash mismatch')
     for key in ('segment', 'sequence', 'approval_epoch', 'attempts_current_turn'):
         _integer(value[key], key)
     if value['attempts_current_turn'] > config.max_attempts:
@@ -371,7 +408,8 @@ class Journal:
             document_bytes = b''
         if normalize(document_bytes.decode('utf-8')) != state['plan']:
             raise RunError('document changed outside Duo before checkpoint creation')
-        value = dict(schema_version=1, duo_version=__version__, run_id=store.path.name,
+        schema = (PANEL_CHECKPOINT_SCHEMA_VERSION if config.reviewers else CHECKPOINT_SCHEMA_VERSION)
+        value = dict(schema_version=schema, duo_version=__version__, run_id=store.path.name,
                      segment=0, sequence=0, created_at=created_at, updated_at=created_at,
                      deadline=deadline, max_seconds=config.max_seconds, status='running',
                      repo=str(config.repo), document=manifest['document'], output=config.output,
@@ -385,6 +423,12 @@ class Journal:
                      attempts_current_turn=0,
                      in_flight=None, last_attempt=None, pending=None, approval_epoch=0,
                      segments=[{'segment': 0, 'started_at': created_at, 'from_sequence': 0}])
+        if config.reviewers:
+            members = [{"id": spec.id, "kind": spec.kind, "backend": spec.backend,
+                        "model": spec.model, "effort": spec.effort}
+                       for spec in config.roster()]
+            value['roster_sha256'] = roster_sha256(members)
+            value['policy_sha256'] = policy_sha256(PANEL_RULE, value['roster_sha256'])
         return cls(store, value)
 
     def write(self, **changes):
@@ -534,10 +578,11 @@ class Journal:
                     invalidated[epoch] = event
         if set(invalidated) != set(range(1, value['approval_epoch'] + 1)):
             raise RunError('Missing approval invalidation evidence')
+        roster = set(config.roster_ids())
         for checked in [value['state'], recovered['state']]:
             approvals = set()
             for number, turn in enumerate(checked['history'], 1):
-                if approvals == AGENTS:
+                if approvals == roster:
                     raise RunError('Review history continues after agreement')
                 if number in epochs:
                     approvals.clear()

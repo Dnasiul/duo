@@ -153,6 +153,36 @@ Progress goes to stderr; `--json` prints only the final summary to stdout.
 Task and criteria files retain their exact decoded UTF-8 contents, including
 CRLF and CR line endings, literal HTML, and trailing whitespace.
 
+### Panels (optional)
+
+By default Duo runs the legacy pair (`codex`, `claude`). You can instead define
+an explicit reviewer roster with repeatable `--reviewer` flags:
+
+```sh
+duo \
+  --repo /absolute/path/to/project \
+  --task "Review and refine the existing plan" \
+  --reviewer codex:codex:native:gpt-5:high \
+  --reviewer claude:claude:native:claude-sonnet-5.5:max \
+  --reviewer gptx:codex:copilot:gpt-5.6:medium
+```
+
+`SPEC` format is `ID:KIND:BACKEND:MODEL` or `ID:KIND:BACKEND:MODEL:EFFORT`.
+Roster order is review order; `--start` must be one of those IDs.
+
+Panel agreement is unanimous: **every reviewer must approve the same current
+document**. There is no majority, quorum, abstention, or substitution mode.
+Any revision clears all approvals. Resume still clears all approvals and starts
+a fresh approval epoch, so unanimity is required again.
+
+For panel rosters, `--max-turns` must be at least the roster size so one full
+approval cycle is possible before any model call.
+
+Duo computes roster diversity metadata for every run and resume. Warnings are
+factual only: identical-model pairs, same-family concentration, and unknown
+families. They do not claim statistical independence or correctness, and they
+never block execution.
+
 Add `--show-conversation` to see each review as soon as the turn completes:
 
 ```sh
@@ -369,7 +399,8 @@ the latest successfully published plan; they never imply agreement.
 | `--context-file PATH` | none | Repeatable captured context; 64 KiB aggregate |
 | `--max-output-mb` | 32 | MiB per captured CLI output stream (stdout, stderr) |
 | `--max-run-mb` | 256 | MiB per run audit directory, including CLI logs and caches |
-| `--start` | `codex` | First reviewer |
+| `--reviewer ID:KIND:BACKEND:MODEL[:EFFORT]` | none | Add a roster member (repeatable); when present, legacy per-role model/backend/effort flags are disallowed |
+| `--start` | `codex` | First reviewer ID (`codex`/`claude` by default pair, roster ID for panels) |
 | `--codex-effort` | Unset | Requested Codex reasoning effort |
 | `--claude-effort` | Unset | Requested Claude reasoning effort |
 | `--codex-backend` | `native` | Codex CLI or GitHub Copilot (`copilot`) |
@@ -617,7 +648,9 @@ key sets throughout 1.x; minor versions cannot add fields inside locations.
 Incompatible changes require a new major version and migration notes. The schema
 ships as `duo/schemas/verdict-1.0.json`; resumed runs use
 `duo/schemas/verdict-1.1.json`, adding a decision `approval_epoch` so historical
-approvals cannot satisfy agreement after recovery. Fresh runs retain 1.0.
+approvals cannot satisfy agreement after recovery. Fresh default-pair runs retain
+1.0. Panel runs emit `duo/schemas/verdict-1.2.json` with roster `kind`/`effort`
+and agreement hashes (`roster_sha256`, `policy_sha256`).
 Example artifacts are in [`tests/fixtures/verdicts`](tests/fixtures/verdicts).
 `validate_verdict` is the authoritative 1.x checker; the JSON Schema is the published
 description of the same contract. JSON Schema `integer` also accepts integral floats
@@ -639,7 +672,17 @@ verdict. The threshold adds severity-specific diagnostics. It exits **0** on suc
 and **2** on failure, printing failed checks
 to stderr. Missing, malformed, incompatible, incomplete, stale, and non-agreed
 artifacts fail closed. `--rule` can select the expected agreement rule; the default
-is `both-reviewers-approve-same-subject`. Generate the artifact in trusted CI:
+is `both-reviewers-approve-same-subject`. For panel artifacts use:
+
+```sh
+python examples/check_verdict.py --verdict "$RUN_DIR/verdict.json" \
+  --document plan.md \
+  --rule unanimous-roster-approve-same-subject \
+  --roster-sha256 "$EXPECTED_ROSTER_HASH"
+```
+
+`--roster-sha256` is optional and pins the exact expected roster hash. Generate
+the artifact in trusted CI:
 hashes bind content but are not signatures and cannot protect against rewriting
 both the artifact and the content. See the [runbook](docs/RUNBOOK.md).
 
@@ -697,7 +740,11 @@ Only runs recorded by this version with `checkpoint.json` are recoverable.
 Earlier audit directories remain records, not checkpoints, and are never
 silently imported. Resume preserves the saved document, history, diff, findings,
 and consumed attempts. Every active approval is cleared, even if the document
-has not changed: both reviewers must approve again in the new approval epoch.
+has not changed: all reviewers must approve again in the new approval epoch.
+
+Default-pair checkpoints use schema version 1. Panel checkpoints use schema
+version 2 and include roster/policy hashes tied to the configured roster; hash
+mismatch or other checkpoint tampering is refused before any model call.
 
 The original absolute deadline and budgets are preserved; downtime counts.
 An expired deadline or exhausted turn budget returns exit 4 without model calls.

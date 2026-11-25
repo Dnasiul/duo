@@ -113,15 +113,18 @@ class Reviewer:
         prompt = build_prompt(state, self.config.history_limit, feedback,
                               self.config.mode, self.config.guidance, self.config.output,
                               self.config.allow_web, self.context, sizes,
-                              user_clarification=self.user_clarification)
+                              user_clarification=self.user_clarification,
+                              panel=len(self.config.roster()) > 2)
         return prompt, sizes
 
     def check_startup_budget(self, state: State) -> None:
-        # Both wrappers matter even when the smaller one belongs to the first role.
         prompt, sizes = self.prompt(state)
-        for agent in ("codex", "claude"):
-            check_prompt_budget(prompt, self.config.max_prompt_bytes,
-                                getattr(self.config, f"{agent}_backend"), sizes)
+        backends = []
+        for item in self.config.roster():
+            if item.backend not in backends:
+                backends.append(item.backend)
+        for backend in backends:
+            check_prompt_budget(prompt, self.config.max_prompt_bytes, backend, sizes)
 
     def __call__(self, state: State) -> State:
         current = dict(state)
@@ -141,6 +144,9 @@ class Reviewer:
             return
         self.plan_file.check()
         agent = state["next_agent"]
+        spec = self.config.spec(agent)
+        roster = self.config.roster_ids()
+        order = {member: index for index, member in enumerate(roster)}
         feedback = ""
         offset, self.turn_attempt_offset = self.turn_attempt_offset, 0
         if self.checkpoints:
@@ -163,7 +169,7 @@ class Reviewer:
             try:
                 prompt, sizes = self.prompt(state, feedback)
                 check_prompt_budget(prompt, self.config.max_prompt_bytes,
-                                    getattr(self.config, f"{agent}_backend"), sizes)
+                                    spec.backend, sizes)
                 if self.checkpoints:
                     self.checkpoints.reserve(state, agent, attempt)
                 state["attempts"] += 1
@@ -239,14 +245,13 @@ class Reviewer:
         state["findings"] = findings
         state["approved"] = sorted(approved)
         state["turns"] += 1
-        state["next_agent"] = "claude" if agent == "codex" else "codex"
+        state["next_agent"] = roster[(order[agent] + 1) % len(roster)]
         turn = {"agent": agent, "decision": result["decision"], "reason": result["reason"],
                 "plan_hash": content_hash(state["plan"]), "timestamp": timestamp(),
-                "backend": getattr(self.config, f"{agent}_backend"),
-                "model": getattr(self.config, f"{agent}_model")}
+                "backend": spec.backend, "model": spec.model}
         state["history"] = state["history"] + [turn]
         if state["status"] == "running":
-            if approved == {"codex", "claude"}:
+            if approved == set(roster):
                 state["status"] = "agreed"
             elif state["turns"] >= self.config.max_turns:
                 state.update(status="limit_reached", error="Review turn limit reached")

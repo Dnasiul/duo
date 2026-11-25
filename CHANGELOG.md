@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Optional reviewer rosters (`--reviewer ID:KIND:BACKEND:MODEL[:EFFORT]`) for
+  N-reviewer document panels, including roster-order scheduling, per-member
+  backend/model dispatch, and unanimous agreement semantics.
+- Diversity classification for every roster (including the default pair), with
+  factual warnings for identical models, same-family concentration, and unknown
+  families. Classification and warnings are recorded in JSON summaries and
+  `reviewer-policy.json`.
+- Verdict schema **1.2** for panel runs, including roster member kind/effort,
+  `unanimous-roster-approve-same-subject`, and agreement hashes
+  (`roster_sha256`, `policy_sha256`), plus panel fixtures and gate coverage.
+- Checkpoint schema **2** for panel runs, with roster/policy hashes validated
+  on load and enforced before any resumed model call.
+
+### Changed
+
+- `--start` now validates against the active roster (default pair or explicit
+  panel roster) instead of argparse choices.
+- `examples/check_verdict.py` now validates panel verdicts with
+  `--rule unanimous-roster-approve-same-subject` and optional
+  `--roster-sha256` pinning while preserving pair fail-closed behavior.
+
 ## 0.7.0 (2026-11-24)
 
 ### Added

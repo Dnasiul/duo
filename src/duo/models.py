@@ -135,7 +135,7 @@ class State(TypedDict):
     criteria: str
     plan: str
     approved: list[str]
-    next_agent: Agent
+    next_agent: str
     turns: int
     attempts: int
     status: str
@@ -145,11 +145,20 @@ class State(TypedDict):
 
 
 @dataclass(frozen=True)
+class ReviewerSpec:
+    id: str
+    kind: str
+    backend: str
+    model: str
+    effort: str | None = None
+
+
+@dataclass(frozen=True)
 class Config:
     repo: Path
     codex_model: str
     claude_model: str
-    start: Agent = "codex"
+    start: str = "codex"
     max_turns: int = 12
     max_attempts: int = 3
     timeout: float = 600
@@ -174,10 +183,9 @@ class Config:
     pass_env: tuple[str, ...] = ()  # extra environment variable names for reviewer CLIs
     allow_web: bool = False  # give reviewers web search and page fetching
     max_prompt_bytes: int = DEFAULT_MAX_PROMPT_BYTES
+    reviewers: tuple[ReviewerSpec, ...] = ()
 
     def __post_init__(self):
-        if self.start not in AGENTS:
-            raise ValueError("Starting agent must be codex or claude")
         for name in self.pass_env:
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
                 raise ValueError(f"--pass-env needs an environment variable name, not {name!r}")
@@ -187,23 +195,62 @@ class Config:
             raise ValueError(f"mode must be one of: {', '.join(DOCUMENT_MODES)}")
         if len(self.guidance.encode("utf-8")) > MAX_TEXT_BYTES:
             raise ValueError(f"Instructions exceed the {MAX_TEXT_BYTES // 1024} KiB limit")
-        if not self.codex_model.strip() or not self.claude_model.strip():
-            raise ValueError("Both model identifiers must be nonempty")
-        for name, choices in (("codex_effort", CODEX_EFFORTS), ("claude_effort", CLAUDE_EFFORTS)):
-            agent = name.split("_")[0]
-            backend = getattr(self, f"{agent}_backend")
-            if backend not in ("native", "copilot"):
-                raise ValueError(f"{agent}_backend must be native or copilot")
-            if backend == "copilot":
-                choices = COPILOT_EFFORTS
-                if getattr(self, f"{agent}_model").lower() == "auto":
+        if self.reviewers:
+            if len(self.reviewers) < 2:
+                raise ValueError("Panel rosters require at least two reviewers")
+            ids = []
+            for spec in self.reviewers:
+                if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", spec.id):
+                    raise ValueError(f"Invalid reviewer id: {spec.id!r}")
+                if spec.id == "codex" and spec.kind != "codex":
+                    raise ValueError("Reviewer id codex must use kind codex")
+                if spec.id == "claude" and spec.kind != "claude":
+                    raise ValueError("Reviewer id claude must use kind claude")
+                if spec.kind not in AGENTS:
+                    raise ValueError("reviewer kind must be codex or claude")
+                if spec.backend not in ("native", "copilot"):
+                    raise ValueError("reviewer backend must be native or copilot")
+                if not spec.model.strip():
+                    raise ValueError("reviewer model must be nonempty")
+                if spec.backend == "copilot" and spec.model.lower() == "auto":
                     raise ValueError("Copilot reviewers require an explicit model, not auto")
-            value = getattr(self, name)
-            if value is not None and value not in choices:
-                raise ValueError(f"{name} must be one of: {', '.join(choices)}")
-        if self.claude_backend == "copilot" and (
-                self.claude_max_budget_usd is not None or self.claude_max_turns is not None):
-            raise ValueError("Claude internal-turn and dollar limits require --claude-backend native")
+                choices = COPILOT_EFFORTS if spec.backend == "copilot" else (
+                    CODEX_EFFORTS if spec.kind == "codex" else CLAUDE_EFFORTS
+                )
+                if spec.effort is not None and spec.effort not in choices:
+                    raise ValueError(
+                        f"reviewer effort for {spec.id} must be one of: {', '.join(choices)}")
+                ids.append(spec.id)
+            if len(set(ids)) != len(ids):
+                raise ValueError("Reviewer ids must be unique")
+            if self.start not in set(ids):
+                raise ValueError("Starting agent must be one of the configured reviewer ids")
+            if self.max_turns < len(self.reviewers):
+                raise ValueError("max_turns must allow at least one full roster cycle")
+            has_native_claude = any(spec.kind == "claude" and spec.backend == "native"
+                                    for spec in self.reviewers)
+            if (self.claude_max_budget_usd is not None or self.claude_max_turns is not None) and not has_native_claude:
+                raise ValueError("Claude internal-turn and dollar limits require a native Claude reviewer")
+        else:
+            if self.start not in AGENTS:
+                raise ValueError("Starting agent must be codex or claude")
+            if not self.codex_model.strip() or not self.claude_model.strip():
+                raise ValueError("Both model identifiers must be nonempty")
+            for name, choices in (("codex_effort", CODEX_EFFORTS), ("claude_effort", CLAUDE_EFFORTS)):
+                agent = name.split("_")[0]
+                backend = getattr(self, f"{agent}_backend")
+                if backend not in ("native", "copilot"):
+                    raise ValueError(f"{agent}_backend must be native or copilot")
+                if backend == "copilot":
+                    choices = COPILOT_EFFORTS
+                    if getattr(self, f"{agent}_model").lower() == "auto":
+                        raise ValueError("Copilot reviewers require an explicit model, not auto")
+                value = getattr(self, name)
+                if value is not None and value not in choices:
+                    raise ValueError(f"{name} must be one of: {', '.join(choices)}")
+            if self.claude_backend == "copilot" and (
+                    self.claude_max_budget_usd is not None or self.claude_max_turns is not None):
+                raise ValueError("Claude internal-turn and dollar limits require --claude-backend native")
         for name in ("max_turns", "max_attempts", "history_limit", "claude_max_turns",
                      "max_output_mb", "max_run_mb", "max_prompt_bytes"):
             value = getattr(self, name)
@@ -215,6 +262,23 @@ class Config:
             value = getattr(self, name)
             if value is not None and (not math.isfinite(value) or value <= 0):
                 raise ValueError(f"{name} must be finite and positive")
+
+    def roster(self) -> tuple[ReviewerSpec, ...]:
+        if self.reviewers:
+            return self.reviewers
+        return (
+            ReviewerSpec("codex", "codex", self.codex_backend, self.codex_model, self.codex_effort),
+            ReviewerSpec("claude", "claude", self.claude_backend, self.claude_model, self.claude_effort),
+        )
+
+    def spec(self, member_id: str) -> ReviewerSpec:
+        for item in self.roster():
+            if item.id == member_id:
+                return item
+        raise KeyError(member_id)
+
+    def roster_ids(self) -> tuple[str, ...]:
+        return tuple(item.id for item in self.roster())
 
 
 def normalize(text: str) -> str:

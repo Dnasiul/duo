@@ -13,7 +13,8 @@ import time
 from typing import Callable
 
 from . import copilot
-from .models import (Agent, AgentError, AgentTimeout, Config, DEFAULT_CLAUDE_MAX_TURNS, RunError,
+from .diversity import classify_roster
+from .models import (AgentError, AgentTimeout, Config, DEFAULT_CLAUDE_MAX_TURNS, ReviewerSpec, RunError,
                      SCHEMA, validate_payload)
 from .policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options, claude_tools,
                      codex_options, reviewer_environment, verify_controls, verify_version)
@@ -356,9 +357,10 @@ class CLIAdapter:
 
     def preflight(self) -> dict[str, str]:
         self.policy_verified = False
-        native = {agent for agent in ("codex", "claude")
-                  if getattr(self.config, f"{agent}_backend") == "native"}
-        if len(native) < 2:
+        roster = self.config.roster()
+        native = {spec.kind for spec in roster if spec.backend == "native"}
+        uses_copilot = any(spec.backend == "copilot" for spec in roster)
+        if uses_copilot:
             copilot.require_auth(os.environ)
         if "claude" in native:
             check_claude_managed_files()
@@ -395,20 +397,27 @@ class CLIAdapter:
         policy = verify_controls(self.config.codex_bin, self.config.claude_bin,
                                  self.settings_path, self.probe, agents=native,
                                  pass_env=self.config.pass_env, allow_web=self.config.allow_web)
-        if len(native) < 2:
+        if uses_copilot:
             directory = Path(tempfile.mkdtemp(prefix="copilot-preflight-", dir=self.store.path))
             versions["copilot"], policy["copilot"] = copilot.preflight(self.config, directory)
             self.copilot_session = policy["copilot"]["session_flags"]
             if policy["copilot"].get("version_status") == "untested":
                 untested.append("copilot")
-        policy["reviewers"] = {
-            agent: {"backend": getattr(self.config, f"{agent}_backend"),
-                    "model": getattr(self.config, f"{agent}_model")}
-            for agent in ("codex", "claude")
-        }
+        if self.config.reviewers:
+            policy["reviewers"] = {
+                spec.id: {"kind": spec.kind, "backend": spec.backend, "model": spec.model}
+                for spec in roster
+            }
+        else:
+            policy["reviewers"] = {
+                agent: {"backend": getattr(self.config, f"{agent}_backend"),
+                        "model": getattr(self.config, f"{agent}_model")}
+                for agent in ("codex", "claude")
+            }
+        policy["diversity"] = classify_roster(roster)
         # Names only: which variables each reviewer CLI receives, never their values.
         policy["environment"] = {cli: sorted(self.environment(cli)) for cli in sorted(native)}
-        if len(native) < 2:
+        if uses_copilot:
             # Built as a review builds it, so Duo's own Copilot settings are listed too.
             names = directory / "environment"
             names.mkdir()
@@ -421,37 +430,34 @@ class CLIAdapter:
         self.policy_verified = True
         return versions
 
-    def command(self, agent: Agent, directory: Path) -> list[str]:
+    def command(self, member_id: str, directory: Path) -> list[str]:
         config = self.config
-        if agent not in ("codex", "claude"):
-            raise ValueError("Unknown agent")
-        if getattr(config, f"{agent}_backend") == "copilot":
-            return copilot.command(config, agent, directory, self.copilot_session)
-        if agent == "codex":
+        spec = config.spec(member_id)
+        if spec.backend == "copilot":
+            return copilot.command(config, spec, directory, self.copilot_session)
+        if spec.kind == "codex":
             argv = [config.codex_bin, "--no-daemon", "exec", "--sandbox", "read-only",
                     "--ignore-user-config", "--ignore-rules", "--strict-config",
                     # JSONL events on stdout keep the transcript out of stderr
                     # and report failures as structured error events.
-                    "--ephemeral", "--json", "-m", config.codex_model,
+                    "--ephemeral", "--json", "-m", spec.model,
                     "--output-schema", str(directory / "review.schema.json"),
                     "-o", str(directory / "response.json")]
-            if config.codex_effort is not None:
-                argv += ["-c", f'model_reasoning_effort="{config.codex_effort}"']
+            if spec.effort is not None:
+                argv += ["-c", f'model_reasoning_effort="{spec.effort}"']
             argv += codex_options(config.allow_web)
             if config.skip_git_repo_check:
                 argv.append("--skip-git-repo-check")
             return argv + ["-"]
-        if agent != "claude":
-            raise ValueError("Unknown agent")
-        argv = [config.claude_bin, "-p", "--model", config.claude_model,
+        argv = [config.claude_bin, "-p", "--model", spec.model,
                 "--output-format", "stream-json", "--verbose", "--json-schema", json.dumps(SCHEMA),
                 "--tools", ",".join(claude_tools(config.allow_web)),
                 "--allowedTools", ",".join(claude_tools(config.allow_web)),
                 *claude_options(self.settings_path), "--disallowedTools", "mcp__*",
                 "--no-session-persistence", "--max-turns",
                 str(config.claude_max_turns or DEFAULT_CLAUDE_MAX_TURNS)]
-        if config.claude_effort is not None:
-            argv += ["--effort", config.claude_effort]
+        if spec.effort is not None:
+            argv += ["--effort", spec.effort]
         if config.claude_max_budget_usd is not None:
             argv += ["--max-budget-usd", str(config.claude_max_budget_usd)]
         return argv
@@ -471,32 +477,33 @@ class CLIAdapter:
                     "including CLI logs and caches")
         return None
 
-    def __call__(self, agent: Agent, prompt: str, timeout: float) -> dict:
-        backend = getattr(self.config, f"{agent}_backend")
+    def __call__(self, member_id: str, prompt: str, timeout: float) -> dict:
+        spec = self.config.spec(member_id)
+        backend = spec.backend
         check_prompt_budget(prompt, self.config.max_prompt_bytes, backend)
         prompt = backend_prefix(backend) + prompt
         if not self.policy_verified:
             self.preflight()
-        if agent == "claude" and backend == "native":
+        if spec.kind == "claude" and backend == "native":
             check_claude_managed_files()
         directory = self.store.attempt_dir()
-        env = self.environment(agent)
+        env = self.environment(spec.kind)
         if backend == "copilot":
             copilot.check_sources(self.config.repo)
             env = copilot.environment(directory, self.config.pass_env)
             copilot.require_auth(env)
         schema = directory / "review.schema.json"
         schema.write_text(json.dumps(SCHEMA), encoding="utf-8")
-        argv = self.command(agent, directory)
+        argv = self.command(member_id, directory)
         (directory / "command.json").write_text(json.dumps(argv), encoding="utf-8")
         stdout, stderr = directory / "stdout.log", directory / "stderr.log"
         # Raw CLI events survive failures and interruption; they are not an
         # archive of every inspected file or page.
-        self.store.event({"event": "cli_start", "agent": agent, "backend": backend,
-                          "model": getattr(self.config, f"{agent}_model"),
+        self.store.event({"event": "cli_start", "agent": member_id, "kind": spec.kind,
+                          "backend": backend, "model": spec.model,
                           "attempt_dir": directory.name})
-        if backend == "native" and agent == "claude":
-            return self.claude_attempt(argv, prompt, timeout, stdout, stderr, env)
+        if backend == "native" and spec.kind == "claude":
+            return self.claude_attempt(argv, prompt, timeout, stdout, stderr, env, spec)
         try:
             code = run_process(argv, prompt, self.config.repo, timeout, stdout, stderr, env=env,
                                check=lambda: self.limit_message(stdout, stderr))
@@ -515,16 +522,17 @@ class CLIAdapter:
             # Only structured error fields are read from stdout, which otherwise
             # carries model text (Copilot's stdout is never read).
             diagnostic = read_tail(stderr)
-            if backend == "native" and agent == "codex":
+            if backend == "native" and spec.kind == "codex":
                 diagnostic += "\n" + codex_error_text(stdout)
-            raise classify_failure(diagnostic, getattr(self.config, f"{agent}_model"))
+            raise classify_failure(diagnostic, spec.model)
         if backend == "copilot":
             return validate_payload(copilot_reply(stdout))
-        if agent == "codex":
+        if spec.kind == "codex":
             return validate_payload(read_json(directory / "response.json"))
 
     def claude_attempt(self, argv: list[str], prompt: str, timeout: float,
-                       stdout: Path, stderr: Path, env: dict[str, str]) -> dict:
+                       stdout: Path, stderr: Path, env: dict[str, str],
+                       spec: ReviewerSpec) -> dict:
         metadata = {"process_status": "interrupted", "returncode": None,
                     "payload_validated": False}
         stream_error = None
@@ -556,11 +564,11 @@ class CLIAdapter:
                 diagnostic = read_tail(stderr) + "\n" + (
                     claude_error_text(envelope) if envelope is not None
                     else claude_stream_error_text(stdout))
-                raise classify_failure(diagnostic, self.config.claude_model)
+                raise classify_failure(diagnostic, spec.model)
             if stream_error:
                 raise stream_error
             if metadata["completion"] != "success":
-                raise classify_failure(claude_error_text(envelope), self.config.claude_model)
+                raise classify_failure(claude_error_text(envelope), spec.model)
             result = validate_payload(envelope.get("structured_output"))
             metadata["payload_validated"] = True
             return result
