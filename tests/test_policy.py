@@ -195,6 +195,24 @@ class PolicyTests(unittest.TestCase):
                 verify_controls('codex', 'claude', self.root / 'settings.json', probe)
             self.assertNotIn('SECRET', str(caught.exception))
 
+    def test_rejects_duplicate_codex_feature_rows(self):
+        def probe(argv, env=None):
+            if 'features' in argv:
+                return self.probe(argv) + '\nhooks stable false\n'
+            return self.probe(argv)
+        with patch('duo.policy.check_claude_managed_files'), \
+                self.assertRaisesRegex(RunError, r'duplicate feature row: hooks'):
+            verify_controls('codex', 'claude', self.root / 'settings.json', probe)
+
+    def test_rejects_unexpected_codex_feature_layout(self):
+        def probe(argv, env=None):
+            if 'features' in argv:
+                return self.probe(argv).replace('hooks stable false', 'hooks stable true false')
+            return self.probe(argv)
+        with patch('duo.policy.check_claude_managed_files'), \
+                self.assertRaisesRegex(RunError, 'feature layout'):
+            verify_controls('codex', 'claude', self.root / 'settings.json', probe)
+
     def test_stream_json_must_be_an_output_format_value(self):
         for output_help in ('--output-format json --input-format stream-json',
                             '--output-format <format>  Output format: "text", "json"\n'
