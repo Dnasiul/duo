@@ -10,6 +10,8 @@ import subprocess
 import sys
 from unittest.mock import patch
 
+import jsonschema
+
 from test_duo import Fixture, response
 from duo.adapters import CLIAdapter
 from duo.cli import main
@@ -411,6 +413,20 @@ class VerdictTests(Fixture):
         self.assertEqual(roster['properties']['kind']['enum'], ['codex', 'claude'])
         self.assertEqual(roster['properties']['backend']['enum'], ['native', 'copilot'])
         self.assertEqual(roster['properties']['effort']['oneOf'][1]['pattern'], '\\S')
+        self.assertEqual(
+            schema['properties']['decisions']['items']['properties']['role']['pattern'],
+            '^[a-z][a-z0-9_-]{0,31}$')
+        closed_disposition = schema['properties']['findings']['items']['allOf'][0]['else']['properties'][
+            'disposition']['properties']['by']
+        self.assertEqual(closed_disposition['pattern'], '^[a-z][a-z0-9_-]{0,31}$')
+        agreed_branch = schema['allOf'][1]['then']['properties']
+        self.assertNotIn('decisions', agreed_branch)
+
+        validator = jsonschema.Draft202012Validator(schema)
+        for name in ('valid-panel-agreed.json', 'valid-panel-custom-ids.json'):
+            value = json.loads((FIXTURES / name).read_text())
+            self.assertIs(validate_verdict(value), value)
+            self.assertEqual(list(validator.iter_errors(value)), [], name)
 
     def test_agreement_rejects_stale_approval_replay_probe_e(self):
         value = json.loads((FIXTURES / 'invalid-stale-approval-replay.json').read_text())
@@ -432,6 +448,17 @@ class VerdictTests(Fixture):
                 decisions += [('claude', 'approve', False), ('codex', 'approve', False)]
             with self.subTest(decision=decision), self.assertRaisesRegex(ValueError, 'after agreement'):
                 validate_verdict(replay_verdict(decisions))
+
+    def test_panel_replay_rejects_duplicate_approval_in_same_epoch(self):
+        value = json.loads((FIXTURES / 'valid-panel-agreed.json').read_text())
+        value['decisions'].append({
+            **value['decisions'][0],
+            'turn': 4,
+            'timestamp': '2026-11-23T00:00:03+00:00',
+        })
+        value['summary'].update(turns=4, attempts=4)
+        with self.assertRaisesRegex(ValueError, 'after agreement'):
+            validate_verdict(value)
 
     def test_blocked_completion_requires_final_blocked_decision(self):
         for decisions in ([], [('codex', 'approve', False)], [('codex', 'revise', False)],

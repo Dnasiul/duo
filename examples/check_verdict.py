@@ -36,6 +36,8 @@ def canonical(value):
 def roster_hash(roster):
     members = []
     for item in roster:
+        if not isinstance(item, dict):
+            raise ValueError("malformed reviewer roster")
         members.append({
             "id": item.get("role"),
             "kind": item.get("kind"),
@@ -235,17 +237,21 @@ def check(value, args):
             require(isinstance(agreement["roster_sha256"], str)
                     and re.fullmatch(r"[0-9a-f]{64}", agreement["roster_sha256"]),
                     "malformed roster_sha256")
-            computed = roster_hash(roster)
-            require(agreement["roster_sha256"] == computed, "roster_sha256 does not match roster")
-            if args.roster_sha256:
-                require(agreement["roster_sha256"] == args.roster_sha256,
-                        "--roster-sha256 does not match artifact")
-            if "policy_sha256" in agreement:
-                require(isinstance(agreement["policy_sha256"], str)
-                        and agreement["policy_sha256"] == policy_hash(args.rule, computed),
-                        "policy_sha256 does not match rule and roster")
+            try:
+                computed = roster_hash(roster)
+            except ValueError as exc:
+                errors.append(str(exc))
             else:
-                errors.append("missing policy_sha256")
+                require(agreement["roster_sha256"] == computed, "roster_sha256 does not match roster")
+                if args.roster_sha256:
+                    require(agreement["roster_sha256"] == args.roster_sha256,
+                            "--roster-sha256 does not match artifact")
+                if "policy_sha256" in agreement:
+                    require(isinstance(agreement["policy_sha256"], str)
+                            and agreement["policy_sha256"] == policy_hash(args.rule, computed),
+                            "policy_sha256 does not match rule and roster")
+                else:
+                    errors.append("missing policy_sha256")
         else:
             errors.append("missing roster_sha256")
     else:
@@ -390,6 +396,8 @@ def main(argv=None):
         errors = check(value, args)
     except (OSError, TypeError, UnicodeError, ValueError, RecursionError) as exc:
         errors = [f"cannot read verdict: {exc}"]
+    except Exception as exc:
+        errors = [f"gate internal failure: {exc}"]
     if errors:
         for error in errors:
             print(f"FAIL: {error}", file=sys.stderr)
