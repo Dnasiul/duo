@@ -14,8 +14,9 @@ import threading
 
 from .adapters import CLIAdapter
 from .checkpoints import Journal, load as load_checkpoint, read_record, remaining_seconds
+from .diversity import classify_roster
 from .models import (CLAUDE_EFFORTS, CODEX_EFFORTS, COPILOT_EFFORTS, DEFAULT_CLAUDE_MAX_TURNS,
-                     DOCUMENT_MODES, DEFAULT_MAX_PROMPT_BYTES, MAX_TEXT_BYTES, Config, RunError,
+                     DOCUMENT_MODES, DEFAULT_MAX_PROMPT_BYTES, MAX_TEXT_BYTES, Config, ReviewerSpec, RunError,
                      State, Terminated, Turn, new_secret, normalize)
 from .prompts import plan_diff
 from .report import write_report
@@ -54,18 +55,20 @@ def parser() -> argparse.ArgumentParser:
                              "owner-ratified 2026-11-23)")
     result.add_argument("--output", type=Path,
                         help="Document path relative to --repo (default: <mode>.md)")
-    result.add_argument("--codex-model", required=True, help="Explicit Codex model identifier")
-    result.add_argument("--claude-model", required=True, help="Explicit Claude model identifier")
-    result.add_argument("--codex-backend", choices=["native", "copilot"], default="native",
+    result.add_argument("--codex-model", help="Explicit Codex model identifier")
+    result.add_argument("--claude-model", help="Explicit Claude model identifier")
+    result.add_argument("--reviewer", action="append", default=[], metavar="ID:KIND:BACKEND:MODEL[:EFFORT]",
+                        help="Panel reviewer spec (repeatable) in roster order")
+    result.add_argument("--codex-backend", choices=["native", "copilot"],
                         help="Run the Codex reviewer through Codex CLI or GitHub Copilot")
-    result.add_argument("--claude-backend", choices=["native", "copilot"], default="native",
+    result.add_argument("--claude-backend", choices=["native", "copilot"],
                         help="Run the Claude reviewer through Claude Code or GitHub Copilot")
     result.add_argument("--copilot-bin", default="copilot", help="GitHub Copilot CLI executable path")
     result.add_argument("--codex-effort", choices=tuple(dict.fromkeys(CODEX_EFFORTS + COPILOT_EFFORTS)),
                         help="Requested Codex reasoning effort; omit to use CLI defaults")
     result.add_argument("--claude-effort", choices=tuple(dict.fromkeys(CLAUDE_EFFORTS + COPILOT_EFFORTS)),
                         help="Requested Claude effort; omit to use CLI defaults")
-    result.add_argument("--start", choices=["codex", "claude"], default="codex")
+    result.add_argument("--start", default="codex")
     result.add_argument("--max-turns", type=int, default=12, help="Accepted review turns (default: 12)")
     result.add_argument("--max-attempts", type=int, default=3, help="CLI attempts per turn (default: 3)")
     result.add_argument("--timeout", type=float, default=600, help="Seconds per CLI call (default: 600)")
@@ -115,6 +118,23 @@ def emit(summary: dict, as_json: bool) -> None:
             print(f"Audit: {summary['run_dir']}")
 
 
+def parse_reviewer(spec: str) -> ReviewerSpec:
+    parts = spec.split(":")
+    if len(parts) not in (4, 5) or any(part == "" for part in parts):
+        raise RunError(
+            "Invalid --reviewer spec; expected ID:KIND:BACKEND:MODEL or ID:KIND:BACKEND:MODEL:EFFORT")
+    ident, kind, backend, model, *rest = parts
+    return ReviewerSpec(ident, kind, backend, model, rest[0] if rest else None)
+
+
+def diversity_summary(config: Config, *, as_json: bool) -> dict:
+    diversity = classify_roster(config.roster())
+    for warning in diversity["warnings"]:
+        if not as_json:
+            print(f"Warning: {warning}", file=sys.stderr, flush=True)
+    return {"diversity": diversity, "warnings": diversity["warnings"]}
+
+
 def show_review(number: int, review: Turn, before: str, after: str, document: str = "plan") -> None:
     details = ""
     if review["decision"] == "revise":
@@ -130,10 +150,12 @@ def show_review(number: int, review: Turn, before: str, after: str, document: st
     )
 
 
-def outcome(state: State, document: str = "plan") -> dict:
+def outcome(state: State, document: str = "plan", reviewers: int = 2) -> dict:
     latest = state["history"][-1] if state["history"] else None
+    agreed = (f"Both reviewers approved the current {document}" if reviewers == 2
+              else f"All {reviewers} reviewers approved the current {document}")
     message = state["error"] or {
-        "agreed": f"Both reviewers approved the current {document}",
+        "agreed": agreed,
         "blocked": "Review requires user input",
         "limit_reached": "Review budget exhausted",
         "error": "Review failed",
@@ -238,6 +260,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
     interrupted = False
     started = datetime.now(timezone.utc)
     latest_review = None
+    diversity = {"diversity": {}, "warnings": []}
 
     def completed(number: int, review: Turn, before: str, after: str) -> None:
         nonlocal latest_review
@@ -277,23 +300,53 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             if len(text.encode("utf-8")) > MAX_TEXT_BYTES:
                 raise RunError(f"{name} exceeds the {MAX_TEXT_BYTES // 1024} KiB limit")
         context = capture_context(args.context_file)
-        config = Config(
-            repo=repo, codex_model=args.codex_model, claude_model=args.claude_model,
-            codex_effort=args.codex_effort, claude_effort=args.claude_effort,
-            codex_backend=args.codex_backend, claude_backend=args.claude_backend,
-            copilot_bin=args.copilot_bin,
-            start=args.start, max_turns=args.max_turns, max_attempts=args.max_attempts,
-            timeout=args.timeout, max_seconds=args.max_seconds,
-            claude_max_turns=args.claude_max_turns,
-            claude_max_budget_usd=args.claude_max_budget_usd,
-            skip_git_repo_check=args.skip_git_repo_check,
-            allow_untested_cli=args.allow_untested_cli,
-            max_output_mb=args.max_output_mb, max_run_mb=args.max_run_mb,
-            codex_bin=args.codex_bin, claude_bin=args.claude_bin,
-            mode=args.mode, guidance=guidance, output=str(document.relative_to(repo)),
-            pass_env=tuple(args.pass_env), allow_web=args.allow_web,
-            max_prompt_bytes=args.max_prompt_bytes,
-        )
+        if args.reviewer:
+            legacy = ("--codex-model", args.codex_model), ("--claude-model", args.claude_model), (
+                "--codex-backend", args.codex_backend), ("--claude-backend", args.claude_backend), (
+                "--codex-effort", args.codex_effort), ("--claude-effort", args.claude_effort)
+            conflict = [name for name, value in legacy if value is not None]
+            if conflict:
+                raise RunError(f"--reviewer cannot be combined with {', '.join(conflict)}")
+            reviewers = tuple(parse_reviewer(spec) for spec in args.reviewer)
+            if len(reviewers) < 2:
+                raise RunError("--reviewer must be provided at least twice")
+            config = Config(
+                repo=repo, codex_model="", claude_model="", reviewers=reviewers,
+                codex_backend="native", claude_backend="native",
+                copilot_bin=args.copilot_bin,
+                start=args.start, max_turns=args.max_turns, max_attempts=args.max_attempts,
+                timeout=args.timeout, max_seconds=args.max_seconds,
+                claude_max_turns=args.claude_max_turns,
+                claude_max_budget_usd=args.claude_max_budget_usd,
+                skip_git_repo_check=args.skip_git_repo_check,
+                allow_untested_cli=args.allow_untested_cli,
+                max_output_mb=args.max_output_mb, max_run_mb=args.max_run_mb,
+                codex_bin=args.codex_bin, claude_bin=args.claude_bin,
+                mode=args.mode, guidance=guidance, output=str(document.relative_to(repo)),
+                pass_env=tuple(args.pass_env), allow_web=args.allow_web,
+                max_prompt_bytes=args.max_prompt_bytes,
+            )
+        else:
+            if args.codex_model is None or args.claude_model is None:
+                raise RunError("--codex-model and --claude-model are required unless --reviewer is used")
+            config = Config(
+                repo=repo, codex_model=args.codex_model, claude_model=args.claude_model,
+                codex_effort=args.codex_effort, claude_effort=args.claude_effort,
+                codex_backend=args.codex_backend or "native", claude_backend=args.claude_backend or "native",
+                copilot_bin=args.copilot_bin,
+                start=args.start, max_turns=args.max_turns, max_attempts=args.max_attempts,
+                timeout=args.timeout, max_seconds=args.max_seconds,
+                claude_max_turns=args.claude_max_turns,
+                claude_max_budget_usd=args.claude_max_budget_usd,
+                skip_git_repo_check=args.skip_git_repo_check,
+                allow_untested_cli=args.allow_untested_cli,
+                max_output_mb=args.max_output_mb, max_run_mb=args.max_run_mb,
+                codex_bin=args.codex_bin, claude_bin=args.claude_bin,
+                mode=args.mode, guidance=guidance, output=str(document.relative_to(repo)),
+                pass_env=tuple(args.pass_env), allow_web=args.allow_web,
+                max_prompt_bytes=args.max_prompt_bytes,
+            )
+        diversity = diversity_summary(config, as_json=args.json)
         default_state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "duo"
         state_dir = (args.state_dir or default_state).expanduser().resolve()
         if state_dir == repo or repo in state_dir.parents:
@@ -362,7 +415,8 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
             journal.terminal(result)
             store.json("result.json", {**result, "untested_cli": adapter.untested})
             write_verdict(store.path)
-        emit({**outcome(result, args.mode), "untested_cli": adapter.untested,
+        emit({**outcome(result, args.mode, len(config.roster())), "untested_cli": adapter.untested,
+              **diversity,
               "plan_path": str(plan.path), "run_dir": str(store.path)}, args.json)
         return EXIT_CODES[result["status"]]
     except KeyboardInterrupt as exc:
@@ -380,6 +434,7 @@ def review(args: argparse.Namespace, holder: list[RunStore]) -> int:
         summary = {"status": "error", "message": str(exc)}
         code = 1
     summary["latest_review"] = latest_review
+    summary.update(diversity)
     if store is not None:
         summary["run_dir"] = str(store.path)
         try:
@@ -407,10 +462,12 @@ def resume(args: argparse.Namespace, holder: list[RunStore]) -> int:
     journal = None
     active = False
     invoking = False
+    diversity = {"diversity": {}, "warnings": []}
     try:
         store = RunStore.open_existing(args.resume)
         # Do not rewrite even reports on a refused recovery.
         value, config = load_checkpoint(store.path)
+        diversity = diversity_summary(config, as_json=args.json)
         if value["status"] != "running":
             hint = "; use --answer with --source-run instead" if value["status"] == "blocked" else ""
             raise RunError(f"Cannot resume terminal run ({value['status']}){hint}")
@@ -439,7 +496,8 @@ def resume(args: argparse.Namespace, holder: list[RunStore]) -> int:
                 journal.terminal(state)
                 store.json("result.json", {**state, "untested_cli": {}})
                 write_verdict(store.path)
-                emit({**outcome(state, config.mode), "run_dir": str(store.path)}, args.json)
+                emit({**outcome(state, config.mode, len(config.roster())), **diversity,
+                      "run_dir": str(store.path)}, args.json)
                 return EXIT_CODES[state["status"]]
             adapter = CLIAdapter(config, store)
             versions = adapter.preflight()
@@ -465,7 +523,8 @@ def resume(args: argparse.Namespace, holder: list[RunStore]) -> int:
             journal.terminal(result)
             store.json("result.json", {**result, "untested_cli": adapter.untested})
             write_verdict(store.path)
-            emit({**outcome(result, config.mode), "untested_cli": adapter.untested,
+            emit({**outcome(result, config.mode, len(config.roster())), "untested_cli": adapter.untested,
+                  **diversity,
                   "plan_path": str(plan.path), "run_dir": str(store.path)}, args.json)
             return EXIT_CODES[result["status"]]
     except KeyboardInterrupt as exc:
@@ -503,5 +562,6 @@ def resume(args: argparse.Namespace, holder: list[RunStore]) -> int:
             store.close()
     if store:
         summary["run_dir"] = str(store.path)
+    summary.update(diversity)
     emit(summary, args.json)
     return code

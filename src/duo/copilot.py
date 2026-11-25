@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from .models import Agent, Config, RunError
+from .models import Config, ReviewerSpec, RunError
 from .policy import preferences_domain_absent, reviewer_environment, verify_version
 from .storage import atomic_write
 
@@ -171,13 +171,13 @@ def tools(allow_web: bool = False) -> list[str]:
     return ['view', 'glob', 'grep', *(['web_fetch'] if allow_web else [])]
 
 
-def command(config: Config, agent: Agent, directory: Path, session: list[str]) -> list[str]:
+def command(config: Config, member: ReviewerSpec, directory: Path, session: list[str]) -> list[str]:
     """The review argv; ``session`` comes from preflight's ``session_flags``."""
     # With --allow-web, URL access is allowed rather than denied; it applies to
     # web_fetch and the shell, which stays denied.
     web = ['--allow-all-urls'] if config.allow_web else []
     argv = [config.copilot_bin, '--no-auto-update', '--silent', '--stream', 'off',
-            '--output-format', 'json', '--model', getattr(config, f'{agent}_model'),
+            '--output-format', 'json', '--model', member.model,
             # List options take separate values; read-only access needs no allow rule.
             '--available-tools', *tools(config.allow_web),
             '--deny-tool', 'write', 'shell', *([] if config.allow_web else ['url']), *web,
@@ -186,9 +186,8 @@ def command(config: Config, agent: Agent, directory: Path, session: list[str]) -
             '--disallow-temp-dir', '--no-experimental', '--mode', 'interactive',
             '--log-dir', str(directory / 'copilot-logs')]
     argv += [f'--disable-mcp-server={name}' for name in mcp_names(config.repo)]
-    effort = getattr(config, f'{agent}_effort')
-    if effort is not None:
-        argv += ['--reasoning-effort', effort]
+    if member.effort is not None:
+        argv += ['--reasoning-effort', member.effort]
     # Copilot supports piped stdin as a programmatic prompt. No prompt in argv.
     return argv
 
@@ -224,8 +223,7 @@ def _preflight(config: Config, directory: Path) -> tuple[str, dict]:
     session = session_flags(help_text)
     if config.allow_web and '--allow-all-urls' not in available:
         raise RunError('Installed Copilot lacks the --allow-all-urls option needed for --allow-web')
-    if any(getattr(config, f'{agent}_backend') == 'copilot' and
-           getattr(config, f'{agent}_effort') is not None for agent in ('codex', 'claude')):
+    if any(spec.backend == 'copilot' and spec.effort is not None for spec in config.roster()):
         if '--reasoning-effort' not in available:
             raise RunError('Installed Copilot does not support reasoning effort')
     try:

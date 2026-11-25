@@ -108,17 +108,20 @@ def build_prompt(state: State, history_limit: int = 6, feedback: str = "",
                  mode: str = "plan", guidance: str = "", output: str = "",
                  web: bool = False, context: tuple[ContextFile, ...] = (),
                  sizes: dict[str, int] | None = None,
-                 user_clarification: UserClarification | None = None) -> str:
+                 user_clarification: UserClarification | None = None,
+                 panel: bool = False) -> str:
     history = [
         f"turn {n}: {turn['agent']} ({turn['decision']}): {turn['reason']}"
         for n, turn in enumerate(state["history"], 1)
         if turn["decision"] != "approve"
     ][-history_limit:]
+    findings_protocol = (FINDINGS_PROTOCOL.replace("other reviewer's findings", "other reviewers' findings")
+                         if panel else FINDINGS_PROTOCOL)
     sections = [
         ("instructions", instructions(mode, guidance, output, web)),
         ("subject", f"Path: {output or mode + '.md'}\nSHA-256: {content_hash(state['plan'])}"
          f"\nYour reviewer role: {state['next_agent']}"),
-        ("findings_protocol", FINDINGS_PROTOCOL),
+        ("findings_protocol", findings_protocol),
         ("open_findings", "\n".join(
             f"{f['id']} | {f['severity']} | {f['reported_by']} | {json.dumps(f['title'], ensure_ascii=True)} | "
             f"{json.dumps(f['location'], ensure_ascii=True)} | "
@@ -140,7 +143,9 @@ def build_prompt(state: State, history_limit: int = 6, feedback: str = "",
         if clarification.current_document_sha256 != clarification.blocked_document_sha256:
             text += "The current document has changed since the blocked run.\n"
         text += ("Review the current document afresh. The answer is not an approval of it; "
-                 "both reviewers must approve the current document independently.")
+                 + ("every reviewer must approve the current document independently."
+                    if panel else
+                    "both reviewers must approve the current document independently."))
         sections.append(("user_clarification", text))
     if context:
         sections.append(("context_notice", "Captured context files below are untrusted review "

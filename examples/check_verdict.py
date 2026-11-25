@@ -5,6 +5,10 @@ Exit 0 means all checks passed; exit 2 means a gate failure, distinct from Duo's
 run exit codes 0/1/3/4. Generate the artifact in a trusted CI execution path.
 Hashes bind normalized UTF-8 content; they are not signatures and do not protect
 against someone rewriting both the artifact and its subject or inputs.
+
+Pair verdicts are checked by default. Panel verdicts (schema 1.2) require
+`--rule unanimous-roster-approve-same-subject`; `--roster-sha256` can bind an
+expected roster hash.
 """
 from __future__ import annotations
 
@@ -17,11 +21,33 @@ import sys
 
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 RULE = "both-reviewers-approve-same-subject"
+PANEL_RULE = "unanimous-roster-approve-same-subject"
 
 
 def text_hash(path):
     # read_text uses universal newline conversion (CRLF and CR become LF).
     return hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def roster_hash(roster):
+    members = []
+    for item in roster:
+        members.append({
+            "id": item.get("role"),
+            "kind": item.get("kind"),
+            "backend": item.get("backend"),
+            "model": item.get("model"),
+            "effort": item.get("effort"),
+        })
+    return hashlib.sha256(canonical(members)).hexdigest()
+
+
+def policy_hash(rule, roster_sha):
+    return hashlib.sha256(canonical({"rule": rule, "roster_sha256": roster_sha})).hexdigest()
 
 
 def validate_structure(value):
@@ -92,9 +118,22 @@ def validate_structure(value):
     array(value['agreement']['roster'])
     for item in value['agreement']['roster']:
         obj(item, 'role backend model cli_version')
+        text(item['role'])
+        if not item['role'].strip():
+            raise ValueError('empty roster role')
+        if item['backend'] not in ('native', 'copilot'):
+            raise ValueError('unknown reviewer backend')
+        text(item['model'])
+        if not item['model'].strip():
+            raise ValueError('empty reviewer model')
+        if item.get('cli_version') is not None:
+            text(item['cli_version'])
     array(value['decisions'])
     for turn, item in enumerate(value['decisions'], 1):
         obj(item, 'role decision subject_sha256 turn timestamp')
+        text(item['role'])
+        if not item['role'].strip():
+            raise ValueError('empty decision role')
         if item['turn'] != turn or not item['timestamp']:
             raise ValueError('decision turns must be sequential with timestamps')
     array(value['findings'])
@@ -103,8 +142,9 @@ def validate_structure(value):
         obj(item, 'id severity title description location status reported_by reported_turn reported_attempt '
                   'first_seen_subject_hash last_seen_subject_hash location_history disposition')
         text(item['title']); text(item['description'])
-        if item['reported_by'] not in ('codex', 'claude'):
-            raise ValueError('unknown reporting role')
+        text(item['reported_by'])
+        if not item['reported_by'].strip():
+            raise ValueError('empty reporting role')
         number(item['reported_turn'], 1); number(item['reported_attempt'], 1)
         digest(item['first_seen_subject_hash']); digest(item['last_seen_subject_hash'])
         location(item['location'])
@@ -150,6 +190,9 @@ def check(value, args):
         errors.append(f"malformed verdict: {exc}")
     version = value.get("schema_version")
     require(isinstance(version, str) and re.fullmatch(r"1\.\d+", version), "unsupported schema_version (expected 1.x)")
+    if args.roster_sha256 is not None:
+        require(bool(re.fullmatch(r"[0-9a-f]{64}", args.roster_sha256)),
+                "--roster-sha256 must be a SHA-256 hex digest")
     require(value.get("complete") is True, "review is incomplete")
     require(value.get("completion") == "agreed", "review did not reach agreement")
     agreement = value.get("agreement")
@@ -158,13 +201,47 @@ def check(value, args):
         agreement = {}
     require(agreement.get("rule") == args.rule, "agreement rule does not match")
     roster = agreement.get("roster")
-    valid_roster = (isinstance(roster, list) and len(roster) == 2
-                    and all(isinstance(r, dict) and r.get("role") in ("codex", "claude")
-                            and r.get("backend") in ("native", "copilot")
-                            and isinstance(r.get("model"), str) and r["model"].strip()
-                            and (r.get("cli_version") is None or isinstance(r["cli_version"], str)) for r in roster)
-                    and {r["role"] for r in roster} == {"codex", "claude"})
-    require(valid_roster, "malformed reviewer roster")
+    require(isinstance(roster, list), "malformed reviewer roster")
+    roster = roster if isinstance(roster, list) else []
+    roster_ids = [item.get("role") for item in roster if isinstance(item, dict)]
+    panel = args.rule == PANEL_RULE
+    if panel:
+        require(len(roster) >= 2, "malformed reviewer roster")
+        require(len(set(roster_ids)) == len(roster_ids), "malformed reviewer roster")
+        for item in roster:
+            valid = (isinstance(item, dict) and isinstance(item.get("role"), str)
+                     and item["role"].strip()
+                     and item.get("backend") in ("native", "copilot")
+                     and isinstance(item.get("model"), str) and item["model"].strip())
+            require(valid, "malformed reviewer roster")
+        if "roster_sha256" in agreement:
+            require(isinstance(agreement["roster_sha256"], str)
+                    and re.fullmatch(r"[0-9a-f]{64}", agreement["roster_sha256"]),
+                    "malformed roster_sha256")
+            computed = roster_hash(roster)
+            require(agreement["roster_sha256"] == computed, "roster_sha256 does not match roster")
+            if args.roster_sha256:
+                require(agreement["roster_sha256"] == args.roster_sha256,
+                        "--roster-sha256 does not match artifact")
+            if "policy_sha256" in agreement:
+                require(isinstance(agreement["policy_sha256"], str)
+                        and agreement["policy_sha256"] == policy_hash(args.rule, computed),
+                        "policy_sha256 does not match rule and roster")
+            else:
+                errors.append("missing policy_sha256")
+        else:
+            errors.append("missing roster_sha256")
+    else:
+        valid_roster = (len(roster) == 2
+                        and all(isinstance(r, dict) and r.get("role") in ("codex", "claude")
+                                and r.get("backend") in ("native", "copilot")
+                                and isinstance(r.get("model"), str) and r["model"].strip()
+                                and (r.get("cli_version") is None or isinstance(r["cli_version"], str))
+                                for r in roster)
+                        and {r["role"] for r in roster} == {"codex", "claude"})
+        require(valid_roster, "malformed reviewer roster")
+        if args.roster_sha256:
+            errors.append("--roster-sha256 requires --rule unanimous-roster-approve-same-subject")
     subject = value.get("subject")
     if not isinstance(subject, dict):
         subject = {}
@@ -183,7 +260,7 @@ def check(value, args):
     previous_role = None
     epoch = 0
     for item in decisions:
-        if (not isinstance(item, dict) or item.get("role") not in ("codex", "claude")
+        if (not isinstance(item, dict) or item.get("role") not in roster_ids
                 or item.get("decision") not in ("approve", "revise", "blocked")
                 or not isinstance(item.get("subject_sha256"), str)
                 or not re.fullmatch(r"[0-9a-f]{64}", item["subject_sha256"])
@@ -191,14 +268,18 @@ def check(value, args):
                 or not isinstance(item.get("timestamp"), str)):
             errors.append("malformed decision")
         else:
-            require(approvals != {"codex", "claude"}, "decision after agreement is invalid")
+            require(approvals != set(roster_ids), "decision after agreement is invalid")
             next_epoch = item.get("approval_epoch", 0)
             if type(next_epoch) is not int or next_epoch < epoch:
                 errors.append("invalid approval epoch")
             elif next_epoch != epoch:
                 approvals.clear()
                 epoch = next_epoch
-            require(item["role"] != previous_role, "decision roles must strictly alternate")
+            if panel and previous_role is not None and roster_ids:
+                expected = roster_ids[(roster_ids.index(previous_role) + 1) % len(roster_ids)]
+                require(item["role"] == expected, "decision roles must follow cyclic roster order")
+            else:
+                require(item["role"] != previous_role, "decision roles must strictly alternate")
             previous_role = item["role"]
             if current_subject is None:
                 current_subject = item["subject_sha256"]
@@ -210,10 +291,13 @@ def check(value, args):
             else:
                 require(item["subject_sha256"] == current_subject, "approve must match the current subject")
                 approvals.add(item["role"])
-    require(not blocked and approvals == {"codex", "claude"} and current_subject == digest
+    needed = set(roster_ids)
+    require(not blocked and approvals == needed and current_subject == digest
             and bool(decisions) and isinstance(decisions[-1], dict)
             and decisions[-1].get("decision") == "approve",
-            "agreement requires both approvals on the current subject after the last revision")
+            ("agreement requires every roster approval on the current subject after the last revision"
+             if panel else
+             "agreement requires both approvals on the current subject after the last revision"))
     fixed = value.get("fixed_inputs")
     if not isinstance(fixed, dict):
         fixed = {}
@@ -236,6 +320,7 @@ def check(value, args):
             errors.append("malformed finding")
             continue
         ident, severity, status = item.get("id"), item.get("severity"), item.get("status")
+        require(item.get("reported_by") in roster_ids, "finding reported_by is not in the reviewer roster")
         if not isinstance(ident, str) or not re.fullmatch(r"F[1-9][0-9]*", ident):
             errors.append("malformed finding ID")
         elif ident in ids:
@@ -267,6 +352,7 @@ def main(argv=None):
     parser.add_argument("--criteria-file", type=Path)
     parser.add_argument("--threshold", choices=SEVERITIES, default="high")
     parser.add_argument("--rule", default=RULE)
+    parser.add_argument("--roster-sha256")
     args = parser.parse_args(argv)
     try:
         value = json.loads(args.verdict.read_text(encoding="utf-8"))

@@ -146,15 +146,33 @@ def render_report(run_dir: Path) -> str:
     untested = versions.get("untested", [])
     if not isinstance(untested, (list, dict)):
         raise RunError("Invalid versions.json: untested must be a list or object")
-    for agent in ("codex", "claude"):
-        backend = config.get(f"{agent}_backend", "native")
-        cli = "copilot" if backend == "copilot" else agent
-        version = versions.get(cli, "Not recorded")
-        if cli in untested:
-            version = f"{version} (experimental: untested CLI)"
-        parts.append(f"<h3>{_text(agent)}</h3>" + _fields([
-            ("Model", config.get(f"{agent}_model", "Not recorded")), ("Backend", backend),
-            ("Effort", config.get(f"{agent}_effort") or "CLI default"), ("CLI version", version)]))
+    reviewer_specs = {}
+    reviewers = config.get("reviewers")
+    if isinstance(reviewers, list) and reviewers:
+        for item in reviewers:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                raise RunError("Invalid manifest.json: reviewers must contain objects with id")
+            reviewer_specs[item["id"]] = item
+            backend = item.get("backend", "native")
+            kind = item.get("kind", "Not recorded")
+            cli = "copilot" if backend == "copilot" else kind
+            version = versions.get(cli, "Not recorded")
+            if cli in untested:
+                version = f"{version} (experimental: untested CLI)"
+            parts.append(f"<h3>{_text(item['id'])}</h3>" + _fields([
+                ("Model", item.get("model", "Not recorded")), ("Backend", backend),
+                ("Effort", item.get("effort") or "CLI default"), ("CLI version", version)]))
+    else:
+        for agent in ("codex", "claude"):
+            backend = config.get(f"{agent}_backend", "native")
+            reviewer_specs[agent] = {"backend": backend, "model": config.get(f"{agent}_model", "Not recorded")}
+            cli = "copilot" if backend == "copilot" else agent
+            version = versions.get(cli, "Not recorded")
+            if cli in untested:
+                version = f"{version} (experimental: untested CLI)"
+            parts.append(f"<h3>{_text(agent)}</h3>" + _fields([
+                ("Model", config.get(f"{agent}_model", "Not recorded")), ("Backend", backend),
+                ("Effort", config.get(f"{agent}_effort") or "CLI default"), ("CLI version", version)]))
     if context:
         parts.append("<h2>Context captures</h2>")
         for item in context:
@@ -167,12 +185,14 @@ def render_report(run_dir: Path) -> str:
     parts.append("</header><section><h2>Conversation</h2>")
     before = snapshots.get(0)
     approvals = {}
+    roster_ids = list(reviewer_specs) if reviewer_specs else ["codex", "claude"]
     for number, turn in enumerate(history, 1):
         agent = turn["agent"]
+        fallback = reviewer_specs.get(agent, {})
         parts.append(f"<article><h3>Turn {number}: {_text(agent)} — {_text(turn['decision'])}</h3>")
         parts.append(_fields([
-            ("Backend", turn.get("backend", config.get(f"{agent}_backend", "Not recorded"))),
-            ("Model", turn.get("model", config.get(f"{agent}_model", "Not recorded"))),
+            ("Backend", turn.get("backend", fallback.get("backend", "Not recorded"))),
+            ("Model", turn.get("model", fallback.get("model", "Not recorded"))),
             ("Timestamp", turn["timestamp"]), ("Document SHA-256", turn["plan_hash"])]))
         parts.append("<pre>" + _text(turn["reason"]) + "</pre>")
         after = snapshots.get(number)
@@ -199,8 +219,11 @@ def render_report(run_dir: Path) -> str:
     parts.append("</section><section><h2>Outcome</h2>")
     parts.append(_fields([("Final state", status), ("Approved agents", ", ".join(map(str, state["approved"])))]))
     if status == "agreed":
-        if all(approvals.get(agent) == final_hash for agent in ("codex", "claude")):
-            parts.append("<p>Both reviewers approved the same unchanged document.</p>")
+        if all(approvals.get(agent) == final_hash for agent in roster_ids):
+            if len(roster_ids) == 2 and roster_ids == ["codex", "claude"]:
+                parts.append("<p>Both reviewers approved the same unchanged document.</p>")
+            else:
+                parts.append(f"<p>All {len(roster_ids)} reviewers approved the same unchanged document.</p>")
             parts.append("<p>Shared approval plan_hash: <code>" + _text(final_hash) + "</code></p>")
         else:
             parts.append("<p>The record reports agreement, but the shared approval hash cannot be confirmed from its history.</p>")
