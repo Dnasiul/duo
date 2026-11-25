@@ -69,6 +69,24 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(allow=allow), self.assertRaisesRegex(RunError, 'Cannot parse'):
                 verify_version('claude', 'unrecognized', allow)
 
+    def test_version_parser_rejects_ambiguous_distinct_versions(self):
+        text = ('Update available: 1.0.120\n'
+                'GitHub Copilot CLI 1.0.95.\n')
+        with self.assertRaisesRegex(RunError, 'Cannot parse.*ambiguous'):
+            verify_version('copilot', text)
+        with self.assertRaisesRegex(RunError, 'Cannot parse.*ambiguous'):
+            verify_version('copilot', '\n'.join(reversed(text.splitlines())))
+
+    def test_version_parser_accepts_single_distinct_triple_with_prose(self):
+        self.assertEqual(verify_version(
+            'copilot',
+            'GitHub Copilot CLI 1.0.95.\n(official build, release channel)\n'),
+            'tested')
+        self.assertEqual(verify_version(
+            'copilot',
+            'GitHub Copilot CLI 1.0.95.\nLatest installed: 1.0.95\n'),
+            'tested')
+
     def test_untested_versions_are_recorded_when_allowed(self):
         def run(argv, **kwargs):
             if '--version' in argv:
@@ -176,6 +194,36 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(failure=failure), patch('duo.policy.check_claude_managed_files'), self.assertRaises(RunError) as caught:
                 verify_controls('codex', 'claude', self.root / 'settings.json', probe)
             self.assertNotIn('SECRET', str(caught.exception))
+
+    def test_rejects_duplicate_codex_feature_rows(self):
+        def probe(argv, env=None):
+            if 'features' in argv:
+                # Chain (2): an earlier "true" row must not be silently
+                # overridden by a later duplicate "false" row.
+                return (self.probe(argv).replace('hooks stable false', 'hooks stable true')
+                        + '\nhooks stable false\n')
+            return self.probe(argv)
+        with patch('duo.policy.check_claude_managed_files'), \
+                self.assertRaisesRegex(RunError, r'duplicate feature row: hooks'):
+            verify_controls('codex', 'claude', self.root / 'settings.json', probe)
+
+    def test_rejects_unknown_codex_feature_state(self):
+        def probe(argv, env=None):
+            if 'features' in argv:
+                return self.probe(argv).replace('hooks stable false', 'hooks stable unknown')
+            return self.probe(argv)
+        with patch('duo.policy.check_claude_managed_files'), \
+                self.assertRaisesRegex(RunError, 'feature states'):
+            verify_controls('codex', 'claude', self.root / 'settings.json', probe)
+
+    def test_rejects_unexpected_codex_feature_layout(self):
+        def probe(argv, env=None):
+            if 'features' in argv:
+                return self.probe(argv).replace('hooks stable false', 'hooks stable true false')
+            return self.probe(argv)
+        with patch('duo.policy.check_claude_managed_files'), \
+                self.assertRaisesRegex(RunError, 'feature layout'):
+            verify_controls('codex', 'claude', self.root / 'settings.json', probe)
 
     def test_stream_json_must_be_an_output_format_value(self):
         for output_help in ('--output-format json --input-format stream-json',
