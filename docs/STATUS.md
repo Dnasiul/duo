@@ -1020,3 +1020,77 @@ and the latest segment's `started_at` only, which is sufficient because the
 budget derives from `created_at`, `deadline`, and `max_seconds`; and after a
 small backward clock correction, resume refuses as inconsistent until the
 wall clock passes the recorded `updated_at` (conservative by design).
+
+## Reviewer panels
+
+Unreleased implementation of plan §13 for document modes. An explicit ordered
+roster (`--reviewer ID:KIND:BACKEND:MODEL[:EFFORT]`, repeatable, at least two
+members) replaces the default pair only when given; the legacy flags remain
+the default two-member configuration with unchanged behavior, and combining
+the two forms is refused. Scheduling is sequential round-robin over roster
+order; agreement is unanimity of the fixed roster on the same unchanged
+subject, a revision clears every member's approval including the reviser's,
+and no majority, quorum, abstention, or substitution exists anywhere. Panel
+runs emit verdict schema 1.2 (rule `unanimous-roster-approve-same-subject`,
+full roster, `roster_sha256` and `policy_sha256` over canonical JSON) and
+checkpoint schema 2 (the same hashes recomputed at validation); default-pair
+runs keep emitting verdict 1.0/1.1 and schema-1 checkpoints with byte-identical
+config serialization. `src/duo/diversity.py` classifies roster models by an
+explicit prefix family mapping (`gpt-`/`claude-`, anything else unknown, never
+guessed), reports pairwise relations, and warns on identical models and
+same-family concentration; warnings appear on stderr, in `--json` summaries,
+and in `reviewer-policy.json`. The reference gate accepts a panel verdict
+only under the panel rule with a matching `--roster-sha256`; its default
+invocation rejects panel verdicts. Build mode does not exist yet (§10), so
+the build-plus-panel refusal is vacuous.
+
+Loop and verification (2026-11-25): implemented by `gpt-5.3-codex` through
+Copilot CLI — native Codex was usage-limited until 2026-11-29, an adaptation
+of the usual loop that preserves the cross-model implement/review split —
+and reviewed by native Claude `claude-opus-5-5` over four rounds (three
+REVISE, then APPROVE; commits `67ef4bf`, `babd447`, `4a74d79`, `dda41ab`).
+The suite grew from 433 to **468 tests**. Coordinator verification: clean
+non-editable install, `scripts/run_tests.py` from an unrelated directory,
+468 tests OK, in an environment without the `jsonschema` library (the suite
+is hermetic; full schema validation is a verification step, as in §11/§12).
+With the real `jsonschema` library (4.10.3), both valid 1.2 fixtures pass
+the shipped `verdict-1.2.json` and the pair-rule panel fixture fails it; the
+remaining invalid panel fixtures are validator-level and are rejected by
+`validate_verdict` in the suite's fixture tests.
+
+Live evidence (2026-11-25, Linux). Panel roster: `lead` (codex kind,
+Copilot backend, `gpt-5.3-codex`, high), `opus` (claude, native,
+`claude-opus-5-5`, high), `sonnet` (claude, Copilot, `claude-sonnet-5.5`,
+high). Run `run-eqyn9pdi` (Trailhead statistics plan) agreed in 8 turns and
+8 attempts: sonnet's and lead's approvals were cleared by opus's turn-5
+revision and unanimity was re-earned on the final subject in turns 6–8;
+verdict 1.2 records `roster_sha256` `b974aac6…` and `policy_sha256`
+`627d70f2…`, the schema-2 checkpoint carries the same hashes, and 9 findings
+closed with none open. The implementation's own diversity classification of
+this panel is three instances in **two** families (gpt ×1, claude ×2), with
+the same-family concentration warning shown on stderr and recorded in
+`reviewer-policy.json`. A default-pair run on the same code (`run-680_ahbc`,
+Copilot codex + native claude) agreed in 4 turns with verdict 1.0, a
+schema-1 checkpoint, and no `reviewers` key in the manifest or checkpoint
+config. Panel/checkpoint interplay: run `run-53pjli5o` was SIGKILLed after
+turn 3 with `approved == ["sonnet"]` durable and turn 4 in flight; resume
+opened segment 1, recorded `approvals_invalidated` for sonnet at approval
+epoch 1, and the run agreed only after all three members approved afresh in
+epoch 1 (8 turns, 11 attempts) — including an opus revision that cleared
+lead's fresh epoch-1 approval first. A blocked member stops a panel run:
+in `run-5sk1338a`, opus returned blocked on turn 2 and the run ended
+(blocked, exit 3) with no assent counted. Gate checks on `run-eqyn9pdi`'s
+verdict: default invocation exits 2 ("agreement rule does not match",
+"malformed reviewer roster"); the panel rule with the correct
+`--roster-sha256` exits 0; a wrong hash exits 2.
+
+Known limitations: live panel evidence uses the Copilot backend for the
+GPT-family member — native-Codex panel evidence is deferred until the usage
+limit resets on 2026-11-29 (§13.6: unavailable configurations remain an
+explicit evidence limitation). The shipped 1.2 schema pins a closed finding's
+`disposition.by` to its reporter only for the `codex`/`claude` ids (JSON
+Schema cannot express field equality in general); `validate_verdict` and
+the gate enforce it for every roster id. The suite's schema-parity test is
+structural and locates the agreed/closed-finding branches positionally; it
+catches the regression class found in review, and full schema validation
+remains a coordinator verification step.
