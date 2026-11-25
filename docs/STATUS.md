@@ -1095,10 +1095,32 @@ verdict: default invocation exits 2 ("agreement rule does not match",
 "malformed reviewer roster"); the panel rule with the correct
 `--roster-sha256` exits 0; a wrong hash exits 2.
 
-Known limitations: live panel evidence uses the Copilot backend for the
-GPT-family member — native-Codex panel evidence is deferred until the usage
-limit resets on 2026-11-29 (§13.6: unavailable configurations remain an
-explicit evidence limitation). The shipped 1.2 schema pins a closed finding's
+Native-backend panel evidence (2026-11-25, Linux, Duo 0.8.1). The owner
+performed a Codex limit reset the same day, so the deferred native run
+followed within hours. Roster: `lead` (codex kind, native, `gpt-6-astra`,
+high), `opus` (claude, native, `claude-opus-5-5`, high), `scout` (codex,
+native, `gpt-6-astra`, medium) — with the Copilot monthly quota exhausted
+(HTTP 402), no Copilot member was available, so the third seat is a second
+native Codex at a lower effort rather than a second family. Run
+`run-zouzw1q_` (logtrim plan) agreed in 4 turns and 4 attempts; verdict 1.2
+records `roster_sha256` `cfe1927b…` and `policy_sha256` `73faa213…`, the
+schema-2 checkpoint carries the same roster hash, and 1 finding closed with
+none open; `validate_verdict` and `duo.checkpoints` validation both pass
+and the auto-emitted `report.html` is script-free. The diversity
+classification is three instances in **two** families (gpt ×2, claude ×1),
+with the identical-model warning for `lead`/`scout` and the same-family
+concentration warning shown on stderr and recorded in
+`reviewer-policy.json`. Gate checks on the run's verdict reproduce the
+pattern above: the default invocation exits 2, the panel rule with the
+correct `--roster-sha256` exits 0, and a wrong hash exits 2.
+
+Known limitations: the first live panel evidence above uses the Copilot
+backend for the GPT-family member; native-Codex panel evidence, deferred at
+that point under §13.6 (unavailable configurations remain an explicit
+evidence limitation), was gathered the same day after the owner's limit
+reset (`run-zouzw1q_`, above), and that deferral is closed. §13.6's rule
+still applies to configurations not yet exercised live (a panel run on
+macOS, for example). The shipped 1.2 schema pins a closed finding's
 `disposition.by` to its reporter only for the `codex`/`claude` ids (JSON
 Schema cannot express field equality in general); `validate_verdict` and
 the gate enforce it for every roster id. The suite's schema-parity test is
