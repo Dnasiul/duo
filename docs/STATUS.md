@@ -84,6 +84,14 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 7. **F4: native Claude tool audit** (plan §2): implemented in the working tree;
    see the stream evidence below. Document snapshots archive the reviewed
    document only; emitted tool logs do not guarantee complete file/page archives.
+8. **Codex login-shell environment reintroduction** (plan §7.2): investigated
+   on Linux on 2026-11-25 (see "Codex login-shell environment reintroduction"
+   below). The supported controls are identified and the probe harness is
+   built and verified up to the model-call boundary, but the decisive live
+   sentinel probe is deferred until after 2026-11-29 13:11, when the native
+   Codex account usage limit resets; no control is adopted yet, so what the
+   login shell adds remains unverified. macOS is an untested platform for
+   this question. The unresolved boundary passes to section 4.
 
 ## HTML agreement reports (Unreleased, 2026-11-23)
 
@@ -1095,3 +1103,105 @@ the gate enforce it for every roster id. The suite's schema-parity test is
 structural and locates the agreed/closed-finding branches positionally; it
 catches the regression class found in review, and full schema validation
 remains a coordinator verification step.
+
+## Codex login-shell environment reintroduction (plan §7.2)
+
+Investigation run 2026-11-25 on Linux (Ubuntu 24.04, x86-64) with codex-cli
+0.171.0. macOS is an untested platform for this question (it needs the owner's
+Mac); the shell under test is bash (the account's passwd shell and the owner's
+`SHELL`). No code or behavior changed, so there is no CHANGELOG entry and
+`docs/SECURITY.md` is unchanged: its Codex environment row still stands —
+Codex's commands run in a login shell that can set variables again from the
+shell profile, and what the login shell adds is not verified.
+
+**The supported controls (vendor documentation).** OpenAI's Codex
+configuration documentation (Config basics and Advanced Configuration,
+learn.chatgpt.com/codex, crawled 2026-11-21/25) describes two distinct
+mechanisms:
+
+- `shell_environment_policy` "controls which environment variables Codex
+  passes to spawned commands": `inherit` (`all`/`core`/`none`), a `set`
+  table, `ignore_default_excludes` (default `true`; when `false`, names
+  containing `KEY`, `SECRET`, or `TOKEN` are automatically excluded first),
+  and keyed `[shell_environment_policy.filters]` glob patterns
+  (`exclude`/`include`, case-insensitive; any `include` makes an allowlist).
+  Application order: automatic exclusions, custom exclusions, `set` values,
+  include allowlist. Legacy `exclude`/`include_only` arrays remain supported
+  and are rejected in combination with `filters` in one layer. This policy
+  governs the environment of the process Codex spawns — by construction it
+  cannot remove a variable that the spawned process's own startup files set
+  afterwards.
+- `allow_login_shell = false`, a top-level key documented as "Optional
+  hardening: disallow login shells for shell tools". This is the only
+  documented control of login-shell behavior itself. (Managed
+  `requirements.toml` can also enforce a login-shell policy, but that is an
+  enterprise mechanism Duo neither needs nor uses; Duo already passes every
+  Codex setting as a per-invocation `-c` override under `--strict-config`.)
+
+Both keys are recognized by 0.171.0: `codex doctor -c allow_login_shell=false`,
+`-c shell_environment_policy.inherit=core`, and
+`-c shell_environment_policy.ignore_default_excludes=false` each report
+"config ✓ loaded", while a bogus key (`-c duo_bogus_key_zz=1`) reports a
+warning state ("⚠ config"). Under Duo's actual `exec --strict-config`
+invocation, the `allow_login_shell=false` variant below failed with the same
+account usage-limit error as the baseline — not a configuration error.
+
+**`shell_environment_policy` is effective on the spawned-command path**
+(no model call; `codex sandbox /usr/bin/env` with `PROBE_PLAIN` and
+`PROBE_TOKEN` set in the parent environment, 2026-11-25): default policy
+passes both; `ignore_default_excludes=false` removes `PROBE_TOKEN` only;
+legacy `exclude=["PROBE_PLAIN"]` removes `PROBE_PLAIN` only; `inherit=none`
+and `inherit=core` remove both. Filters work from a config file (glob
+`"PROBE_*"` excluded) and via `-c` with an exact name
+(`shell_environment_policy.filters.PROBE_PLAIN="exclude"`); the glob-key
+form via `-c` did not take effect in one test. This proves the filter acts
+on the environment handed to a spawned command. It does not by itself say
+anything about a login profile, which executes inside the spawned shell
+after that environment is established.
+
+**The decisive probe is built and deferred.** Harness:
+`~/workspace/duo-runs/duo-login-shell/probe/probe.py` (README alongside it
+records the exact run sequence and interpretation key). It builds the exact
+reviewer environment and argv Duo uses for native Codex
+(`duo.policy.reviewer_environment` + `codex_options` + the adapter's
+`exec` argv, model `gpt-6-astra`, effort high), points `HOME` at a
+disposable directory whose `.bash_profile` exports `DUO_PROBE_PROFILE` and
+`DUO_PROBE_PROFILE_TOKEN` and whose `.bashrc` exports `DUO_PROBE_NONLOGIN`
+(attribution control), keeps `CODEX_HOME` at the real `~/.codex` so the
+stored ChatGPT login is used through the supported config-home mechanism
+(no credential copied or printed), and asserts a parent-only
+`DUO_PROBE_DROPPED` never enters the constructed environment. Dry runs
+verify argv and environment construction for all four variants (baseline;
+`allow_login_shell=false`; policy-only; combined). Two live attempts on
+2026-11-25 (baseline and `allow_login_shell=false`) both failed in seconds
+with the account usage-limit error ("You've hit your usage limit … try
+again at Nov 29th, 2026 1:11 PM"), after configuration acceptance and
+authentication — so authentication survives the disposable-HOME setup up to
+the model-call boundary, and no sentinel result exists yet. The four runs
+execute verbatim from the probe README once the limit resets; Copilot
+evidence is not a substitute, as this behavior is Codex-specific.
+
+**Adoption: none.** Plan §7.2's acceptance requires a prevention claim to
+show the sentinel absent despite the startup file attempting to set it; that
+demonstration does not exist yet, so no control is adopted and nothing in
+Duo's overrides changes. `allow_login_shell=false` is the candidate control;
+whether `shell_environment_policy` alone leaves profile sentinels in place
+(the ordering question) is exactly what the deferred policy-only run
+decides. If a control is adopted later, note that `verify_controls` has no
+metadata surface for it (it is not a feature flag): verification would rest
+on `--strict-config` acceptance plus this probe, and the probe should then
+be promoted into the test/smoke tooling with argv/configuration tests.
+
+**Handed to section 4:** the isolation feasibility gate inherits this
+unresolved boundary in full — under Duo's current invocation, a native
+Codex review's command shell is a login shell whose startup files execute
+after all of Duo's and Codex's environment filtering, so the effective
+command environment can include variables from the user's shell profile
+that neither Duo's allowlist nor `shell_environment_policy` admitted; §4's
+boundary definition must either (a) incorporate a demonstrated control
+(the deferred §7.2 probe result, starting with `allow_login_shell=false`),
+or (b) treat profile-set variables as inside the boundary for native Codex
+on each platform (Linux/bash evidenced as the open question; macOS
+untested). §4 should also account for non-login startup mechanisms the
+§7.2 probe does not cover (`BASH_ENV`, zsh's `ZDOTDIR`/`.zshenv` class) —
+noted here as analysis, not evidence.
