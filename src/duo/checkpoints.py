@@ -33,6 +33,13 @@ KEYS = set('schema_version duo_version run_id segment sequence created_at update
 PANEL_KEYS = KEYS | {'roster_sha256', 'policy_sha256'}
 
 
+def config_payload(config: Config) -> dict:
+    payload = json.loads(json.dumps({**asdict(config), 'repo': str(config.repo)}))
+    if not config.reviewers:
+        payload.pop('reviewers', None)
+    return payload
+
+
 def utc(value: str) -> datetime:
     _string(value, 'UTC timestamp', nonempty=True)
     result = datetime.fromisoformat(value)
@@ -166,7 +173,8 @@ def validate_state(state: dict, config: Config) -> None:
     if len(set(state['approved'])) != len(state['approved']):
         raise ValueError('Duplicate approval')
     if state['status'] == 'agreed' and set(state['approved']) != roster_set:
-        raise ValueError('Agreement requires all live approvals')
+        raise ValueError('Agreement requires all live approvals' if config.reviewers
+                         else 'Agreement requires both live approvals')
     _array(state['history'], 'history')
     if len(state['history']) != state['turns']:
         raise ValueError('History length must equal turns')
@@ -179,7 +187,9 @@ def validate_state(state: dict, config: Config) -> None:
     for turn in state['history']:
         _object(turn, {'agent', 'decision', 'reason', 'plan_hash', 'timestamp', 'backend', 'model'}, 'turn')
         if turn['agent'] != role:
-            raise ValueError('History roles must follow the configured roster order')
+            raise ValueError('History roles must follow the configured roster order'
+                             if config.reviewers else
+                             'History roles must alternate from the configured start')
         role = roster[(index[role] + 1) % len(roster)]
         _choice(turn['decision'], DECISIONS, 'decision')
         if blocked:
@@ -413,7 +423,7 @@ class Journal:
                      segment=0, sequence=0, created_at=created_at, updated_at=created_at,
                      deadline=deadline, max_seconds=config.max_seconds, status='running',
                      repo=str(config.repo), document=manifest['document'], output=config.output,
-                     config=json.loads(json.dumps({**asdict(config), 'repo': str(config.repo)})),
+                     config=config_payload(config),
                      inputs={'task': state['task'], 'criteria': state['criteria'],
                              'clarification': manifest.get('answer'),
                              'context': [{k: item[k] for k in ('artifact', 'sha256', 'bytes')}

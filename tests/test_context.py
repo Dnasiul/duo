@@ -15,7 +15,8 @@ except ImportError:
 
 from duo.adapters import CLIAdapter
 from duo.cli import main
-from duo.models import AgentError, DEFAULT_MAX_PROMPT_BYTES, MAX_CONTEXT_BYTES, MAX_TEXT_BYTES
+from duo.models import (AgentError, DEFAULT_MAX_PROMPT_BYTES, MAX_CONTEXT_BYTES,
+                        MAX_TEXT_BYTES, ReviewerSpec)
 from duo.prompts import backend_prefix, build_prompt, check_prompt_budget
 from duo.storage import ContextFile, RunStore, atomic_write, capture_context, read_input
 from duo.workflow import initial_state
@@ -208,6 +209,17 @@ class ContextTests(Fixture):
         self.assertEqual(code, 1)
         adapter.assert_not_called()
         preflight.assert_not_called()
+
+    def test_startup_budget_checks_each_distinct_roster_backend(self):
+        roster = (
+            ReviewerSpec('a', 'codex', 'native', 'gpt-5'),
+            ReviewerSpec('b', 'claude', 'copilot', 'claude-sonnet-5.5'),
+            ReviewerSpec('c', 'codex', 'copilot', 'gpt-5.6'),
+        )
+        node, state, _ = self.node([response('approve')], reviewers=roster, start='a', max_turns=3)
+        with patch('duo.workflow.check_prompt_budget') as budget:
+            node.check_startup_budget(state)
+        self.assertEqual([call.args[2] for call in budget.call_args_list], ['native', 'copilot'])
 
     def test_all_fixed_sections_and_delimiters_count_exact_utf8_bytes(self):
         state = initial_state('é' * 10, '条件', 'Plan', self.config)

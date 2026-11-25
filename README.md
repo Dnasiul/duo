@@ -169,6 +169,9 @@ duo \
 
 `SPEC` format is `ID:KIND:BACKEND:MODEL` or `ID:KIND:BACKEND:MODEL:EFFORT`.
 Roster order is review order; `--start` must be one of those IDs.
+Reviewer IDs must match `^[a-z][a-z0-9_-]{0,31}$`. The special IDs `codex`
+and `claude` are reserved to their matching kinds (`codex` and `claude`,
+respectively).
 
 Panel agreement is unanimous: **every reviewer must approve the same current
 document**. There is no majority, quorum, abstention, or substitution mode.

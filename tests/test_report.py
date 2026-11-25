@@ -101,6 +101,17 @@ class ReportTests(Fixture):
         self.assertEqual(path.read_bytes(), html.encode('utf-8'))
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
+    def test_two_member_panel_uses_all_reviewers_wording(self):
+        manifest, _ = self.record()
+        manifest['config']['reviewers'] = [
+            {'id': 'codex', 'kind': 'codex', 'backend': 'native', 'model': 'gpt-6-astra', 'effort': 'high'},
+            {'id': 'claude', 'kind': 'claude', 'backend': 'native', 'model': 'claude-opus-5-5', 'effort': 'max'},
+        ]
+        self.save('manifest.json', manifest)
+        html = render_report(self.run)
+        self.assertIn('All 2 reviewers approved the same unchanged document.', html)
+        self.assertNotIn('Both reviewers approved the same unchanged document.', html)
+
     def test_all_record_text_is_escaped_and_page_has_no_active_content(self):
         hostile = '<script>alert(1)</script><img src="https://evil/" onerror="alert(2)"> & \'quote\''
         manifest, state = self.record(document=hostile, reason=hostile)

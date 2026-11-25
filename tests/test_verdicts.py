@@ -397,6 +397,21 @@ class VerdictTests(Fixture):
             for variant in loc['oneOf']:
                 self.assertIn('subject_sha256', variant['required'])
 
+    def test_panel_schema_parity_with_validator_contract(self):
+        schema = json.loads(importlib.resources.files('duo').joinpath('schemas/verdict-1.2.json').read_text())
+        self.assertEqual(schema['$schema'], 'https://json-schema.org/draft/2020-12/schema')
+        self.assertEqual(set(schema['required']), VERDICT_KEYS)
+        self.assertEqual(set(schema['properties']), VERDICT_KEYS)
+        agreement = schema['properties']['agreement']
+        self.assertEqual(set(agreement['required']), {'rule', 'roster', 'roster_sha256', 'policy_sha256'})
+        roster = agreement['properties']['roster']['items']
+        self.assertEqual(set(roster['required']),
+                         {'role', 'kind', 'backend', 'model', 'effort', 'cli_version'})
+        self.assertEqual(roster['properties']['role']['pattern'], '^[a-z][a-z0-9_-]{0,31}$')
+        self.assertEqual(roster['properties']['kind']['enum'], ['codex', 'claude'])
+        self.assertEqual(roster['properties']['backend']['enum'], ['native', 'copilot'])
+        self.assertEqual(roster['properties']['effort']['oneOf'][1]['pattern'], '\\S')
+
     def test_agreement_rejects_stale_approval_replay_probe_e(self):
         value = json.loads((FIXTURES / 'invalid-stale-approval-replay.json').read_text())
         with self.assertRaisesRegex(ValueError, 'strictly alternate'):
@@ -804,3 +819,16 @@ class GateTests(Fixture):
             with self.subTest(path=path.name):
                 result = self.gate(json.loads(path.read_text()), '--threshold', 'critical')
                 self.assertEqual(result.returncode, 2, result.stderr)
+
+    def test_non_string_roster_role_fails_closed_for_pair_and_panel_rules(self):
+        pair = self.valid()
+        pair['agreement']['roster'][0]['role'] = ['codex']
+        result = self.gate(pair)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn('Traceback', result.stderr)
+
+        panel = json.loads((FIXTURES / 'valid-panel-agreed.json').read_text())
+        panel['agreement']['roster'][0]['role'] = ['codex']
+        result = self.gate(panel, '--rule', 'unanimous-roster-approve-same-subject')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn('Traceback', result.stderr)

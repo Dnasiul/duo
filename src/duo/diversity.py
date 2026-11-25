@@ -1,7 +1,9 @@
 """Roster diversity classification for reviewer panels.
 
-Normalization compares model-name spellings only. It does not infer routing,
-independence, or provider identity beyond explicit known prefixes.
+Normalization is spelling-only: strip whitespace, case-fold to lowercase,
+rewrite dots between digits (`5.5` -> `5-5`), then apply the alias table.
+It does not infer routing, independence, or provider identity beyond explicit
+known prefixes.
 """
 from __future__ import annotations
 
