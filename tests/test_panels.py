@@ -410,10 +410,14 @@ class PanelVerdictAndGateTests(Fixture):
                 self.assertEqual(result.returncode, 2, result.stderr)
 
     def test_gate_non_dict_roster_member_fails_closed_for_all_rules(self):
-        verdict = json.loads((FIXTURES / "valid-panel-agreed.json").read_text())
-        verdict["agreement"]["roster"].append("x")
-        self.assertEqual(self.gate(verdict).returncode, 2)
-        self.assertEqual(self.gate(verdict, "--rule", PANEL_RULE).returncode, 2)
+        for member in ("x", ["codex"]):
+            with self.subTest(member=member):
+                verdict = json.loads((FIXTURES / "valid-panel-agreed.json").read_text())
+                verdict["agreement"]["roster"].append(member)
+                for extra in ((), ("--rule", PANEL_RULE)):
+                    result = self.gate(verdict, *extra)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
 
 
 class PanelResumeTests(Fixture):

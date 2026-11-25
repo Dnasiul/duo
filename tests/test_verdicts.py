@@ -10,8 +10,6 @@ import subprocess
 import sys
 from unittest.mock import patch
 
-import jsonschema
-
 from test_duo import Fixture, response
 from duo.adapters import CLIAdapter
 from duo.cli import main
@@ -399,34 +397,38 @@ class VerdictTests(Fixture):
             for variant in loc['oneOf']:
                 self.assertIn('subject_sha256', variant['required'])
 
-    def test_panel_schema_parity_with_validator_contract(self):
+    def test_panel_schema_structural_parity_with_validator_contract(self):
+        """Structural parity only; full JSON-Schema validation runs separately."""
         schema = json.loads(importlib.resources.files('duo').joinpath('schemas/verdict-1.2.json').read_text())
         self.assertEqual(schema['$schema'], 'https://json-schema.org/draft/2020-12/schema')
         self.assertEqual(set(schema['required']), VERDICT_KEYS)
         self.assertEqual(set(schema['properties']), VERDICT_KEYS)
+        reviewer_pattern = '^[a-z][a-z0-9_-]{0,31}$'
         agreement = schema['properties']['agreement']
         self.assertEqual(set(agreement['required']), {'rule', 'roster', 'roster_sha256', 'policy_sha256'})
         roster = agreement['properties']['roster']['items']
         self.assertEqual(set(roster['required']),
                          {'role', 'kind', 'backend', 'model', 'effort', 'cli_version'})
-        self.assertEqual(roster['properties']['role']['pattern'], '^[a-z][a-z0-9_-]{0,31}$')
+        self.assertEqual(roster['properties']['role']['pattern'], reviewer_pattern)
         self.assertEqual(roster['properties']['kind']['enum'], ['codex', 'claude'])
         self.assertEqual(roster['properties']['backend']['enum'], ['native', 'copilot'])
         self.assertEqual(roster['properties']['effort']['oneOf'][1]['pattern'], '\\S')
         self.assertEqual(
             schema['properties']['decisions']['items']['properties']['role']['pattern'],
-            '^[a-z][a-z0-9_-]{0,31}$')
+            reviewer_pattern)
+        self.assertEqual(
+            schema['properties']['findings']['items']['properties']['reported_by']['pattern'],
+            reviewer_pattern)
         closed_disposition = schema['properties']['findings']['items']['allOf'][0]['else']['properties'][
             'disposition']['properties']['by']
-        self.assertEqual(closed_disposition['pattern'], '^[a-z][a-z0-9_-]{0,31}$')
-        agreed_branch = schema['allOf'][1]['then']['properties']
-        self.assertNotIn('decisions', agreed_branch)
+        self.assertEqual(closed_disposition['pattern'], reviewer_pattern)
+        agreed_then = schema['allOf'][1]['then']
+        self.assertNotIn('decisions', agreed_then['properties'])
+        self.assertNotIn('decisions', agreed_then.get('required', []))
 
-        validator = jsonschema.Draft202012Validator(schema)
         for name in ('valid-panel-agreed.json', 'valid-panel-custom-ids.json'):
             value = json.loads((FIXTURES / name).read_text())
             self.assertIs(validate_verdict(value), value)
-            self.assertEqual(list(validator.iter_errors(value)), [], name)
 
     def test_agreement_rejects_stale_approval_replay_probe_e(self):
         value = json.loads((FIXTURES / 'invalid-stale-approval-replay.json').read_text())
