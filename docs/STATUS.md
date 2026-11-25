@@ -24,6 +24,7 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 | Version policy: only tested CLI ranges; `--allow-untested-cli` runs others as experimental | `src/duo/policy.py` (`TESTED_VERSIONS`) |
 | Sanitized real-CLI fixtures replayed through the parsers | `tests/fixtures/`, `scripts/record_fixtures.py` |
 | Weekly CLI drift check, with an issue opened when action is needed | `.github/workflows/drift.yml`, `scripts/check_drift.py` |
+| Parsing-dependency inventory for plan §6 step 1 ("Dependence on message wording"): runtime and tooling parser sites, fallback behavior, and risk classifications; minimal fail-closed guards landed with it for ambiguous CLI version output, ambiguous Codex feature listings, and Copilot reply streams without a successful terminal result | `docs/PARSING_INVENTORY.md`, `src/duo/policy.py`, `src/duo/copilot.py`, `src/duo/adapters.py` |
 | SIGTERM/SIGHUP stop the reviewer; lock per repository; accurate failure status; capped retry delays | `src/duo/cli.py`, `storage.py`, `workflow.py` |
 | Output and run-storage limits enforced while reviewers run; 1 MiB input limits; `duo-clean` | `src/duo/adapters.py`, `src/duo/cleanup.py` |
 | Deployment contract, compatibility matrix, restart behavior | README "Supported deployment" |

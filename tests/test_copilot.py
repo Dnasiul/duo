@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from test_duo import Fixture, response
 from duo import copilot
-from duo.adapters import CLIAdapter
+from duo.adapters import CLIAdapter, copilot_reply
 from duo.cli import main
 from duo.models import AgentError, Config, RunError
 
@@ -155,6 +155,20 @@ else:
             adapter = CLIAdapter(self.copilot_config(binary), self.store)
             with self.subTest(body=body), self.assertRaises(AgentError):
                 adapter('codex', 'Review', 5)
+        stream = self.root / 'missing-terminal.jsonl'
+        stream.write_text(json.dumps({
+            'type': 'assistant.message',
+            'data': {'content': json.dumps(ready), 'toolRequests': []},
+        }) + '\n')
+        with self.assertRaisesRegex(AgentError, 'terminal result event'):
+            copilot_reply(stream)
+        stream = self.root / 'false-terminal.jsonl'
+        stream.write_text(json.dumps({
+            'type': 'assistant.message',
+            'data': {'content': json.dumps(ready), 'toolRequests': []},
+        }) + '\n' + json.dumps({'type': 'result', 'exitCode': False}) + '\n')
+        with self.assertRaisesRegex(AgentError, 'terminal result event'):
+            copilot_reply(stream)
 
     def test_copilot_final_answer_is_read_from_events(self):
         # Multi-line plans and progress lines broke the terminal text format.
@@ -166,6 +180,18 @@ else:
             adapter = CLIAdapter(self.copilot_config(binary), self.store)
             with self.subTest(text=text):
                 self.assertEqual(adapter('codex', 'Review', 5)['plan'], plan)
+
+    def test_copilot_accepts_stream_with_final_message_and_terminal_result(self):
+        reply = {'decision': 'approve', 'plan': '', 'reason': 'Ready',
+                 'findings': [], 'finding_updates': []}
+        stream = self.root / 'terminal-success.jsonl'
+        stream.write_text(
+            json.dumps({
+                'type': 'assistant.message',
+                'data': {'content': json.dumps(reply), 'phase': 'final_answer', 'toolRequests': []},
+            }) + '\n' +
+            json.dumps({'type': 'result', 'exitCode': 0}) + '\n')
+        self.assertEqual(copilot_reply(stream), reply)
 
     def test_model_text_on_stdout_never_marks_failure_permanent(self):
         binary = self.fake("print('The plan handles unauthorized access with no authentication bypass')\n"
@@ -292,6 +318,15 @@ reply({'decision': 'approve', 'plan': '', 'reason': 'Ready', 'findings': [], 'fi
         self.assertEqual(json.loads((run / 'versions.json').read_text())['untested'], ['copilot'])
         self.assertEqual(json.loads((run / 'result.json').read_text())['untested_cli'],
                          {'copilot': 'GitHub Copilot CLI 1.2.0.'})
+
+    def test_preflight_rejects_ambiguous_multiline_version_output(self):
+        binary = self.fake("sys.stdin.read()\nreply({'decision':'approve','plan':'','reason':'Ready', 'findings': [], 'finding_updates': []})\n")
+        path = Path(binary)
+        path.write_text(path.read_text().replace(
+            "print('GitHub Copilot CLI 1.0.95.'); sys.exit(0)",
+            "print('Update available: 1.0.120'); print('GitHub Copilot CLI 1.0.95.'); sys.exit(0)"))
+        with self.assertRaisesRegex(RunError, 'Cannot parse the copilot version'):
+            CLIAdapter(self.copilot_config(binary), self.store).preflight()
 
     def test_preflight_rejects_missing_controls(self):
         binary = self.fake('')

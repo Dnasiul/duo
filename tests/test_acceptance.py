@@ -451,6 +451,7 @@ runtime.mkdir(parents=True)
 reply = {'decision': 'approve', 'plan': '', 'reason': 'Ready', 'findings': [], 'finding_updates': []}
 print(json.dumps({'type': 'assistant.message', 'data': {'content': json.dumps(reply),
                   'phase': 'final_answer', 'toolRequests': []}}))
+print(json.dumps({'type': 'result', 'exitCode': 0}))
 ''')
         config = replace(self.config, codex_backend='copilot', copilot_bin=binary, max_run_mb=1)
         adapter = CLIAdapter(config, self.store)

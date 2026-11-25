@@ -111,10 +111,13 @@ def tested_range(agent: str) -> str:
 
 def verify_version(agent: str, version: str, allow_untested: bool = False) -> str:
     """Return "tested", or "untested" when explicitly allowed; otherwise refuse."""
-    match = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", version)
-    if not match:
+    matches = re.findall(r"\b(\d+)\.(\d+)\.(\d+)\b", version)
+    if not matches:
         raise RunError(f"Cannot parse the {agent} version; tested: {tested_range(agent)}")
-    actual = tuple(map(int, match.groups()))
+    parsed = {tuple(map(int, match)) for match in matches}
+    if len(parsed) != 1:
+        raise RunError(f"Cannot parse the {agent} version; ambiguous version output")
+    actual = parsed.pop()
     low, high = TESTED_VERSIONS[agent]
     if low <= actual < high:
         return "tested"
@@ -226,8 +229,20 @@ def verify_controls(codex: str, claude: str, settings: Path,
         if any(flag not in help_text for flag in flags):
             raise RunError("Installed codex lacks required inspection options")
         effective = probe([codex, *codex_options(allow_web), "features", "list"])
-        features = {parts[0]: parts[-1] for line in effective.splitlines()
-                    if len(parts := line.split()) >= 3}
+        known_stages = {"stable", "experimental", "deprecated", "under development", "removed"}
+        features = {}
+        for line in effective.splitlines():
+            if len(parts := line.split()) < 3:
+                continue
+            name, state = parts[0], parts[-1]
+            if state not in {"true", "false"}:
+                raise RunError("Cannot verify Codex feature states in features list output")
+            if " ".join(parts[1:-1]) not in known_stages:
+                raise RunError("Cannot verify Codex feature layout in features list output "
+                               f"(unrecognized stage: {' '.join(parts[1:-1])!r})")
+            if name in features:
+                raise RunError(f"Codex features list contains duplicate feature row: {name}")
+            features[name] = state
         if any(features.get(name) != "false" for name in CODEX_DISABLED):
             raise RunError("Codex inspection feature restrictions did not take effect; "
                            "check managed settings and CLI compatibility")
