@@ -198,10 +198,22 @@ class PolicyTests(unittest.TestCase):
     def test_rejects_duplicate_codex_feature_rows(self):
         def probe(argv, env=None):
             if 'features' in argv:
-                return self.probe(argv) + '\nhooks stable false\n'
+                # Chain (2): an earlier "true" row must not be silently
+                # overridden by a later duplicate "false" row.
+                return (self.probe(argv).replace('hooks stable false', 'hooks stable true')
+                        + '\nhooks stable false\n')
             return self.probe(argv)
         with patch('duo.policy.check_claude_managed_files'), \
                 self.assertRaisesRegex(RunError, r'duplicate feature row: hooks'):
+            verify_controls('codex', 'claude', self.root / 'settings.json', probe)
+
+    def test_rejects_unknown_codex_feature_state(self):
+        def probe(argv, env=None):
+            if 'features' in argv:
+                return self.probe(argv).replace('hooks stable false', 'hooks stable unknown')
+            return self.probe(argv)
+        with patch('duo.policy.check_claude_managed_files'), \
+                self.assertRaisesRegex(RunError, 'feature states'):
             verify_controls('codex', 'claude', self.root / 'settings.json', probe)
 
     def test_rejects_unexpected_codex_feature_layout(self):
