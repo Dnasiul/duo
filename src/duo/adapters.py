@@ -119,6 +119,7 @@ def copilot_reply(path: Path) -> object:
     commentary and tool-calling messages are skipped, as is tool output.
     """
     reply = None
+    success_result = False
     try:
         # Events include tool results, so allow more than a single response.
         if path.stat().st_size > 64 * 1024 * 1024:
@@ -129,7 +130,11 @@ def copilot_reply(path: Path) -> object:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if not isinstance(event, dict) or event.get("type") != "assistant.message":
+                if not isinstance(event, dict):
+                    continue
+                if event.get("type") == "result" and event.get("exitCode") == 0:
+                    success_result = True
+                if event.get("type") != "assistant.message":
                     continue
                 data = event.get("data")
                 if (isinstance(data, dict) and isinstance(data.get("content"), str)
@@ -140,6 +145,8 @@ def copilot_reply(path: Path) -> object:
         raise AgentError("Agent returned missing or invalid JSON") from exc
     if reply is None:
         raise AgentError("Copilot returned no final answer")
+    if not success_result:
+        raise AgentError("Copilot stream is missing a successful terminal result event")
     return parse_json(reply, allow_fence=True)
 
 
