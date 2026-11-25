@@ -111,10 +111,13 @@ def tested_range(agent: str) -> str:
 
 def verify_version(agent: str, version: str, allow_untested: bool = False) -> str:
     """Return "tested", or "untested" when explicitly allowed; otherwise refuse."""
-    match = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", version)
-    if not match:
+    matches = re.findall(r"\b(\d+)\.(\d+)\.(\d+)\b", version)
+    if not matches:
         raise RunError(f"Cannot parse the {agent} version; tested: {tested_range(agent)}")
-    actual = tuple(map(int, match.groups()))
+    parsed = {tuple(map(int, match)) for match in matches}
+    if len(parsed) != 1:
+        raise RunError(f"Cannot parse the {agent} version; ambiguous version output")
+    actual = parsed.pop()
     low, high = TESTED_VERSIONS[agent]
     if low <= actual < high:
         return "tested"

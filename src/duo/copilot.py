@@ -213,9 +213,10 @@ def _preflight(config: Config, directory: Path) -> tuple[str, dict]:
         if result.returncode:
             raise RunError('Copilot configuration probe failed')
         return result.stdout
-    version_lines = probe(['--version']).splitlines()
+    version_output = probe(['--version']).strip()
+    version_lines = version_output.splitlines()
     version = version_lines[0] if version_lines else ''
-    status = verify_version('copilot', version, config.allow_untested_cli)
+    status = verify_version('copilot', version_output, config.allow_untested_cli)
     help_text = probe(['--help'])
     available = options(help_text)
     if not available.issuperset(FLAGS):
