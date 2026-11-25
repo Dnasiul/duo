@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Native Codex invocations now pass `allow_login_shell=false`: on Linux/bash,
+  the reviewer's command shell no longer runs the login profile (plan §7.2,
+  demonstrated with Codex 0.171.0). The non-login shell still sources `.bashrc`
+  in that probe, so variables set there can still enter.
+
 ## 0.8.1 (2026-11-25)
 
 ### Fixed
