@@ -229,8 +229,19 @@ def verify_controls(codex: str, claude: str, settings: Path,
         if any(flag not in help_text for flag in flags):
             raise RunError("Installed codex lacks required inspection options")
         effective = probe([codex, *codex_options(allow_web), "features", "list"])
-        features = {parts[0]: parts[-1] for line in effective.splitlines()
-                    if len(parts := line.split()) >= 3}
+        known_stages = {"stable", "experimental", "deprecated", "under development", "removed"}
+        features = {}
+        for line in effective.splitlines():
+            if len(parts := line.split()) < 3:
+                continue
+            name, state = parts[0], parts[-1]
+            if state not in {"true", "false"}:
+                raise RunError("Cannot verify Codex feature states in features list output")
+            if " ".join(parts[1:-1]) not in known_stages:
+                raise RunError("Cannot verify Codex feature layout in features list output")
+            if name in features:
+                raise RunError(f"Codex features list contains duplicate feature row: {name}")
+            features[name] = state
         if any(features.get(name) != "false" for name in CODEX_DISABLED):
             raise RunError("Codex inspection feature restrictions did not take effect; "
                            "check managed settings and CLI compatibility")
