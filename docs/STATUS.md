@@ -4,7 +4,7 @@ Where Duo's production readiness stands, and how to continue on a Linux machine.
 Written 2026-10-13 at commit `c5886a7`; Linux live results and the 0.1.0, 0.2.0,
 0.2.1, and 0.3.0 releases added the same day; 0.3.1, 0.4.0, and 0.4.1 on
 2026-10-14; 0.4.2 on 2026-10-21; 0.4.3 on 2026-10-28; 0.4.4 on 2026-11-02; later
-releases are listed under "Done". `plan.md` is the improvement plan after 0.8.2
+releases are listed under "Done". `plan.md` is the improvement plan after 0.8.3
 (revised 2026-11-26); the production plan it replaced is `git show 918d2c5:plan.md`. This page records progress.
 
 ## Done
