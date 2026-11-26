@@ -17,7 +17,7 @@ This revision (2026-11-26) replaces the plan written after 0.4.6 (`git show 8120
 - Shipped since 0.4.6: the native Claude audit stream and context files with a 512 KiB combined prompt budget (0.5.0); HTML agreement reports (0.5.1); structured verdicts with findings and answering a blocked run (0.6.0); persistent checkpoints and `--resume` (0.7.0); reviewer panels with diversity warnings (0.8.0); fail-closed parsing guards and the parsing inventory (0.8.1); `allow_login_shell=false` for native Codex (0.8.2).
 - Native Codex reads remain unconfined, and its non-login command shell still sources `.bashrc`. Copilot's fresh configuration/cache directories are not an isolated OS home. No backend has an isolation profile; the Linux feasibility gate is recorded in `docs/ISOLATION_GATE.md`. These limitations remain explicit in `docs/SECURITY.md`.
 - The owner's Copilot account (Copilot Pro) offered `claude-sonnet-5.5`, `gpt-6-luna`, and `gpt-5.3-codex` on 2026-11-23 and refused `gpt-5.4`, `gpt-6-astra`, `claude-opus-5.5`, and `claude-fable-5-1`. Since 2026-11-25 its monthly quota is exhausted (HTTP 402 `quota_exceeded`); the owner expects a reset around 2026-12-01.
-- Message wording remains a compatibility dependency. `docs/PARSING_INVENTORY.md` classifies 23 parsing sites; three remain potential unsafe acceptance (site 9 chain (a), sites 11a/11b).
+- Message wording remains a compatibility dependency. `docs/PARSING_INVENTORY.md` classifies 23 parsing sites. Three still carry a risk of unsafe acceptance: Copilot answer selection (site 9, with two remaining cases) and the drift checks for flags and features (sites 11a/11b).
 
 Effort estimates are planning estimates, not delivery promises: small means roughly half a day to two engineering days; medium means several days; large means multiple weeks. Live-call cost, account quotas, and availability of both machines are additional dependencies.
 
@@ -35,17 +35,19 @@ Repeatable `--context-file` with a 64 KiB aggregate limit, credential rejection 
 
 ## 4. Isolation profile — feasibility gate partly run
 
-Status: step 1 recorded for Linux in `docs/ISOLATION_GATE.md` (2026-11-25); steps 2–5 not started. Effort: Linux native-only release-ready milestone approximately 7–11 engineer-days per the gate's revised estimate; Copilot another 0.5–1 day after quota is available; macOS investigation 2–4 days, implementation unestimated.
+Status: step 1 recorded for Linux; Copilot and macOS cells pending; steps 2–5 not started.
+
+The Linux gate is recorded in `docs/ISOLATION_GATE.md` (2026-11-25). The owner can decide now whether to proceed with the tested Linux native profile or wait for broader coverage. For that boundary, step 2 implementation is estimated at **4–6 engineer-days**, or **7–11 engineer-days total** including release verification and documentation. Allow 0.5–1 day to rerun the Copilot gate once quota permits and 2–4 days to investigate macOS. The Copilot and macOS implementation estimates remain open pending those results.
 
 Gate verdicts so far, on Linux with bubblewrap: native Codex is supported only with `~/.codex` writable (read-only state fails with `EROFS`); native Claude is supported with `~/.claude` and `~/.claude.json` writable; Copilot is unevaluated because both confined and unconfined requests hit the quota. Every macOS cell is unevaluated. Section 7.2's residuals (`.bashrc` sourcing, `BASH_ENV`/zsh startup files, macOS login-shell behavior) pass to this section.
 
 Relevant files: `src/duo/adapters.py`, `src/duo/copilot.py`, `src/duo/policy.py`, `src/duo/models.py`, `src/duo/cli.py`, `scripts/smoke_inspection.py`, `tests/test_environment.py`, `tests/test_policy.py`, new `tests/test_isolation.py`, `docs/SECURITY.md`, `docs/STATUS.md`, `docs/ISOLATION_GATE.md`.
 
-1. Finish the gate: rerun the Copilot cell for a completed authenticated response once quota permits, and run the recorded two-candidate macOS protocol (sandbox-exec and a separate account). Update the verdict table and estimate.
-2. Owner decision before implementation: accept a Linux native-only first profile with writable CLI state, or wait for Copilot and macOS results.
-3. Only after that decision, implement an explicit opt-in profile providing a read-only repository view, temporary home, enumerated writable scratch/cache/state/audit paths, and only required runtime/login resources. Do not expose unrelated home contents, projects, SSH keys, or cloud credentials. Credential provisioning remains an explicit owner-controlled operation.
-4. Refuse unavailable mechanisms and unsupported combinations; never silently use ordinary execution. Preserve the ordinary mode's documented baseline rather than implying it has acquired this boundary.
-5. Add deterministic boundary probes plus live authentication/inspection checks for each claimed combination: outside canaries, symlinks, excluded login resources, writes inside and outside the repository, hooks, MCP launchers, conflicting configuration, and network behavior. Test web-disabled and `--allow-web` operation separately. A model declining an action is not enforcement evidence, and filesystem isolation does not stop readable material reaching providers.
+1. Evaluate each remaining combination independently. Rerun the Copilot cell for a completed authenticated response once quota permits. On macOS, run the recorded protocol under both sandbox-exec and a separate account. Update the verdict and estimate for each as evidence arrives.
+2. With owner approval, implement an explicit opt-in profile for the supported combinations the owner selects. Provide a read-only repository view, temporary home, enumerated writable scratch/cache/state/audit paths, and only required runtime/login resources. Do not expose unrelated home contents, projects, SSH keys, or cloud credentials. Credential provisioning remains an explicit owner-controlled operation.
+3. Refuse unavailable mechanisms and unsupported combinations; never silently use ordinary execution. Preserve the ordinary mode's documented baseline rather than implying it has acquired this boundary.
+4. Add deterministic boundary probes plus live authentication/inspection checks for each claimed combination: outside canaries, symlinks, excluded login resources, writes inside and outside the repository, hooks, MCP launchers, conflicting configuration, and network behavior. Enforcement evidence requires an observed denial of an attempted operation. A model refusal leaves the probe inconclusive.
+5. Test web-disabled and `--allow-web` operation separately. For each, record which destinations the boundary permits and which the probe actually contacted. Filesystem isolation does not stop readable material reaching providers or URLs. The Linux gate used a shared host network.
 
 Acceptance: each supported combination has retained enforcement and authentication evidence; forbidden operations fail and leave no write/hook/MCP sentinels; required checks fail closed; unsupported combinations are explicit. Expansion to sensitive or untrusted repositories requires a separate owner decision.
 
@@ -63,11 +65,13 @@ Acceptance: README and STATUS model lists match recorded evidence; Copilot diver
 
 ## 6. Dependence on message wording — partly shipped in 0.8.1
 
-Shipped: step 1's inventory (`docs/PARSING_INVENTORY.md`) and fail-closed guards for ambiguous version output, ambiguous Codex feature listings, and Copilot streams without a successful terminal result.
+Status: steps 1–5 below open.
 
-Status: steps 2–4 open. Effort: medium. Relevant files: `src/duo/policy.py`, `src/duo/adapters.py`, `src/duo/copilot.py`, `scripts/check_drift.py`, `scripts/record_fixtures.py`, `.github/workflows/drift.yml`, `tests/test_policy.py`, `tests/test_copilot.py`, `tests/test_drift.py`, `tests/fixtures/`, `docs/PARSING_INVENTORY.md`.
+Version 0.8.1 added the inventory (`docs/PARSING_INVENTORY.md`) and guards for ambiguous version output, ambiguous Codex feature listings, and Copilot streams missing a successful `result` event. The Copilot parser currently accepts that event anywhere in the stream.
 
-1. Site 9 chain (a): bind Copilot answer acceptance to a stricter final-message contract, so a qualifying non-final message after the true final answer cannot be accepted when the stream ends successfully.
+The remaining work below has a medium effort estimate. Relevant files: `src/duo/policy.py`, `src/duo/adapters.py`, `src/duo/copilot.py`, `scripts/check_drift.py`, `scripts/record_fixtures.py`, `.github/workflows/drift.yml`, `tests/test_policy.py`, `tests/test_copilot.py`, `tests/test_drift.py`, `tests/fixtures/`, `docs/PARSING_INVENTORY.md`.
+
+1. For site 9, require an identifiable final assistant answer followed by a successful terminal result. Cover both remaining cases with regression fixtures before closing the site. In chain (a), a later non-final message must never replace the genuine answer. In chain (b), a schema-valid non-final message followed by terminal success must be rejected when the stream contains no genuine final answer.
 2. Sites 11a/11b: make `check_drift.py` report parser confidence and unknown formats, and add state-aware feature diffs, so drift shows wording and state changes rather than only flag/feature names.
 3. Tighten version parsing to CLI-specific anchored formats (`codex-cli X`, `X (Claude Code)`, `GitHub Copilot CLI X`); move Codex feature parsing to a structured contract when upstream exposes one.
 4. Retry/cost group (inventory recommendation 5): prefer structured fields over text in failure classification and separate retry policy from wording, including the new `type: "result"`/`exitCode` dependency.
@@ -121,10 +125,10 @@ For every row: identify the commit, installed artifact, OS/architecture, exact C
 
 | Open verification | Specific evidence required |
 | --- | --- |
-| Codex 0.164–0.166 and 0.168–0.172 on macOS; 0.167 on Linux; 0.168–0.172 with Copilot pairs | Version probes, inspection smoke with `--login-shell`, deterministic write denial, and a bounded Duo run. If an older version is no longer obtainable or worth maintaining, record the owner's decision instead of crediting a newer run to it. |
+| Codex 0.164–0.166 and 0.168–0.172 on macOS, 0.167 on Linux, and 0.168–0.172 paired with a Copilot reviewer | Exercise each native Codex version with version probes, inspection smoke, deterministic write denial, and a bounded Duo run. For its login-shell check, record the executed shell. Use `smoke_inspection.py --login-shell` for bash and the gate record's `.zprofile` sentinel variant for macOS/zsh. Credit each result only to the shell and backend exercised. If an older version is unavailable or no longer worth maintaining, record the owner's decision. |
 | Copilot 1.0.103+ on macOS | Exact version with `--sync-session=off`, effective settings, confinement evidence, and a bounded run. |
 | Document modes through Copilot on macOS and with mixed pairs | Each missing mode/backend/platform combination produces valid structured reviews and preserves approval semantics. |
-| `--allow-web` on macOS, with mixed pairs, and in plan/description/review modes | Actual permitted tool requests/results for synthetic public sources from the section 2 stream, and unchanged read-only/MCP restrictions. |
+| `--allow-web` on macOS, with mixed pairs, and in plan/description/review modes | For each reviewer, retain requests and available results for synthetic public sources from its own audit stream: native Codex web-search events as its JSON stream emits them (record the gap if it emits none), native Claude WebSearch/WebFetch events (section 2), or Copilot `web_fetch` events. Record gaps in emitted results and verify the read-only and MCP restrictions. |
 | F3: Copilot GPT outside reads on macOS | On Linux (2026-11-23, `gpt-6-luna`) the reads were not accessed but the refusal was model-level. Tool-level denial or observed access is still needed. Native Codex's declined searches remain untested operations. |
 | Features shipped in 0.5.0–0.8.2 on macOS | Context capture, Claude stream events, verdicts, `--resume`, a panel run, and the login-shell control each need a bounded macOS run. |
 | Authenticated policy and network boundaries | Record the credential context of managed-policy probes without values. For network claims use controlled connection attempts with a working comparison path; DNS failure alone does not prove denial. Coordinate with section 4. |
@@ -159,11 +163,11 @@ Versioned `verdict.json` (schema 1.0, 1.1 in 0.7.0 with `approval_epoch`, 1.2 in
 
 ## Execution order and release gates
 
-1. **Next patch release, proposed 0.8.3:** ship the unreleased Codex 0.168.x–0.172.x range from `main`. Its gates are already recorded; add Copilot pairs if quota allows before release, or release with the native-only evidence stated.
-2. **Next maintenance work, proposed 0.9.0:** section 6 steps 1–2 first (the two remaining unsafe-acceptance chains), then steps 3–5. Fold in section 5's README model-list correction.
+1. **Next patch release, proposed 0.8.3.** Linux native-pair compatibility evidence for Codex 0.168.x–0.172.x is recorded. Add Copilot pair evidence if quota permits. Scope release claims to the combinations exercised. Bump the version in `pyproject.toml` and date the `CHANGELOG.md` entry as 0.8.3, run CI on the exact candidate commit, and build and verify its wheel and sdist with `scripts/release.py`. Follow section 1 for tagging, publication, and downloaded-asset verification.
+2. **Next maintenance work, proposed 0.9.0.** Address both Copilot answer-selection cases and the two drift-reporting sites in section 6 steps 1–2, then steps 3–5. Fold in section 5's README model-list correction.
 3. **After the Copilot quota resets:** the section 4 Copilot cell, section 8's Copilot rows (including 0.168–0.172 pairs), and section 5's macOS two-family run when on the Mac. Consider section 7.4's feasibility check in the same window.
 4. **On the owner's Mac:** the section 4 macOS protocol and section 8's macOS rows, prioritizing the login-shell control and the features shipped in 0.5.0–0.8.2.
-5. **Isolation implementation:** only after section 4 step 2's owner decision. A negative or deferred decision leaves isolation and build mode deferred with the reason recorded; it does not block other work.
+5. **Isolation implementation.** The owner can authorize section 4 step 2 for the tested Linux native combinations while the Copilot and macOS evaluations are pending. If the owner defers or declines, record the reason and continue independent work.
 6. **Build mode:** only after section 4 ships a profile and the bounded writable role passes its own tests.
 7. **CLI range extensions continue independently:** a drift-detected CLI minor version follows the probe-and-live-evidence procedure and may ship as its own patch release. Default refusal and the experimental exception remain unchanged.
 
