@@ -13,6 +13,11 @@ so hand-written fakes cannot drift from real formats unnoticed.
 | `codex-0.165.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on Linux |
 | `codex-0.166.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on Linux |
 | `codex-0.167.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on macOS |
+| `codex-0.168.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on Linux |
+| `codex-0.169.1` | the same probes (`exec --help` adds `--trust`); JSON event stream and response of a live approval on Linux |
+| `codex-0.170.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on Linux |
+| `codex-0.171.0` | the same probes (`exec --help` adds `--remote` and `--remote-auth-token-env`); JSON event stream and response of a live approval on Linux |
+| `codex-0.172.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on Linux |
 | `claude-2.1.296` | version, `--help`, `doctor`; success envelope; unrecognized-model envelope (`is_error: true` with `subtype: "success"`) and stderr |
 | `claude-2.1.330` | Linux stream discovery: Read/Glob/Grep with and without web, WebSearch/WebFetch with web, explicit denial versus missing-file error, success and turn-limit terminals; fresh restricted probes and timed-out adapter streams (2026-11-23, `claude-opus-5-5`) |
 | `copilot-1.0.95` | version, `--help`, isolated `config --list --json`; event streams from GPT (`phase: "final_answer"`) and Claude (no `phase`) models; model-unavailable and authentication-failure stderr |

@@ -103,7 +103,7 @@ def claude_options(settings: Path) -> list[str]:
 # effective metadata, not behavioral enforcement. Codex is 0.x: extend the
 # upper bound one minor version at a time, only with probe and live-run evidence.
 TESTED_VERSIONS = {
-    "codex": ((0, 162, 1), (0, 168, 0)),
+    "codex": ((0, 162, 1), (0, 173, 0)),
     "claude": ((2, 1, 296), (2, 2, 0)),
     "copilot": ((1, 0, 95), (1, 1, 0)),
 }

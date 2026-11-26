@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Codex CLI 0.168.x to 0.172.x are tested and accepted (0.162.1 to 0.172.x),
+  validated on Linux with native pairs. Duo's disabled features stay off and
+  the empty-home MCP list stays empty in every version. New `exec` flags
+  `--trust` (0.169, persists project trust even with `--ephemeral`) and
+  `--remote` (0.171) are never passed by Duo; a test asserts this.
+
 ## 0.8.2 (2026-11-25)
 
 ### Changed

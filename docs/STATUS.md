@@ -68,6 +68,8 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 3. **Codex CLI 0.164.x to 0.166.x**: validated on Linux on 2026-10-28 and
    2026-11-02 (below); live macOS verification remains pending. 0.167.x was
    validated on macOS on 2026-11-10 (below); live Linux verification pending.
+   0.168.x to 0.172.x were validated on Linux on 2026-11-26 with native pairs
+   only (below); Copilot pairs and macOS remain pending.
 4. **Copilot CLI 1.0.103+** (`--sync-session`): validated on Linux with 1.0.105
    on 2026-10-28 (below) and with 1.0.114 on 2026-11-23 (below); live macOS
    verification remains pending.
@@ -301,6 +303,56 @@ The deterministic Codex write-denial results below remain historical evidence:
 Linux x86-64 0.164.0, 0.165.0, 0.166.0; macOS 27.2 arm64 0.167.0. The separate
 0.164.0 model-directed write attempt remains inconclusive. Open items 5–7 retain
 the missing confinement, authenticated-policy/network, and audit evidence.
+
+## Codex 0.168.0 to 0.172.0 compatibility validation
+
+2026-11-26, Ubuntu 22.04.5 x86-64 (kernel 5.15.0-204), Python 3.11; codex-cli
+0.172.0 (installed by Codex's own update) and 0.168.0, 0.169.1, 0.170.0, and
+0.171.0 from scratch npm installs, Claude Code 2.1.332. The drift check had
+opened issue #3 for 0.172.0 as `untested-version`. Copilot pairs were not run:
+the account's monthly Copilot quota is exhausted (HTTP 402 `quota_exceeded`).
+
+Each minor version was compared with the previous one. With Duo's options and an
+empty `CODEX_HOME`, the MCP list is empty and all nine features Duo disables are
+false in every version (`multi_agent` became deprecated in 0.168, still false).
+
+| Version | `exec --help` | Features newly true by default (none touches a Duo control) |
+| --- | --- | --- |
+| 0.168.0 | unchanged | `guardian_include_additional_context` (new); `retain_client_tool_outputs`, `unified_image_budget` |
+| 0.169.1 | adds `--trust` | `incremental_tools_legacy`, `incremental_tools_legacy_gcp` (new); `code_mode_host_grpc`, `code_mode_host_output_truncation`, `untrusted_as_tool_output`; `plugin_discovery_prefetch` removed |
+| 0.170.0 | unchanged | none |
+| 0.171.0 | adds `--remote`, `--remote-auth-token-env` | `tui_workspace` |
+| 0.172.0 | unchanged | `mcp_lazy_stdio_startup`; `code_mode_host_grpc` removed |
+
+Other new features are under development or stable and false. `--trust` saves
+trust for the project, including MCP commands outside the sandbox, and persists
+even with `--ephemeral`; `--remote` attaches to an existing app server. Duo
+passes neither, and a test now asserts that. Reviews ignore user configuration,
+where saved project trust lives.
+
+| Check | Result |
+| --- | --- |
+| Codex read-only sandbox, deterministic probe (`codex --no-daemon sandbox` with Duo's options and reviewer environment), all five versions | reads inside and outside the repository succeeded; writes inside, outside, and in the home directory failed with `EROFS` ("Read-only file system") and created no files |
+| Startup inspection smoke and login-shell check, native pair, all five versions | both read the repository; no hook or MCP sentinel ran; login-profile sentinels absent from the command environment (the `.bashrc` sentinel present, as documented) |
+| File confinement, 0.172.0 | Codex read the three outside canaries (documented); Claude's `Read` was denied for all three |
+| Search confinement, 0.172.0 | Claude's `Glob` and `Grep` were denied outside the repository; Codex reported its searches failed and read nothing, which is not counted as enforcement evidence |
+| Live native Codex + native Claude, each version | agreed in 3 turns; 3 attempts, except 0.171.0 (4: one Claude response was rejected for closing a finding it did not own, and its retry succeeded) |
+
+The first live runs were started for all four scratch installs at once, plus the
+0.172.0 checks. In all four, both attempts of the first Codex call ran one or
+two inspection commands and then emitted nothing until the 300-second limit;
+0.172.0's run, which overlapped them only partly, agreed. Rerun one at a time
+with Duo's default 600-second call timeout, every run agreed, with first calls
+of 16 to 47 seconds; the longest call was 0.168.0's final approval (3 min 46 s).
+This matches the stalls recorded for 0.164.0 to 0.166.0 and is most likely
+service-side; its cause is not established. The 0.172.0 smoke run started
+alongside them also timed out once at the script's fixed 120-second bound and
+passed when rerun.
+
+Models: `gpt-6-astra` and `claude-sonnet-5-5`, default effort. `calc.py`
+unchanged and only `plan.md` created in every run; Codex ran read-only
+inspection commands only. Fixtures: `tests/fixtures/codex-0.168.0/` to
+`tests/fixtures/codex-0.172.0/` (probes and a live approval for each).
 
 ## Codex 0.167.0 compatibility validation
 
