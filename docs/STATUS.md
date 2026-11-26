@@ -3,20 +3,21 @@
 Where Duo's production readiness stands, and how to continue on a Linux machine.
 Written 2026-10-13 at commit `c5886a7`; Linux live results and the 0.1.0, 0.2.0,
 0.2.1, and 0.3.0 releases added the same day; 0.3.1, 0.4.0, and 0.4.1 on
-2026-10-14; 0.4.2 on 2026-10-21; 0.4.3 on 2026-10-28; 0.4.4 on 2026-11-02. `plan.md` is the improvement plan after 0.4.1; the production plan
-it replaced is `git show 918d2c5:plan.md`. This page records progress.
+2026-10-14; 0.4.2 on 2026-10-21; 0.4.3 on 2026-10-28; 0.4.4 on 2026-11-02; later
+releases are listed under "Done". `plan.md` is the improvement plan after 0.8.2
+(revised 2026-11-26); the production plan it replaced is `git show 918d2c5:plan.md`. This page records progress.
 
 ## Done
 
 | Area | Where |
 | --- | --- |
 | Isolation feasibility gate (2026-11-25, plan §4 step 1 only): Linux bubblewrap battery passed; native Codex with writable `~/.codex` and native Claude completed an authenticated Duo run to agreement; read-only Codex state failed with `EROFS`; Copilot preflight/battery passed but matched confined/unconfined requests hit HTTP 402 `quota_exceeded`; macOS unevaluated. No opt-in profile implemented | [Gate record, boundary/verdict matrix, exact failures, macOS protocol and revised effort estimate](ISOLATION_GATE.md) |
-| Reviewer panels (Unreleased, plan §13): optional roster-defined N-reviewer panels, unanimity on one subject, diversity classification/warnings, verdict schema 1.2 + panel gate rule/hash checks, checkpoint schema 2 + roster hash validation | `src/duo/models.py`, `src/duo/workflow.py`, `src/duo/cli.py`, `src/duo/diversity.py`, `src/duo/verdicts.py`, `src/duo/checkpoints.py`, `examples/check_verdict.py`, `tests/test_panels.py` |
-| Persistent checkpoints (Unreleased, plan §12): explicit recovery, durable attempt reservations and publication intents, fresh approval epochs, protected cleanup | `src/duo/checkpoints.py`, `src/duo/workflow.py`, `src/duo/cli.py`, `src/duo/cleanup.py`, `tests/test_resume.py`; "Persistent checkpoints" below |
+| Reviewer panels (0.8.0, plan §13): optional roster-defined N-reviewer panels, unanimity on one subject, diversity classification/warnings, verdict schema 1.2 + panel gate rule/hash checks, checkpoint schema 2 + roster hash validation | `src/duo/models.py`, `src/duo/workflow.py`, `src/duo/cli.py`, `src/duo/diversity.py`, `src/duo/verdicts.py`, `src/duo/checkpoints.py`, `examples/check_verdict.py`, `tests/test_panels.py` |
+| Persistent checkpoints (0.7.0, plan §12): explicit recovery, durable attempt reservations and publication intents, fresh approval epochs, protected cleanup | `src/duo/checkpoints.py`, `src/duo/workflow.py`, `src/duo/cli.py`, `src/duo/cleanup.py`, `tests/test_resume.py`; "Persistent checkpoints" below |
 | §7.1 snapshot-order test canonicalizes the source path in its read filter (`50705f5`, test-only): production `load_blocked_source` resolves the source run directory before reading snapshots, but the test collected mocked `read_input` calls by comparing each call's parent with the unresolved temporary-directory path, which collects nothing on macOS where the temp directory sits behind the `/var` → `/private/var` symlink (CI run 45282241475 failed all four macOS legs at that assertion while the answer run itself exited 0); reproduced on Linux with `TMPDIR` pointed through a symlinked directory (failed before, passes after), full strict suite 374 tests green; the descending-order assertion is unchanged | `tests/test_answer.py` |
-| Answer a blocked run in a fresh run (Unreleased, plan §7.1): explicit source validation, user clarification, source/current hashes, fresh approvals | `src/duo/storage.py`, `src/duo/cli.py`, `src/duo/prompts.py`, `src/duo/workflow.py`, `tests/test_answer.py`; "Answering blocked runs" below |
-| Structured verdicts and findings (Unreleased, plan §11): versioned artifact, persistent role-owned findings, reference CI gate | `src/duo/verdicts.py`, `src/duo/schemas/`, `examples/check_verdict.py`, `tests/test_verdicts.py`; "Structured verdicts" below |
-| HTML agreement reports (Unreleased): offline rendering of stored runs, standalone CLI, best-effort automatic output, escaped text and collapsible diffs | `src/duo/report.py`, `src/duo/cli.py`, `tests/test_report.py`; "HTML agreement reports" below |
+| Answer a blocked run in a fresh run (0.6.0, plan §7.1): explicit source validation, user clarification, source/current hashes, fresh approvals | `src/duo/storage.py`, `src/duo/cli.py`, `src/duo/prompts.py`, `src/duo/workflow.py`, `tests/test_answer.py`; "Answering blocked runs" below |
+| Structured verdicts and findings (0.6.0, plan §11): versioned artifact, persistent role-owned findings, reference CI gate | `src/duo/verdicts.py`, `src/duo/schemas/`, `examples/check_verdict.py`, `tests/test_verdicts.py`; "Structured verdicts" below |
+| HTML agreement reports (0.5.1): offline rendering of stored runs, standalone CLI, best-effort automatic output, escaped text and collapsible diffs | `src/duo/report.py`, `src/duo/cli.py`, `tests/test_report.py`; "HTML agreement reports" below |
 | HTML report standalone-CLI test canonicalizes its expected output path (`8a1f705`, test-only): the CLI prints the resolved path (`write_report` resolves the run directory), but the test compared it with the unresolved temporary-directory path, which fails on macOS where the temp directory sits behind the `/var` → `/private/var` symlink; reproduced on Linux with `TMPDIR` pointed through a symlinked directory (failed before, passes after), full strict suite 275 tests green | `tests/test_report.py` |
 | Real end-to-end runs: native Codex + native Claude, and both reviewers via Copilot (macOS) | README compatibility table |
 | CI: Ubuntu and macOS, Python 3.11–3.14, wheel and sdist installed with `constraints.txt`, strict runner (no skips), newest-dependency job, `pip-audit` | `.github/workflows/ci.yml` |
@@ -87,8 +88,8 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
    denial requires controlled connection attempts and a working comparison path;
    the historical DNS failures alone do not establish it. Managed deployments
    remain unsupported.
-7. **F4: native Claude tool audit** (plan §2): implemented in the working tree;
-   see the stream evidence below. Document snapshots archive the reviewed
+7. **F4: native Claude tool audit** (plan §2): shipped in 0.5.0; see the
+   stream evidence below; macOS evidence remains pending. Document snapshots archive the reviewed
    document only; emitted tool logs do not guarantee complete file/page archives.
 8. **Codex login-shell environment reintroduction** (plan §7.2): resolved.
    The Linux live sentinel probe completed on 2026-11-25, and
@@ -104,7 +105,7 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
    limited supported cells do not expand the deployment contract or establish
    provider-only network access.
 
-## HTML agreement reports (Unreleased, 2026-11-23)
+## HTML agreement reports (0.5.1, 2026-11-23)
 
 Implemented `duo --render-report RUN_DIR [--report-output PATH]` and best-effort
 automatic `report.html` for terminal results and CLI error/interruption paths
@@ -141,7 +142,7 @@ output on rerender. Outputs were written under this checkout's ignored `build/`
 directory; the original audit directories were unchanged. These are offline
 rendering checks, not new reviewer/model runs.
 
-## Captured context and prompt budget (Unreleased, 2026-11-23)
+## Captured context and prompt budget (0.5.0, 2026-11-23)
 
 Section 3's context capture and budget mechanism is implemented. The credential
 scanner prerequisite was verified in `models.new_secret`: distinct candidates
@@ -233,7 +234,7 @@ and `context-002.bin` = `tests.txt`, **291 bytes**, SHA-256
 Both hashes match the source files. Copilot and macOS context workflows remain
 unverified live.
 
-## Native Claude audit stream (Unreleased, 2026-11-23)
+## Native Claude audit stream (0.5.0, 2026-11-23)
 
 Native Claude now runs with `--output-format stream-json --verbose`. Raw stdout
 and stderr remain in each attempt directory through errors, limits, timeout,
@@ -954,7 +955,7 @@ Each costs a few model calls. Keep runs bounded and in scratch repositories.
 
 ## Answering blocked runs
 
-Plan section 7.1 is implemented in the working tree (Unreleased). Paired
+Plan section 7.1 shipped in 0.6.0. Paired
 `--answer` / `--source-run` options select a completed blocked run explicitly.
 Bounded record and snapshot reads validate the source question and document hash,
 repository, document path/mode, and exact task/criteria association before locking,
@@ -984,7 +985,7 @@ changed-document path is covered by the offline tests, not by this live pair.
 
 ## Structured verdicts
 
-Plan section 11 is implemented in the working tree (Unreleased). Every reviewer
+Plan section 11 shipped in 0.6.0. Every reviewer
 response now includes findings and finding_updates arrays. Findings retain stable
 run-scoped IDs, subject hashes, moved locations, and role-owned dispositions;
 approval requires explicit reconciliation of that role's open findings. Atomic
@@ -1015,7 +1016,7 @@ document sections are supported. Diff old/new-side locations remain section 10 s
 
 ## Persistent checkpoints
 
-Unreleased implementation of plan §12 for document modes. `checkpoint.json` is
+Plan §12 for document modes, shipped in 0.7.0. `checkpoint.json` is
 a versioned, bounded JSON journal with a canonical SHA-256 integrity check and
 atomic file plus directory fsync. It binds both normalized review text and exact
 published file bytes, preserving CRLF documents while detecting external byte
@@ -1093,7 +1094,7 @@ wall clock passes the recorded `updated_at` (conservative by design).
 
 ## Reviewer panels
 
-Unreleased implementation of plan §13 for document modes. An explicit ordered
+Plan §13 for document modes, shipped in 0.8.0. An explicit ordered
 roster (`--reviewer ID:KIND:BACKEND:MODEL[:EFFORT]`, repeatable, at least two
 members) replaces the default pair only when given; the legacy flags remain
 the default two-member configuration with unchanged behavior, and combining
