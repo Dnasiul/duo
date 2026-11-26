@@ -10,6 +10,7 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
 
 | Area | Where |
 | --- | --- |
+| Isolation feasibility gate (2026-11-25, plan §4 step 1 only): Linux bubblewrap battery passed; native Codex with writable `~/.codex` and native Claude completed an authenticated Duo run to agreement; read-only Codex state failed with `EROFS`; Copilot preflight/battery passed but matched confined/unconfined requests hit HTTP 402 `quota_exceeded`; macOS unevaluated. No opt-in profile implemented | [Gate record, boundary/verdict matrix, exact failures, macOS protocol and revised effort estimate](ISOLATION_GATE.md) |
 | Reviewer panels (Unreleased, plan §13): optional roster-defined N-reviewer panels, unanimity on one subject, diversity classification/warnings, verdict schema 1.2 + panel gate rule/hash checks, checkpoint schema 2 + roster hash validation | `src/duo/models.py`, `src/duo/workflow.py`, `src/duo/cli.py`, `src/duo/diversity.py`, `src/duo/verdicts.py`, `src/duo/checkpoints.py`, `examples/check_verdict.py`, `tests/test_panels.py` |
 | Persistent checkpoints (Unreleased, plan §12): explicit recovery, durable attempt reservations and publication intents, fresh approval epochs, protected cleanup | `src/duo/checkpoints.py`, `src/duo/workflow.py`, `src/duo/cli.py`, `src/duo/cleanup.py`, `tests/test_resume.py`; "Persistent checkpoints" below |
 | §7.1 snapshot-order test canonicalizes the source path in its read filter (`50705f5`, test-only): production `load_blocked_source` resolves the source run directory before reading snapshots, but the test collected mocked `read_input` calls by comparing each call's parent with the unresolved temporary-directory path, which collects nothing on macOS where the temp directory sits behind the `/var` → `/private/var` symlink (CI run 45282241475 failed all four macOS legs at that assertion while the answer run itself exited 0); reproduced on Linux with `TMPDIR` pointed through a symlinked directory (failed before, passes after), full strict suite 374 tests green; the descending-order assertion is unchanged | `tests/test_answer.py` |
@@ -93,6 +94,13 @@ it replaced is `git show 918d2c5:plan.md`. This page records progress.
    "Codex login-shell environment reintroduction" below). Residuals pass to
    section 4: the non-login shell still sources `.bashrc`; macOS is untested
    (see (a)–(c) below).
+9. **Isolation profile** (plan §4): the Linux feasibility gate is recorded in
+   [ISOLATION_GATE.md](ISOLATION_GATE.md); step 2 is not implemented. The tested
+   native boundary needs writable Codex state and shared host/guest temporary
+   paths. Copilot still needs a completed model response after its account quota
+   permits one; macOS needs the recorded two-candidate evaluation. The gate's
+   limited supported cells do not expand the deployment contract or establish
+   provider-only network access.
 
 ## HTML agreement reports (Unreleased, 2026-11-23)
 
