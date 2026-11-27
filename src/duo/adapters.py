@@ -111,45 +111,79 @@ def read_json(path: Path, *, allow_fence: bool = False) -> object:
     return parse_json(text, allow_fence=allow_fence)
 
 
+def copilot_final_candidate(data: object) -> bool:
+    """A message that can be the answer: text, an empty tool-request list, final phase.
+
+    `toolRequests` must be present: if the field were renamed, a tool-calling
+    message would otherwise look final.
+    """
+    return (isinstance(data, dict) and isinstance(data.get("content"), str)
+            and bool(data["content"].strip()) and data.get("toolRequests") == []
+            and data.get("phase") in (None, "final_answer"))
+
+
+# Events that mean the agent kept working; none may follow the final answer.
+COPILOT_ACTIVITY = ("assistant.message", "assistant.turn_start", "user.message")
+
+
 def copilot_reply(path: Path) -> object:
-    """The final assistant message from Copilot's JSONL event stream.
+    """The final assistant answer from Copilot's JSONL event stream.
 
     Text output is wrapped for a terminal, which breaks JSON strings, and mixes
-    progress narration with the answer. Events carry each message unchanged;
-    commentary and tool-calling messages are skipped, as is tool output.
+    progress narration with the answer. Events carry each message unchanged.
+    The answer is the last assistant message, it must be the only final
+    candidate, no agent activity may follow it, and a successful terminal
+    `result` event must come after it. Tool output is never a candidate.
     """
-    reply = None
-    success_result = False
+    messages = []  # (index, data) for every assistant.message, in order
+    activity = []  # indexes of events that show further agent work
+    results = []  # (index, success)
+    phased = False
     try:
         # Events include tool results, so allow more than a single response.
         if path.stat().st_size > 64 * 1024 * 1024:
             raise AgentError("Copilot output exceeds the 64 MiB limit", retryable=False)
         with path.open(encoding="utf-8") as lines:
-            for line in lines:
+            for index, line in enumerate(lines):
                 try:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
                 if not isinstance(event, dict):
                     continue
-                exit_code = event.get("exitCode")
-                if (event.get("type") == "result" and isinstance(exit_code, int)
-                        and not isinstance(exit_code, bool) and exit_code == 0):
-                    success_result = True
-                if event.get("type") != "assistant.message":
-                    continue
-                data = event.get("data")
-                if (isinstance(data, dict) and isinstance(data.get("content"), str)
-                        and data["content"].strip() and not data.get("toolRequests")
-                        and data.get("phase") in (None, "final_answer")):
-                    reply = data["content"]
+                kind = event.get("type")
+                if kind == "result":
+                    exit_code = event.get("exitCode")
+                    results.append((index, isinstance(exit_code, int)
+                                    and not isinstance(exit_code, bool) and exit_code == 0))
+                if kind in COPILOT_ACTIVITY or (isinstance(kind, str) and kind.startswith("tool.")):
+                    activity.append(index)
+                if kind == "assistant.message":
+                    data = event.get("data")
+                    messages.append((index, data))
+                    if isinstance(data, dict) and data.get("phase") is not None:
+                        phased = True
     except (OSError, UnicodeError) as exc:
         raise AgentError("Agent returned missing or invalid JSON") from exc
-    if reply is None:
+    candidates = [index for index, data in messages if copilot_final_candidate(data)]
+    if not candidates:
         raise AgentError("Copilot returned no final answer")
-    if not success_result:
+    if len(candidates) > 1:
+        raise AgentError("Copilot stream has more than one final answer")
+    index, data = messages[-1]
+    if index != candidates[0]:
+        raise AgentError("Copilot's last assistant message is not a final answer")
+    if phased and data.get("phase") != "final_answer":
+        raise AgentError("Copilot's final message is not marked as the final answer")
+    if any(later > index for later in activity):
+        raise AgentError("Copilot continued working after its final answer")
+    if any(not success for _, success in results):
+        raise AgentError("Copilot stream has an unsuccessful terminal result event")
+    if any(earlier < index for earlier, _ in results):
+        raise AgentError("Copilot stream has a terminal result event before its final answer")
+    if not results:
         raise AgentError("Copilot stream is missing a successful terminal result event")
-    return parse_json(reply, allow_fence=True)
+    return parse_json(data["content"], allow_fence=True)
 
 
 def read_tail(path: Path, size: int = DIAGNOSTIC_BYTES) -> str:

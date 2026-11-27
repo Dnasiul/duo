@@ -181,7 +181,15 @@ sys.exit({code})
             with self.subTest(name=name):
                 capture = self.root / name
                 capture.write_text(modern_capture(self.path("copilot", name)))
+                events = [json.loads(line) for line in capture.read_text().splitlines()]
+                answers = [e["data"] for e in events if e.get("type") == "assistant.message"
+                           and e["data"].get("toolRequests") == []]
+                self.assertEqual(len(answers), 1)
+                # Claude models omit phase; GPT models mark the answer.
+                self.assertEqual(answers[0].get("phase"),
+                                 "final_answer" if decision == "revise" else None)
                 review = copilot_reply(capture)
+                self.assertEqual(review, json.loads(answers[0]["content"]))
                 self.assertEqual(review["decision"], decision)
                 validate_review(review, "" if decision == "revise" else "# Plan\n")
 

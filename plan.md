@@ -71,9 +71,9 @@ Acceptance: README and STATUS model lists match recorded evidence; Copilot diver
 
 ## 6. Dependence on message wording — partly shipped in 0.8.1
 
-Status: steps 1–5 below open.
+Status: step 1 done on `main`, unreleased (offline replay and mutation tests; a live Copilot run is pending the quota reset); steps 2–5 open.
 
-Version 0.8.1 added the inventory (`docs/PARSING_INVENTORY.md`) and guards for ambiguous version output, ambiguous Codex feature listings, and Copilot streams missing a successful `result` event. The Copilot parser currently accepts that event anywhere in the stream.
+Version 0.8.1 added the inventory (`docs/PARSING_INVENTORY.md`) and guards for ambiguous version output, ambiguous Codex feature listings, and Copilot streams missing a successful `result` event. Step 1 replaced the Copilot parser's last-qualifying-message rule with a final-answer contract; site 9 is now RETRY/COST CHANGE, and the new `toolRequests` dependency joins step 4.
 
 The remaining work below has a medium effort estimate. Relevant files: `src/duo/policy.py`, `src/duo/adapters.py`, `src/duo/copilot.py`, `scripts/check_drift.py`, `scripts/record_fixtures.py`, `.github/workflows/drift.yml`, `tests/test_policy.py`, `tests/test_copilot.py`, `tests/test_drift.py`, `tests/fixtures/`, `docs/PARSING_INVENTORY.md`.
 

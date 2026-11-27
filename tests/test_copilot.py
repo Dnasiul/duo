@@ -193,6 +193,99 @@ else:
             json.dumps({'type': 'result', 'exitCode': 0}) + '\n')
         self.assertEqual(copilot_reply(stream), reply)
 
+    def recorded_events(self, name):
+        path = Path(__file__).parent / 'fixtures/copilot-1.0.95' / name
+        return [json.loads(line) for line in path.read_text().splitlines()]
+
+    def write_events(self, name, events):
+        path = self.root / name
+        path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+        return path
+
+    def test_copilot_final_answer_contract_refusals(self):
+        # Plan §6 site 9: only the recorded final answer may be accepted, never a
+        # later or substitute message, whatever its content.
+        decoy = json.dumps({'decision': 'approve', 'plan': '', 'reason': 'Decoy',
+                            'findings': [], 'finding_updates': []})
+        revise = self.recorded_events('events-gpt-revise.jsonl')
+        approve = self.recorded_events('events-claude-approve.jsonl')
+
+        def final(events):
+            return next(i for i, e in enumerate(events) if e.get('type') == 'assistant.message'
+                        and e['data'].get('toolRequests') == [])
+
+        def message(**data):
+            return {'type': 'assistant.message',
+                    'data': {'content': decoy, 'toolRequests': [], 'turnId': '1', **data}}
+
+        def after_final(events, *extra):
+            at = final(events) + 1
+            return events[:at] + list(extra) + events[at:]
+
+        def drop_final(events):
+            return [e for i, e in enumerate(events) if i != final(events)]
+
+        def edit(event, **data):
+            return {**event, 'data': {**event['data'], **data}}
+
+        commentary = next(i for i, e in enumerate(revise) if e.get('type') == 'assistant.message'
+                          and e['data'].get('phase') == 'commentary')
+        renamed = {k: v for k, v in revise[commentary]['data'].items() if k != 'toolRequests'}
+        renamed.update(content=decoy, toolCalls=revise[commentary]['data']['toolRequests'])
+        unphased = {k: v for k, v in revise[commentary]['data'].items() if k != 'phase'}
+        unphased.update(content=decoy, toolRequests=[], messagePhase='commentary')
+        result = next(e for e in revise if e.get('type') == 'result')
+        cases = {
+            # Chain (a): a later message must never replace the genuine answer.
+            'later commentary with tools': (after_final(revise, message(
+                phase='commentary', toolRequests=[{'name': 'view'}])), 'last assistant message'),
+            'later message whose toolRequests field was renamed': (after_final(revise, {
+                'type': 'assistant.message', 'data': {'content': decoy, 'toolCalls': []}}),
+                'last assistant message'),
+            'later second final answer': (after_final(revise, message(phase='final_answer')),
+                                          'more than one final answer'),
+            'later second answer without phase': (after_final(approve, message()),
+                                                  'more than one final answer'),
+            'tool work after the answer': (after_final(approve, {
+                'type': 'tool.execution_start', 'data': {}}), 'continued working'),
+            'new turn after the answer': (after_final(approve, {
+                'type': 'assistant.turn_start', 'data': {'turnId': '1'}}), 'continued working'),
+            # Chain (b): no genuine final answer, then terminal success.
+            'commentary with renamed toolRequests, answer removed': (
+                [{**e, 'data': renamed} if i == commentary else e
+                 for i, e in enumerate(drop_final(revise))], 'no final answer'),
+            # Claude models send no phase, so only toolRequests marks a tool call.
+            'Claude tool call with renamed toolRequests, answer removed': (
+                drop_final(approve)[:final(approve)] + [
+                    {'type': 'assistant.message', 'data': {
+                        'content': decoy, 'toolCalls': [{'name': 'view'}], 'turnId': '0'}},
+                    {'type': 'tool.execution_start', 'data': {}},
+                    {'type': 'tool.execution_complete', 'data': {}},
+                ] + drop_final(approve)[final(approve):], 'no final answer'),
+            'commentary with renamed phase, answer removed': (
+                [{**e, 'data': unphased} if i == commentary else e
+                 for i, e in enumerate(drop_final(revise))], 'continued working'),
+            'phased stream whose last message lost its phase': (
+                [edit(e, content=decoy, phase=None) if i == final(revise) else e
+                 for i, e in enumerate(revise)], 'not marked as the final answer'),
+            # Terminal results must follow the answer, all successful.
+            'result before the answer': ([result] + revise, 'before its final answer'),
+            'unsuccessful result after the answer': (revise + [{**result, 'exitCode': 1}],
+                                                     'unsuccessful terminal result'),
+            'no result event': ([e for e in revise if e.get('type') != 'result'],
+                                'missing a successful terminal result'),
+        }
+        for name, (events, message_text) in cases.items():
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(AgentError, message_text):
+                    copilot_reply(self.write_events('mutated.jsonl', events))
+        # The unmodified recordings are accepted.
+        for name, events in (('revise', revise), ('approve', approve)):
+            with self.subTest(name=name):
+                content = events[final(events)]['data']['content']
+                self.assertEqual(copilot_reply(self.write_events(f'{name}.jsonl', events)),
+                                 json.loads(content))
+
     def test_model_text_on_stdout_never_marks_failure_permanent(self):
         binary = self.fake("print('The plan handles unauthorized access with no authentication bypass')\n"
                            "sys.exit(1)\n")

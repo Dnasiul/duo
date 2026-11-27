@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Copilot replies are accepted only under a final-answer contract (plan §6,
+  site 9): the answer must be the last assistant message and the stream's only
+  final candidate, with an empty `toolRequests` list present; a phased stream
+  must mark it `final_answer`; no assistant message, new turn, user message, or
+  tool event may follow it; and successful `result` events must follow it, with
+  none unsuccessful or earlier. Previously a later message could replace the
+  answer, and a Claude-model tool call whose `toolRequests` field was renamed
+  could be accepted as a review. Both recorded Copilot 1.0.95 streams still
+  yield their recorded answers. Not yet exercised live (Copilot quota).
+
 ## 0.8.3 (2026-11-26)
 
 ### Changed

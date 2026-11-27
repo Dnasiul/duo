@@ -1,6 +1,6 @@
 # Parsing dependency inventory (plan §6 step 1)
 
-Date: 2026-11-25
+Date: 2026-11-25. Updated 2026-11-27: site 9's final-answer contract (current `plan.md` §6 step 1) closes its unsafe-acceptance chains; it is reclassified RETRY/COST CHANGE.
 
 Scope: inventory with in-cycle remediation notes. This records current parsing dependencies on external CLI wording/shape and notes the minimal fail-closed guards landed in this cycle for sites 3a/3b and 4b, and a partial guard for site 9.
 
@@ -27,7 +27,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 | 7b. `claude_error_text` extraction | RETRY/COST CHANGE |
 | 7c. `claude_stream_error_text` extraction | RETRY/COST CHANGE |
 | 8. `retry_delay` regex + workflow/model cap consumption | RETRY/COST CHANGE |
-| 9. `copilot_reply` event-stream extraction | POTENTIAL UNSAFE ACCEPTANCE |
+| 9. `copilot_reply` event-stream extraction | RETRY/COST CHANGE |
 | 10. `claude_result` terminal-envelope checks | SAFE REFUSAL |
 | 11a. `scripts/check_drift.py` `flags()` extraction | POTENTIAL UNSAFE ACCEPTANCE |
 | 11b. `scripts/check_drift.py` `features()` extraction | POTENTIAL UNSAFE ACCEPTANCE |
@@ -56,7 +56,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 ### 3a) Native preflight call site
 
-- **Location:** parser `src/duo/policy.py:112-129`; call site `src/duo/adapters.py:391-393` using `version_text.strip()[:200]`.
+- **Location:** parser `src/duo/policy.py:112-129`; call site `src/duo/adapters.py:425-427` using `version_text.strip()[:200]`.
 - **Parsing dependency:** semver scan `\b(\d+)\.(\d+)\.(\d+)\b` across the supplied text.
 - **Provenance:** tested ranges in `src/duo/policy.py:100-104`; fixture `version.txt` probes across codex/claude/copilot. **OS:** Linux for the `claude-2.1.330` probes, macOS for `claude-2.1.296`; not recorded for the rest.
 - **Consequence chain (historical):** wrong semver match could return `"tested"` and suppress `untested_cli` recording after preflight acceptance.
@@ -81,7 +81,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 - **Location:** `src/duo/policy.py:226-230`.
 - **Parsing dependency:** required flags are checked via substring presence in `exec --help`.
 - **Provenance:** `tests/fixtures/codex-*/exec-help.txt`; fixture replay in `tests/test_fixtures.py`. **OS:** not recorded for these help files.
-- **Consequence chain:** false match requires stale prose mention after option removal. Duo then passes the removed runtime option (`src/duo/adapters.py:447-460`), the CLI rejects it, exits non-zero, and `classify_failure` (`adapters.py:536`) raises `AgentError`: non-retryable when text still includes `"unknown option"`/`"unexpected argument"`, else retried up to `max_attempts` and workflow ends in status `error` (`workflow.py:207-209`). `validate_payload` is never reached.
+- **Consequence chain:** false match requires stale prose mention after option removal. Duo then passes the removed runtime option (`src/duo/adapters.py:481-494`), the CLI rejects it, exits non-zero, and `classify_failure` (`adapters.py:570`) raises `AgentError`: non-retryable when text still includes `"unknown option"`/`"unexpected argument"`, else retried up to `max_attempts` and workflow ends in status `error` (`workflow.py:207-209`). `validate_payload` is never reached.
 - **Excluded behavioral risk:** a hidden alias that still accepts/ignores a removed flag would be a CLI enforcement change, outside wording-classification scope; advertised-option checks cannot generally detect that (`policy.py:220-223`).
 - **Classification:** **RETRY/COST CHANGE**.
 
@@ -103,7 +103,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 - **Location:** `src/duo/policy.py:281-286`.
 - **Parsing dependency:** required option names are checked by substring presence in `claude --help`.
 - **Provenance:** `tests/fixtures/claude-2.1.296/help.txt`, `tests/fixtures/claude-2.1.330/help.txt`; fixture replay tests. **OS:** Linux for `claude-2.1.330`; macOS for `claude-2.1.296`.
-- **Consequence chain split:** preflight doctor probe is `probe([claude, *claude_options(settings), "doctor"])` (`policy.py:298`), so removal of any of `--safe-mode`, `--restricted`, `--setting-sources`, `--settings`, `--strict-mcp-config`, `--no-chrome`, `--disable-slash-commands` fails **at preflight** when `doctor` rejects the option (assumes unknown top-level options are rejected) and `probe()` raises `RunError` (`adapters.py:362-364`). Removal of `--tools`, `--allowedTools`, `--output-format`, `--verbose`, or `--json-schema` fails **late** on review argv (`adapters.py:461-466`), then `claude_attempt` classifies failure via `classify_failure` at `adapters.py:576` (not the Codex/Copilot path at `adapters.py:536`).
+- **Consequence chain split:** preflight doctor probe is `probe([claude, *claude_options(settings), "doctor"])` (`policy.py:298`), so removal of any of `--safe-mode`, `--restricted`, `--setting-sources`, `--settings`, `--strict-mcp-config`, `--no-chrome`, `--disable-slash-commands` fails **at preflight** when `doctor` rejects the option (assumes unknown top-level options are rejected) and `probe()` raises `RunError` (`adapters.py:396-398`). Removal of `--tools`, `--allowedTools`, `--output-format`, `--verbose`, or `--json-schema` fails **late** on review argv (`adapters.py:495-500`), then `claude_attempt` classifies failure via `classify_failure` at `adapters.py:610` (not the Codex/Copilot path at `adapters.py:570`).
 - **Excluded behavioral risk:** hidden accepted aliases are enforcement changes outside wording standard.
 - **Classification:** **RETRY/COST CHANGE**.
 
@@ -139,7 +139,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 ## 6) `classify_failure` (permanent fragments + fallthrough)
 
-- **Location:** `src/duo/adapters.py:281-315`; callers at `536`, `576`, `580`.
+- **Location:** `src/duo/adapters.py:315-349`; callers at `570`, `610`, `614`.
 - **Parsing dependency:** lowercase fragment matching for permanent categories; unmatched text falls through to retryable `AgentError(... retry_after=retry_delay(text))`.
 - **Provenance:** fixture/model-error tests in `tests/test_fixtures.py` and `tests/test_duo.py`. **OS:** not recorded.
 - **Classification:** **RETRY/COST CHANGE**.
@@ -148,28 +148,28 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 ### 7a) `codex_error_text`
 
-- **Location:** `src/duo/adapters.py:257-275`.
+- **Location:** `src/duo/adapters.py:291-309`.
 - **Parsing dependency:** JSONL event filtering on `turn.failed` and `error`; `"Reconnecting..."` messages are intentionally skipped.
 - **Provenance:** codex event fixtures plus reconnect tests. **OS:** Linux for the Codex 0.164.0-0.166.0 streams, macOS for 0.167.0; not recorded for 0.162.1/0.163.0.
 - **Classification:** **RETRY/COST CHANGE**.
 
 ### 7b) `claude_error_text`
 
-- **Location:** `src/duo/adapters.py:163-170`.
+- **Location:** `src/duo/adapters.py:197-204`.
 - **Parsing dependency:** structured envelope fields (`subtype`, optional `result` when `is_error`).
 - **Provenance:** claude result fixtures/tests. **OS:** Linux for the `claude-2.1.330` fixtures; macOS for the `claude-2.1.296` envelopes.
 - **Classification:** **RETRY/COST CHANGE**.
 
 ### 7c) `claude_stream_error_text`
 
-- **Location:** `src/duo/adapters.py:244-254`.
+- **Location:** `src/duo/adapters.py:278-288`.
 - **Parsing dependency:** tail scan for `type == "result"` events then delegation to `claude_error_text`.
 - **Provenance:** claude stream fixtures/tests. **OS:** Linux for the `claude-2.1.330` fixtures; not recorded for earlier ones.
 - **Classification:** **RETRY/COST CHANGE**.
 
 ## 8) `retry_delay` regex and consumption/cap
 
-- **Location:** parser `src/duo/adapters.py:318-335`; consumer `classify_failure` (`315`); cap handling in `src/duo/models.py:90-91` and retry loop `src/duo/workflow.py:213-219`.
+- **Location:** parser `src/duo/adapters.py:352-369`; consumer `classify_failure` (`349`); cap handling in `src/duo/models.py:90-91` and retry loop `src/duo/workflow.py:213-219`.
 - **Parsing dependency:** free-text regex for retry-after phrases and units.
 - **Provenance:** unit tests plus timeout fixtures `tests/fixtures/claude-2.1.330/events-timeout-noweb.jsonl` and `events-timeout-web.jsonl`.
 - **OS:** Linux (`claude-2.1.330` fixture set).
@@ -179,18 +179,18 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 ## 9) `copilot_reply` event-stream extraction
 
-- **Location:** `src/duo/adapters.py:114-152`.
-- **Parsing dependency:** selects last `assistant.message` with non-empty `content`, no `toolRequests`, and `phase` in `(None, "final_answer")`.
-- **Provenance:** Copilot event fixtures and replay tests. **OS:** not recorded.
-- **Consequence chain:** trigger is wording-level field rename in `toolRequests` or `phase` key/value. Unsafe acceptance additionally needs either (a) the qualifying non-final message appears after the true final answer, or (b) no final answer exists, CLI exits `0`, and that selected message parses as schema-valid JSON passing `validate_payload` (`adapters.py:538`) and `validate_review`.
-- **Structured alternative present:** both `copilot-1.0.95` event fixtures end with `assistant.turn_end`, `session.usage_checkpoint`, `assistant.idle`, and terminal `{"type":"result","exitCode":0,...}` events.
-- **In-cycle remediation (chain status):** `copilot_reply` now refuses when the stream contains no `result` event with `exitCode == 0`, so non-terminal streams no longer produce accepted replies. Chain (b) is closed only for streams lacking that event: a Copilot process that exits `0` normally still emits it, so chain (b)'s schema-valid-message condition is otherwise unchanged. Chain (a) is untouched: a qualifying non-final message after the true final answer is still accepted when the stream terminates successfully. The label therefore stays **POTENTIAL UNSAFE ACCEPTANCE**.
-- **New dependency created by the remediation:** the field names `type: "result"` and `exitCode` are now load-bearing. If either is renamed, every Copilot reply raises `AgentError`, which is retryable by default (`src/duo/models.py:79`), so each review repeats as full model calls up to `max_attempts` before the run errors — a RETRY/COST CHANGE dependency recorded here.
-- **Classification:** **POTENTIAL UNSAFE ACCEPTANCE**.
+- **Location:** `src/duo/adapters.py:114-186` (`copilot_final_candidate`, `COPILOT_ACTIVITY`, `copilot_reply`).
+- **Parsing dependency (since plan §6 step 1):** the answer is the **last** `assistant.message` event; it must be the stream's only final candidate (non-empty string `content`, a `toolRequests` field that is present and equal to `[]`, and `phase` absent or `"final_answer"`); if any message in the stream carries a `phase`, the answer must be `"final_answer"`; no `assistant.message`, `assistant.turn_start`, `user.message`, or `tool.*` event may follow it; at least one `result` event must follow it, every `result` event must have integer `exitCode == 0`, and none may precede it.
+- **Provenance:** both `copilot-1.0.95` event fixtures replay to their recorded answers (`tests/test_fixtures.py`, `test_copilot_event_streams`): `events-claude-approve.jsonl` has no `phase` field, and `events-gpt-revise.jsonl` marks its answer `phase: "final_answer"` after a commentary message with tool requests. Refusal cases are mutations of those recordings (`tests/test_copilot.py`, `test_copilot_final_answer_contract_refusals`). **OS:** not recorded. No event fixture exists for Copilot 1.0.105 or later, and no live Copilot run has exercised this contract yet (monthly quota exhausted since 2026-11-25).
+- **Former consequence chain:** a rename of the `toolRequests` or `phase` key or value made a non-final message qualify, and it was accepted when (a) it appeared after the true final answer, or (b) no final answer existed, the CLI exited `0`, and the message was schema-valid. A Claude-model stream (no `phase`) whose tool-calling message lost its `toolRequests` field and carried a schema-valid review was accepted by the 0.8.x parser; the regression test demonstrates it.
+- **Chain status:** chain (a) is closed: any later message, a second final candidate, a new turn, user message, or tool event after the answer refuses, so a later message can never replace the genuine answer. Chain (b) is closed for the recorded trigger: a renamed `toolRequests` field disqualifies the message, a relabelled commentary message is refused by the tool work that follows it, and a phased stream whose last message lost its `"final_answer"` label refuses. The activity checks only add refusals, so renaming those event types removes a check but never causes an acceptance.
+- **Residual:** acceptance of a non-final message would now need a message with `toolRequests: []` to be the last assistant message with no recognized activity after it, and a successful `result` after that. Inside one Copilot session, that is the final answer; reaching it otherwise requires renames of the activity event types together with a change in Copilot's session semantics.
+- **New dependencies created by the remediation:** the field names `type: "result"`, `exitCode`, and now `toolRequests` (present on the answer as an empty list, as in every recorded message) are load-bearing. If any is renamed or dropped, every Copilot reply raises `AgentError`, which is retryable by default (`src/duo/models.py:79`), so each review repeats as full model calls up to `max_attempts` before the run errors — a RETRY/COST CHANGE dependency (section 6 step 4).
+- **Classification:** **RETRY/COST CHANGE** (was POTENTIAL UNSAFE ACCEPTANCE through 0.8.x).
 
 ## 10) `claude_result` terminal-envelope checks
 
-- **Location:** `src/duo/adapters.py:201-241`, consumed at `568-581`.
+- **Location:** `src/duo/adapters.py:235-275`, consumed at `602-615`.
 - **Parsing dependency:** structured stream validation requires exactly one terminal `result`, no trailing events, and typed `subtype`/`is_error` envelope before success acceptance.
 - **Provenance:** claude stream fixtures and `tests/test_claude_stream.py`. **OS:** Linux for the `claude-2.1.330` fixtures; macOS for the `claude-2.1.296` envelopes.
 - **Classification:** **SAFE REFUSAL**.
@@ -255,7 +255,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 1. **Landed this cycle (site 4b):** unknown Codex feature layouts and duplicate feature rows now fail closed. Follow-up for plan §6 step 2: move from stage-vocabulary guard to explicit structured-column contracts when upstream exposes them.
 2. **Landed this cycle (sites 3a/3b):** ambiguous multi-version output now fails closed, and Copilot version gating parses full `--version` output. Follow-up for plan §6 step 2: tighten to CLI-specific anchored formats (`codex-cli X`, `X (Claude Code)`, `GitHub Copilot CLI X`).
-3. **Landed this cycle (site 9, partial):** Copilot replies now require a `result` event with `exitCode == 0` somewhere in the stream, which closes chain (b) only for streams lacking that event; chain (a) remains open. Follow-up for plan §6 step 2: bind answer acceptance to a stricter final-message contract (not just last qualifying message + terminal success).
+3. **Site 9:** 0.8.1 required a `result` event with `exitCode == 0` somewhere in the stream. Plan §6 step 1 then bound acceptance to a final-answer contract (the last assistant message, the only final candidate, no agent activity after it, and successful `result` events after it), closing chains (a) and (b); see site 9.
 4. **Sites 11a/11b (small):** improve drift visibility (report parser confidence/unknown-format and include state-aware feature diffs).
-5. **Retry/cost group (medium):** sites `6`, `7a`, `7b`, `7c`, `8`, `4a`, `4c`, `5a`, `4d`, `5b`, plus the `type:"result"`/`exitCode` field-name dependency that site 9's remediation created, should prioritize structured fields before text fragments and separate retry policy from human wording.
+5. **Retry/cost group (medium):** sites `6`, `7a`, `7b`, `7c`, `8`, `4a`, `4c`, `5a`, `4d`, `5b`, plus the `type:"result"`/`exitCode`/`toolRequests` field-name dependencies that site 9's remediation created, should prioritize structured fields before text fragments and separate retry policy from human wording.
 6. **Fixture retention/expansion (small/medium):** add fixture-backed tests for unknown/shifted messages, Copilot field/key drift, and at least one unknown-option rejection fixture (requested in 5a) to pin the late-failure classification path.
