@@ -194,6 +194,16 @@
           "sha256": "f3643d24e3f24c48ebaffbcda11353293f452c1c32f715a8329effa730838ad1"
         }
       ]
+    },
+    {
+      "cli": "copilot",
+      "version": "1.0.116",
+      "files": [
+        {
+          "path": "copilot-1.0.116/help.txt",
+          "sha256": "f031f47417bf4336bf00578ccb082d13d96bf9528013caf4b790b8c8afdc1560"
+        }
+      ]
     }
   ]
 }

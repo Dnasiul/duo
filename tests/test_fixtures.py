@@ -98,7 +98,8 @@ class RecordedProbeTests(unittest.TestCase):
     def test_copilot_help_and_config_match_required_controls(self):
         # 1.0.103 replaced --no-remote and --no-remote-export with --sync-session.
         expected = {"copilot-1.0.95": ["--no-remote", "--no-remote-export"],
-                    "copilot-1.0.105": ["--sync-session=off"]}
+                    "copilot-1.0.105": ["--sync-session=off"],
+                    "copilot-1.0.116": ["--sync-session=off"]}
         directories = sorted(FIXTURES.glob("copilot-*"))
         self.assertEqual({d.name for d in directories}, set(expected))
         for directory in directories:

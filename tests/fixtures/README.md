@@ -22,6 +22,7 @@ so hand-written fakes cannot drift from real formats unnoticed.
 | `claude-2.1.330` | Linux stream discovery: Read/Glob/Grep with and without web, WebSearch/WebFetch with web, explicit denial versus missing-file error, success and turn-limit terminals; fresh restricted probes and timed-out adapter streams (2026-11-23, `claude-opus-5-5`) |
 | `copilot-1.0.95` | version, `--help`, isolated `config --list --json`; event streams from GPT (`phase: "final_answer"`) and Claude (no `phase`) models; model-unavailable and authentication-failure stderr |
 | `copilot-1.0.105` | version, `--help` (`--sync-session` in place of `--no-remote` and `--no-remote-export`, from 1.0.103), isolated `config --list --json` |
+| `copilot-1.0.116` | version, `--help` (options now sorted; adds opt-in `--decision`, `--choice`, and `--sandbox`; removes `--host-environment`, `--host-compute-id`, and `--plain-diff`, none passed by Duo), unchanged isolated `config --list --json`; recorded 2026-11-27 on Linux with the restricted recorder |
 
 Response fixtures come from disposable runs with synthetic tasks. The recorder
 replaces home paths, the user and account names, session and request IDs, and
