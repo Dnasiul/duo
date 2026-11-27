@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "baselines": [
+    {
+      "cli": "claude",
+      "version": "2.1.296",
+      "files": [
+        {
+          "path": "claude-2.1.296/help.txt",
+          "sha256": "550db4f88ae1d97bf7244ca96dc89554aabd3978241ceb69f79001e816c35f09"
+        }
+      ]
+    },
+    {
+      "cli": "claude",
+      "version": "2.1.330",
+      "files": [
+        {
+          "path": "claude-2.1.330/help.txt",
+          "sha256": "b296ad20ed563e8c57033bd8570724d63a508dd5a7c1de126e95edcbc73461f3"
+        }
+      ]
+    },
+    {
+      "cli": "codex",
+      "version": "0.162.1",
+      "files": [
+        {
+          "path": "codex-0.162.1/exec-help.txt",
+          "sha256": "df0d864ca2076f7654288c6a1e3394e3eaa2ea8f15021df2524efdd90c70986c"
+        },
+        {
+          "path": "codex-0.162.1/features.txt",
+          "sha256": "21ce111a1d1015d0d2456b209394a9303a765dd50e45a9637ac373cd60aa2a77"
+        }
+      ]
+    },
+    {
+      "cli": "codex",
+      "version": "0.163.0",
+      "files": [
+        {
+          "path": "codex-0.163.0/exec-help.txt",
+          "sha256": "df0d864ca2076f7654288c6a1e3394e3eaa2ea8f15021df2524efdd90c70986c"
+        },
+        {
+          "path": "codex-0.163.0/features.txt",
+          "sha256": "391c7384903dbb4c8cebe7ff943787dc2f7531de328a2cb426d04efa98f3eb48"
+        }
+      ]
+    },
+    {
+      "cli": "codex",
+      "version": "0.164.0",
+      "files": [
+        {
+          "path": "codex-0.164.0/exec-help.txt",
+          "sha256": "df0d864ca2076f7654288c6a1e3394e3eaa2ea8f15021df2524efdd90c70986c"
+        },
+        {
+          "path": "codex-0.164.0/features.txt",
+          "sha256": "35cabb9d5967c27332ab224269a16d54f54c69c8c01a6373eafb8f3f1afab900"
+        }
+      ]
+    },
+    {
+      "cli": "codex",
+      "version": "0.165.0",
+      "files": [
+        {
+          "path": "codex-0.165.0/exec-help.txt",
+          "sha256": "df0d864ca2076f7654288c6a1e3394e3eaa2ea8f15021df2524efdd90c70986c"
+        },
+        {
+          "path": "codex-0.165.0/features.txt",
+          "sha256": "ff2651087483d5adcac58f1b4c93d50dac10c73627a8ffd14b1d4aaec732233d"
+        }
+      ]
+    },
+    {
+      "cli": "codex",
+      "version": "0.166.0",
+      "files": [
+        {
+          "path": "codex-0.166.0/exec-help.txt",
+          "sha256": "df0d864ca2076f7654288c6a1e3394e3eaa2ea8f15021df2524efdd90c70986c"
+        },
+        {
+          "path": "codex-0.166.0/features.txt",
+          "sha256": "9423cc3853bf89d7f2655e7e19cbeac856d8fda9fc8e899fbd716ae4ca8296d0"
+        }
+      ]
+    },
+    {
+      "cli": "codex",
+      "version": "0.167.0",
+      "files": [
+        {
+          "path": "codex-0.167.0/exec-help.txt",
+          "sha256": "df0d864ca2076f7654288c6a1e3394e3eaa2ea8f15021df2524efdd90c70986c"
+        },
+        {
+          "path": "codex-0.167.0/features.txt",
+          "sha256": "681e77d01bfc7aa23c7000cca9663dd12594605f3f099f32718a352116b6d2e7"
+        }
+      ]
+    },
+    {
+      "cli": "codex",
+      "version": "0.168.0",
+      "files": [
+        {
+          "path": "codex-0.168.0/exec-help.txt",
+          "sha256": "df0d864ca2076f7654288c6a1e3394e3eaa2ea8f15021df2524efdd90c70986c"
+        },
+        {
+          "path": "codex-0.168.0/features.txt",
+          "sha256": "f0b066b818b262356a9f7ccfb243d0c57ecf0b0e89089bff1edc6c78bdd1d335"
+        }
+      ]
+    },
+    {
+      "cli": "codex",
+      "version": "0.169.1",
+      "files": [
+        {
+          "path": "codex-0.169.1/exec-help.txt",
+          "sha256": "b7bbe3ad07a91a11393c9a83d97873e0bca1d1766e4d7cd9013da2c374d34f51"
+        },
+        {
+          "path": "codex-0.169.1/features.txt",
+          "sha256": "6150640c1bfcf1acf61c5569feb2e67aebfb2ee5920d49f563cb549eb36a3d93"
+        }
+      ]
+    },
+    {
+      "cli": "codex",
+      "version": "0.170.0",
+      "files": [
+        {
+          "path": "codex-0.170.0/exec-help.txt",
+          "sha256": "b7bbe3ad07a91a11393c9a83d97873e0bca1d1766e4d7cd9013da2c374d34f51"
+        },
+        {
+          "path": "codex-0.170.0/features.txt",
+          "sha256": "e075a9277204383f9e14ee64a3b9c0883f40e1ff7a94b89875de036e51a06b35"
+        }
+      ]
+    },
+    {
+      "cli": "codex",
+      "version": "0.171.0",
+      "files": [
+        {
+          "path": "codex-0.171.0/exec-help.txt",
+          "sha256": "34ddfe0641ace4caaad89106468d9121bfa81978990eba230dc810985d00310d"
+        },
+        {
+          "path": "codex-0.171.0/features.txt",
+          "sha256": "cce36e4c3d6916988e1612448a7fec99ae1b962e11d65bf3fa5e7c440f67136a"
+        }
+      ]
+    },
+    {
+      "cli": "codex",
+      "version": "0.172.0",
+      "files": [
+        {
+          "path": "codex-0.172.0/exec-help.txt",
+          "sha256": "34ddfe0641ace4caaad89106468d9121bfa81978990eba230dc810985d00310d"
+        },
+        {
+          "path": "codex-0.172.0/features.txt",
+          "sha256": "2d3070c2260583d38a63ec3ed67d218c457381edada5e5bc20a7d9f06b6926e0"
+        }
+      ]
+    },
+    {
+      "cli": "copilot",
+      "version": "1.0.95",
+      "files": [
+        {
+          "path": "copilot-1.0.95/help.txt",
+          "sha256": "b19c58d6a34052de619416b3424e04fff736c325f0a0b9d88c945e530478957b"
+        }
+      ]
+    },
+    {
+      "cli": "copilot",
+      "version": "1.0.105",
+      "files": [
+        {
+          "path": "copilot-1.0.105/help.txt",
+          "sha256": "f3643d24e3f24c48ebaffbcda11353293f452c1c32f715a8329effa730838ad1"
+        }
+      ]
+    }
+  ]
+}

@@ -21,6 +21,15 @@ CODEX_DISABLED = (
     "hooks", "apps", "plugins", "browser_use", "browser_use_external",
     "in_app_browser", "multi_agent", "multi_agent_v2", "shell_snapshot",
 )
+# Options preflight requires in `codex exec --help` and `claude --help`.
+CODEX_REQUIRED_FLAGS = ("--sandbox", "--ephemeral", "--json", "--output-schema", "--ignore-rules",
+                        "--ignore-user-config", "--strict-config")
+CLAUDE_REQUIRED_FLAGS = ("--safe-mode", "--restricted", "--setting-sources", "--settings",
+                         "--strict-mcp-config", "--no-chrome", "--disable-slash-commands",
+                         "--tools", "--allowedTools", "--output-format", "--verbose", "--json-schema")
+# The stage column of `codex features list`; any other value refuses.
+CODEX_FEATURE_STAGES = frozenset({"stable", "experimental", "deprecated", "under development",
+                                  "removed"})
 CODEX_OVERRIDES = (
     "mcp_servers={}", "notify=[]", 'approval_policy="never"',
     'sandbox_mode="read-only"', 'web_search="disabled"',
@@ -229,12 +238,9 @@ def verify_controls(codex: str, claude: str, settings: Path,
     }
     if "codex" in agents:
         help_text = probe([codex, "exec", "--help"])
-        flags = ("--sandbox", "--ephemeral", "--json", "--output-schema", "--ignore-rules",
-                 "--ignore-user-config", "--strict-config")
-        if any(flag not in help_text for flag in flags):
+        if any(flag not in help_text for flag in CODEX_REQUIRED_FLAGS):
             raise RunError("Installed codex lacks required inspection options")
         effective = probe([codex, *codex_options(allow_web), "features", "list"])
-        known_stages = {"stable", "experimental", "deprecated", "under development", "removed"}
         features = {}
         for line in effective.splitlines():
             if len(parts := line.split()) < 3:
@@ -242,7 +248,7 @@ def verify_controls(codex: str, claude: str, settings: Path,
             name, state = parts[0], parts[-1]
             if state not in {"true", "false"}:
                 raise RunError("Cannot verify Codex feature states in features list output")
-            if " ".join(parts[1:-1]) not in known_stages:
+            if " ".join(parts[1:-1]) not in CODEX_FEATURE_STAGES:
                 raise RunError("Cannot verify Codex feature layout in features list output "
                                f"(unrecognized stage: {' '.join(parts[1:-1])!r})")
             if name in features:
@@ -284,10 +290,7 @@ def verify_controls(codex: str, claude: str, settings: Path,
         }
     if "claude" in agents:
         help_text = probe([claude, "--help"])
-        flags = ("--safe-mode", "--restricted", "--setting-sources", "--settings",
-                 "--strict-mcp-config", "--no-chrome", "--disable-slash-commands",
-                 "--tools", "--allowedTools", "--output-format", "--verbose", "--json-schema")
-        if any(flag not in help_text for flag in flags):
+        if any(flag not in help_text for flag in CLAUDE_REQUIRED_FLAGS):
             raise RunError("Installed claude lacks required inspection options")
         # Read the output option's own help block, including wrapped choices.
         # Mentions in --input-format or other option descriptions do not count.

@@ -875,26 +875,49 @@ a review: this version does not fingerprint all code or detect every code edit.
 The **CLI drift** workflow (`.github/workflows/drift.yml`) runs every Monday and
 on demand. On Ubuntu and macOS it installs the newest Codex, Claude Code, and
 Copilot releases from npm and runs `scripts/check_drift.py`. That script applies
-Duo's own setup checks without model calls and compares help flags and Codex
-feature names with the recorded fixtures. Allowed authentication can remain;
-"no model calls" does not mean "no credentials". Each CLI is reported as:
+Duo's own setup checks without model calls and compares the options each help
+text defines, and Codex `features list` rows (name, stage, state), with the
+latest **reviewed baseline** at or below the installed version. Baselines are
+recorded fixtures listed with their SHA-256 digests in
+`tests/fixtures/drift-baselines.json`; a digest is verified before its file is
+used. Allowed authentication can remain; "no model calls" does not mean "no
+credentials". Each CLI is reported as:
 
-- `compatible`: a version in the tested range whose configuration probes pass;
-  this does not prove behavioral enforcement.
+- `compatible`: a version in the tested range whose configuration probes pass,
+  with no change needing review; this does not prove behavioral enforcement.
+  Added options, new disabled features, and stage changes are listed but do not
+  need review.
+- `needs-review`: a tested version whose probes pass, but an option or feature
+  was removed (including an option whose name survives only in prose), a
+  feature's default state changed, a new feature is enabled by default, an
+  output layout is unrecognized, or the baseline is missing or fails its
+  digest check (for example, a fixture re-recorded but not yet reviewed).
 - `untested-version`: the probes pass, but the version is outside the tested
   range. Duo refuses it unless `--allow-untested-cli` is passed.
 - `probe-failure`: a control is missing or did not take effect, or the CLI did
   not start. The job fails.
 
 When action is needed, the workflow opens a single "CLI drift: action needed"
-issue or comments on it, and it closes the issue once every CLI is compatible
-again. The repository owner triages it; the issue's arrival is the weekly
-review prompt.
+issue or comments on it. Every result other than `compatible` needs action, as
+do missing or unreadable results from either platform
+(`scripts/drift_report.py`). It closes the issue only when every CLI is
+compatible on both platforms. The repository owner triages it; the issue's
+arrival is the weekly review prompt.
+
+- For `needs-review`: record the version's fixtures with
+  `scripts/record_fixtures.py`, check that Duo uses none of the removed options
+  or changed features (and, for a changed default, that it does not weaken a
+  reviewer control), then record the fixture as reviewed with
+  `python scripts/check_drift.py --review CLI VERSION`. That command refuses
+  fixtures whose layouts are unrecognized or that lack an option preflight
+  requires (or, for Codex, a disabled feature reported `false`). Commit the
+  fixture and `tests/fixtures/drift-baselines.json` together. Only this
+  command changes the manifest.
 
 - For `untested-version`: record its probes with `scripts/record_fixtures.py`,
   run the inspection smoke test and one bounded live Duo run against it, and
   review the reported flag and feature changes. If everything passes, add the
-  fixtures, extend `TESTED_VERSIONS` in `src/duo/policy.py` (for Codex, one
+  fixtures, record them with `check_drift.py --review`, extend `TESTED_VERSIONS` in `src/duo/policy.py` (for Codex, one
   minor version at a time), and update the versions near the top of this file
   in a normal release. Pass `--allow-untested-cli` to the smoke test while
   validating a version that the current policy still rejects.

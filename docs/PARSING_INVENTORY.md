@@ -1,6 +1,6 @@
 # Parsing dependency inventory (plan §6 step 1)
 
-Date: 2026-11-25. Updated 2026-11-27: site 9's final-answer contract (current `plan.md` §6 step 1) closes its unsafe-acceptance chains; it is reclassified RETRY/COST CHANGE.
+Date: 2026-11-25. Updated 2026-11-27: site 9's final-answer contract (current `plan.md` §6 step 1) closes its unsafe-acceptance chains; it is reclassified RETRY/COST CHANGE. Sites 11a/11b (current §6 step 2) are reclassified SAFE REFUSAL; no site remains classified POTENTIAL UNSAFE ACCEPTANCE.
 
 Scope: inventory with in-cycle remediation notes. This records current parsing dependencies on external CLI wording/shape and notes the minimal fail-closed guards landed in this cycle for sites 3a/3b and 4b, and a partial guard for site 9.
 
@@ -29,8 +29,8 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 | 8. `retry_delay` regex + workflow/model cap consumption | RETRY/COST CHANGE |
 | 9. `copilot_reply` event-stream extraction | RETRY/COST CHANGE |
 | 10. `claude_result` terminal-envelope checks | SAFE REFUSAL |
-| 11a. `scripts/check_drift.py` `flags()` extraction | POTENTIAL UNSAFE ACCEPTANCE |
-| 11b. `scripts/check_drift.py` `features()` extraction | POTENTIAL UNSAFE ACCEPTANCE |
+| 11a. `scripts/check_drift.py` help-option extraction | SAFE REFUSAL |
+| 11b. `scripts/check_drift.py` `features list` extraction | SAFE REFUSAL |
 | 12. `scripts/record_fixtures.py` `version_of()` | SAFE REFUSAL |
 | 13. `verify_controls` Codex `mcp list --json` must decode to `[]` | SAFE REFUSAL |
 | 14. Copilot `config --list --json` effective-settings equality check | SAFE REFUSAL |
@@ -62,7 +62,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 - **Consequence chain (historical):** wrong semver match could return `"tested"` and suppress `untested_cli` recording after preflight acceptance.
 - **In-cycle remediation:** `verify_version` now collects all matched triples and refuses when more than one distinct version is present (`RunError` on ambiguous output). A single distinct triple (including repeats) still behaves as before.
 - **Residuals accepted:** (1) output whose only triple is not the CLI's own version — the installed version absent from the output — is still accepted; the recorded CLIs always print their own version, so this requires a CLI that prints a foreign version and not its own. (2) The native call site truncates to `[:200]`, so a second distinct triple beyond character 200 is never seen; the Copilot path (3b) passes the full output and has no such truncation.
-- **Additional call sites:** same parser is used in `scripts/check_drift.py:94-96` and `101-103`; ambiguous output now raises `RunError` there too, which `check_drift.py` reports as probe-failure/`::error` rather than `"compatible"`. A single wrong triple (residual 1) can still report `"compatible"` and suppress the `::warning` path (`check_drift.py:123`, `162-164`).
+- **Additional call sites:** same parser is used in `scripts/check_drift.py:243` (and Copilot preflight at `234`), and `version_tuple` (`142-146`) applies the same one-triple rule to select the baseline; ambiguous output now raises `RunError` there too, which `check_drift.py` reports as probe-failure/`::error` rather than `"compatible"`. A single wrong triple (residual 1) can still report `"compatible"` and suppress the `::warning` path (`check_drift.py:123`, `162-164`).
 - **Classification:** **SAFE REFUSAL**.
 
 ### 3b) Copilot first-line selection before `verify_version`
@@ -89,7 +89,7 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 - **Location:** `src/duo/policy.py:231-248`.
 - **Parsing dependency (historical):** `parts[0]` name + `parts[-1]` state from any row with `len(parts) >= 3`.
-- **Provenance:** `tests/fixtures/codex-*/features.txt`; replay tests and drift helper reuse (`scripts/check_drift.py:49-50`). **OS:** not recorded.
+- **Provenance:** `tests/fixtures/codex-*/features.txt`; replay tests; the drift check's `feature_rows` (`scripts/check_drift.py:103-117`) shares the stage vocabulary (`CODEX_FEATURE_STAGES`). **OS:** not recorded.
 - **Consequence chain (historical, independent OR paths):**
   1. **Chain (1):** a trailing column holding `"false"` (for example after an effective `"true"`) could satisfy `parts[-1]` alone; no duplicate row required.
   2. **Chain (2):** a repeated table where a later row says `"false"` could overwrite an earlier effective `"true"` through dict overwrite; no trailing column required.
@@ -197,25 +197,30 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 
 ## 11) `scripts/check_drift.py` extraction (tooling)
 
-### 11a) `flags()`
+Since current `plan.md` §6 step 2, each CLI is compared with the latest **reviewed baseline** at or below its version: an entry in `tests/fixtures/drift-baselines.json` naming the fixture files and their SHA-256 digests (`load_baselines` and `baseline`, `scripts/check_drift.py:153-198`). A missing baseline, a file missing from it, or a digest mismatch (for example, a fixture re-recorded but not yet reviewed) is reported and the file is not used. Only `check_drift.py --review` changes the manifest (`record_review`, `311-325`), after `review_errors` (`284-308`) confirms recognized layouts, the options preflight requires, and, for Codex, the disabled features reported `false`. Any reason for review makes a tested version `needs-review` instead of `compatible` (`check`, `212-281`), and the weekly workflow treats every result other than `compatible` as needing action (`scripts/drift_report.py`).
 
-- **Location:** `scripts/check_drift.py:45-46`; consumed in comparisons at `99-111`, `118-119`.
-- **Parsing dependency:** regex extraction of help option tokens.
-- **Consequence chain:** if a removed flag remains in prose, it remains in `flags()` output and no `"removed"` entry appears in the drift report. A drift report showing no change is a qualifying decision artifact.
-- **Classification:** **POTENTIAL UNSAFE ACCEPTANCE**.
+### 11a) help-option extraction
 
-### 11b) `features()`
+- **Location:** `defined_flags`, `help_layout`, `compare_help` (`scripts/check_drift.py:72-96`); consumed in `check` at `264-277`.
+- **Parsing dependency:** an option is **defined** when its line starts, indented at most 8 columns, with the option and any comma-separated aliases (`-c, --config`, `--allowedTools, --allowed-tools`); mentions elsewhere are prose. The layout is recognized when an `Options:` header exists and at least one option is defined. Long options may contain capitals (the earlier pattern read `--allowedTools` as `--allowed`).
+- **Provenance:** every reviewed help fixture (`codex-*/exec-help.txt`, `claude-*/help.txt`, `copilot-*/help.txt`) is recognized and defines every option preflight requires (`tests/test_drift.py`, `test_committed_manifest_lists_reviewable_fixtures`).
+- **Former consequence chain:** a removed option still named in prose stayed in the extracted set, so the report showed no removal. Now it is reported as `removed, still mentioned in prose` and needs review, even for an in-range version (`test_removed_option_still_named_in_prose_needs_review`).
+- **Residual:** a wrapped description line indented 8 columns or less that begins with an option name would count as a definition. In the recorded layouts, wrapped descriptions are indented 10 or more columns, except Claude's alias-line descriptions at 6 columns, none of which begins with an option. Added options are reported but do not need review.
+- **Classification:** **SAFE REFUSAL** (an unrecognized layout or any removal needs review; was POTENTIAL UNSAFE ACCEPTANCE).
 
-- **Location:** `scripts/check_drift.py:49-50`; consumed at `112-114`.
-- **Parsing dependency:** keeps only rows with at least 3 tokens and compares **feature names only**.
-- **Consequence chain:** if layout becomes two-column, new feature names are dropped and never reported as `"added"`. State transitions are never compared, which is a design visibility gap (not a wording parser issue).
-- **Classification:** **POTENTIAL UNSAFE ACCEPTANCE**.
+### 11b) `features list` extraction
+
+- **Location:** `feature_rows`, `compare_features` (`scripts/check_drift.py:103-133`); consumed in `check` at `264-277`.
+- **Parsing dependency:** a row is `name stage state` with a stage from `CODEX_FEATURE_STAGES` (shared with preflight, `src/duo/policy.py`) and a state of `true` or `false`; any other nonblank line, or a repeated name, is unrecognized.
+- **Former consequence chain:** rows with fewer than three columns were dropped, and only names were compared. Now unrecognized rows (including a two-column layout) need review, and the report lists added, removed, enabled, disabled, newly enabled, and stage-changed features. Removals, state changes, and features added enabled need review (`test_two_column_feature_list_needs_review`, `test_feature_state_changes_need_review`).
+- **Residual:** stage changes and features added disabled are reported only. Preflight (`verify_controls`, site 4b) still skips rows with fewer than three columns; it refuses when any feature Duo disables is not reported `false`, so a two-column row for one of those refuses there.
+- **Classification:** **SAFE REFUSAL** (was POTENTIAL UNSAFE ACCEPTANCE).
 
 ## 12) `scripts/record_fixtures.py` `version_of()` (tooling)
 
 - **Location:** `scripts/record_fixtures.py:129-133`.
 - **Parsing dependency:** unanchored `\d+\.\d+\.\d+` match from version text.
-- **Consequence chain:** banner/update text can be misparsed as version, causing fixture writes to wrong `<cli>-<version>` directory; `write()` overwrites by filename (`record_fixtures.py:123-126`), potentially replacing first-tested baseline files that `check_drift.fixture()` reads (`check_drift.py:58-60`). `record_attempt` targeting (`record_fixtures.py:189`) also depends on this parser. Runtime reviewer decisions are unaffected; only fixture-commit review catches it.
+- **Consequence chain:** banner/update text can be misparsed as version, causing fixture writes to wrong `<cli>-<version>` directory; `write()` overwrites by filename (`record_fixtures.py:123-126`), potentially replacing files listed as reviewed drift baselines; the drift check then reports their digest mismatch as needing review (`check_drift.py:175-198`). `record_attempt` targeting (`record_fixtures.py:189`) also depends on this parser. Runtime reviewer decisions are unaffected; only fixture-commit review catches it.
 - **Label rationale:** fixture writes are printed (`record_fixtures.py:126`), so baseline overwrite is visible as committed-file git diff before use; replay expectations pinned by version (`tests/test_fixtures.py:98`) fail loudly on Copilot when fixture/version mapping drifts; the explicit refusal path is the no-match `SystemExit` (`record_fixtures.py:131-132`). A wrong match does not self-refuse, so this SAFE REFUSAL label depends on review/replay gates.
 - **Classification:** **SAFE REFUSAL**.
 
@@ -256,6 +261,6 @@ OS provenance note: many fixture artifacts (especially help/version/features/con
 1. **Landed this cycle (site 4b):** unknown Codex feature layouts and duplicate feature rows now fail closed. Follow-up for plan §6 step 2: move from stage-vocabulary guard to explicit structured-column contracts when upstream exposes them.
 2. **Landed this cycle (sites 3a/3b):** ambiguous multi-version output now fails closed, and Copilot version gating parses full `--version` output. Follow-up for plan §6 step 2: tighten to CLI-specific anchored formats (`codex-cli X`, `X (Claude Code)`, `GitHub Copilot CLI X`).
 3. **Site 9:** 0.8.1 required a `result` event with `exitCode == 0` somewhere in the stream. Plan §6 step 1 then bound acceptance to a final-answer contract (the last assistant message, the only final candidate, no agent activity after it, and successful `result` events after it), closing chains (a) and (b); see site 9.
-4. **Sites 11a/11b (small):** improve drift visibility (report parser confidence/unknown-format and include state-aware feature diffs).
+4. **Sites 11a/11b:** done in current `plan.md` §6 step 2: defined-option and full-row parsing, unrecognized layouts reported, state-aware feature diffs, and reviewed, digest-verified baselines; see site 11.
 5. **Retry/cost group (medium):** sites `6`, `7a`, `7b`, `7c`, `8`, `4a`, `4c`, `5a`, `4d`, `5b`, plus the `type:"result"`/`exitCode`/`toolRequests` field-name dependencies that site 9's remediation created, should prioritize structured fields before text fragments and separate retry policy from human wording.
 6. **Fixture retention/expansion (small/medium):** add fixture-backed tests for unknown/shifted messages, Copilot field/key drift, and at least one unknown-option rejection fixture (requested in 5a) to pin the late-failure classification path.

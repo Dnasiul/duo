@@ -76,3 +76,23 @@ python scripts/record_fixtures.py attempt copilot ~/.local/state/duo/runs/run-â€
 Review every file before committing. The fixture tests reject credential
 patterns and home-directory paths, but they cannot judge whether content is
 private.
+
+## Drift baselines
+
+`drift-baselines.json` lists the fixtures `scripts/check_drift.py` may compare
+installed CLIs with: for each reviewed CLI version, the path and SHA-256 digest
+of its `exec-help.txt` and `features.txt` (Codex) or `help.txt` (Claude Code,
+Copilot). The drift check uses the latest reviewed version at or below the
+installed one and refuses to compare with a file whose digest differs, so a
+re-recorded fixture stays flagged until it is reviewed. Older entries remain for
+replay. After reviewing a recorded version (see "Responding to CLI drift" in the
+top-level README), record it:
+
+```sh
+python scripts/check_drift.py --review codex 0.172.0
+```
+
+The command refuses fixtures whose layouts are unrecognized or that lack an
+option preflight requires (for Codex, also a disabled feature reported `false`).
+Every entry present on 2026-11-27 was recorded from the fixtures above, each of
+which had been reviewed when its version was adopted.

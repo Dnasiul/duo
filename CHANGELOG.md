@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Changed
+
+- The drift check (`scripts/check_drift.py`) compares each CLI with its latest
+  reviewed baseline at or below the installed version, listed with SHA-256
+  digests in `tests/fixtures/drift-baselines.json`, instead of the oldest
+  tested fixture (plan §6, sites 11a/11b). A digest mismatch, such as a
+  re-recorded but unreviewed fixture, is reported and the file is not used;
+  `check_drift.py --review CLI VERSION` records a reviewed fixture after
+  checking its layouts and required controls. Help comparison uses the options
+  each help text defines, so an option removed but still named in prose is
+  reported. Codex feature rows are compared by stage and state, and an
+  unrecognized row, such as a two-column layout, is reported instead of
+  dropped. A new `needs-review` result covers removals, feature state changes,
+  features added enabled, unrecognized layouts, and baseline problems, even for
+  a tested version.
+- The weekly drift workflow decides the issue with `scripts/drift_report.py`:
+  every result other than `compatible`, and missing or unreadable results from
+  either platform, open or update the issue; it closes only when every CLI is
+  compatible on both platforms.
+
 ### Fixed
 
 - Copilot replies are accepted only under a final-answer contract (plan §6,
