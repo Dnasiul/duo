@@ -104,7 +104,7 @@ def parse_json(text: str, *, allow_fence: bool = False) -> object:
 def read_json(path: Path, *, allow_fence: bool = False) -> object:
     try:
         if path.stat().st_size > 16 * 1024 * 1024:
-            raise AgentError("Agent response exceeds the 16 MiB limit", retryable=False)
+            raise AgentError("Agent response exceeds the 16 MiB limit", category="limit")
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         raise AgentError("Agent returned missing or invalid JSON") from exc
@@ -122,6 +122,19 @@ def copilot_final_candidate(data: object) -> bool:
             and data.get("phase") in (None, "final_answer"))
 
 
+def copilot_recorded_message(data: object) -> bool:
+    """An assistant message with the fields and values recorded in every fixture.
+
+    Anything else means Copilot's event format changed: a renamed field or a
+    new phase would otherwise only disqualify the answer, and every retry
+    would repeat the full model call.
+    """
+    return (isinstance(data, dict) and isinstance(data.get("content"), str)
+            and isinstance(data.get("toolRequests"), list)
+            and data.get("phase") in COPILOT_PHASES)
+
+
+COPILOT_PHASES = (None, "commentary", "final_answer")
 # Events that mean the agent kept working; none may follow the final answer.
 COPILOT_ACTIVITY = ("assistant.message", "assistant.turn_start", "user.message")
 
@@ -142,7 +155,7 @@ def copilot_reply(path: Path) -> object:
     try:
         # Events include tool results, so allow more than a single response.
         if path.stat().st_size > 64 * 1024 * 1024:
-            raise AgentError("Copilot output exceeds the 64 MiB limit", retryable=False)
+            raise AgentError("Copilot output exceeds the 64 MiB limit", category="limit")
         with path.open(encoding="utf-8") as lines:
             for index, line in enumerate(lines):
                 try:
@@ -165,6 +178,18 @@ def copilot_reply(path: Path) -> object:
                         phased = True
     except (OSError, UnicodeError) as exc:
         raise AgentError("Agent returned missing or invalid JSON") from exc
+    # Format checks first: they decide whether the stream is one Duo can read.
+    if not messages:
+        raise AgentError("Copilot stream has no assistant message", category="stream")
+    if not all(copilot_recorded_message(data) for _, data in messages):
+        raise AgentError("Copilot stream has an assistant message in an unrecorded format",
+                         category="stream")
+    if not results:
+        raise AgentError("Copilot stream is missing a successful terminal result event",
+                         category="stream")
+    if any(not success for _, success in results):
+        raise AgentError("Copilot stream has an unsuccessful terminal result event",
+                         category="stream")
     candidates = [index for index, data in messages if copilot_final_candidate(data)]
     if not candidates:
         raise AgentError("Copilot returned no final answer")
@@ -177,12 +202,9 @@ def copilot_reply(path: Path) -> object:
         raise AgentError("Copilot's final message is not marked as the final answer")
     if any(later > index for later in activity):
         raise AgentError("Copilot continued working after its final answer")
-    if any(not success for _, success in results):
-        raise AgentError("Copilot stream has an unsuccessful terminal result event")
     if any(earlier < index for earlier, _ in results):
-        raise AgentError("Copilot stream has a terminal result event before its final answer")
-    if not results:
-        raise AgentError("Copilot stream is missing a successful terminal result event")
+        raise AgentError("Copilot stream has a terminal result event before its final answer",
+                         category="stream")
     return parse_json(data["content"], allow_fence=True)
 
 
@@ -227,7 +249,7 @@ def check_claude_json_depth(text: str) -> None:
         elif char in "[{":
             depth += 1
             if depth > CLAUDE_MAX_JSON_DEPTH:
-                raise AgentError("Claude returned missing or invalid stream data")
+                raise AgentError("Claude returned missing or invalid stream data", category="stream")
         elif char in "]}":
             depth -= 1
 
@@ -246,28 +268,32 @@ def claude_result(path: Path, metadata: dict, *, max_output_mb: int) -> dict:
     try:
         if path.stat().st_size > max_output_mb * 1024 * 1024:
             raise AgentError(f"Claude output exceeds the {max_output_mb} MiB limit "
-                             "(--max-output-mb)", retryable=False)
+                             "(--max-output-mb)", category="limit")
         with path.open(encoding="utf-8") as lines:
             for line in lines:
                 if not line.strip():
                     continue
                 check_claude_json_depth(line)
-                event = parse_json(line)
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise AgentError("Claude returned an invalid stream event",
+                                     category="stream") from exc
                 if not isinstance(event, dict) or not isinstance(event.get("type"), str):
-                    raise AgentError("Claude returned an invalid stream event")
+                    raise AgentError("Claude returned an invalid stream event", category="stream")
                 last_type = event["type"]
                 if last_type == "result":
                     metadata["terminal_results"] += 1
                     terminal = event
     except (OSError, UnicodeError, RecursionError) as exc:
-        raise AgentError("Claude returned missing or invalid stream data") from exc
+        raise AgentError("Claude returned missing or invalid stream data", category="stream") from exc
     if metadata["terminal_results"] != 1:
         metadata["completion"] = "missing" if terminal is None else "ambiguous"
-        raise AgentError("Claude stream must contain exactly one terminal result")
+        raise AgentError("Claude stream must contain exactly one terminal result", category="stream")
     if last_type != "result":
-        raise AgentError("Claude emitted events after its terminal result")
+        raise AgentError("Claude emitted events after its terminal result", category="stream")
     if not isinstance(terminal.get("subtype"), str) or type(terminal.get("is_error")) is not bool:
-        raise AgentError("Claude returned an invalid result envelope")
+        raise AgentError("Claude returned an invalid result envelope", category="stream")
     metadata["completion"] = ("success" if terminal["subtype"] == "success"
                               and terminal["is_error"] is False else "unsuccessful")
     metadata["usage_available"] = isinstance(terminal.get("usage"), dict)
@@ -275,17 +301,15 @@ def claude_result(path: Path, metadata: dict, *, max_output_mb: int) -> dict:
     return terminal
 
 
+def claude_tail_results(path: Path) -> list[dict]:
+    """Result events from the stream's tail, even if another event is damaged."""
+    events = (_json_line(line) for line in read_tail(path, 8 * DIAGNOSTIC_BYTES).splitlines())
+    return [event for event in events if isinstance(event, dict) and event.get("type") == "result"]
+
+
 def claude_stream_error_text(path: Path) -> str:
     """Bounded failure diagnostics, even if another stream event is damaged."""
-    messages = []
-    for line in read_tail(path, 8 * DIAGNOSTIC_BYTES).splitlines():
-        try:
-            event = json.loads(line)
-        except (ValueError, RecursionError):
-            continue
-        if isinstance(event, dict) and event.get("type") == "result":
-            messages.append(claude_error_text(event))
-    return "\n".join(messages[-4:])
+    return "\n".join(claude_error_text(event) for event in claude_tail_results(path)[-4:])
 
 
 def codex_error_text(events: Path) -> str:
@@ -310,43 +334,99 @@ def codex_error_text(events: Path) -> str:
 
 
 MODEL_UNAVAILABLE = "Requested model is unavailable in the selected CLI"
+OPTION_REJECTED = "Installed CLI does not support a requested option"
+
+# Wording fallbacks, used only when no structured field decides: lowercase
+# fragment -> (category, message). FAILURE_ATTEMPTS decides retries.
+FAILURE_WORDING = {
+    "authentication failed": ("authentication", "Authentication failed; sign in to the agent CLI"),
+    "not logged in": ("authentication", "Agent CLI is not logged in"),
+    "invalid api key": ("authentication", "Agent authentication is invalid"),
+    "unauthorized": ("authentication", "Agent authentication is unauthorized"),
+    "authentication required": ("authentication", "Agent CLI authentication is required"),
+    "no authentication": ("authentication", "Agent CLI authentication is required"),
+    "unknown model": ("model", MODEL_UNAVAILABLE),
+    "model is not supported": ("model", MODEL_UNAVAILABLE),
+    # Claude Code reports an unknown or inaccessible model this way.
+    "unrecognized_model": ("model", MODEL_UNAVAILABLE),
+    "issue with the selected model": ("model", MODEL_UNAVAILABLE),
+    # Copilot CLI: 'Model "<name>" from --model flag is not available.'
+    "from --model flag is not available": ("model", MODEL_UNAVAILABLE),
+    "unknown option": ("option", OPTION_REJECTED),
+    "unexpected argument": ("option", "Installed CLI does not support a requested argument"),
+    "error loading config": ("configuration", "Agent configuration is incompatible with inspection policy"),
+    "invalid configuration": ("configuration", "Agent configuration is incompatible with inspection policy"),
+    "requirements.toml": ("configuration", "Managed Codex configuration is incompatible with inspection policy"),
+    "not inside a trusted directory": ("configuration", "Codex requires a Git repository or --skip-git-repo-check"),
+    "error_max_turns": ("limit", "Claude exhausted its internal turn limit"),
+    "error_max_budget_usd": ("limit", "Claude exhausted its per-call budget"),
+}
+
+# Claude result-envelope subtypes that decide on their own (error_max_turns is
+# recorded in claude-2.1.330 events-maxturns.jsonl).
+CLAUDE_SUBTYPES = {name: FAILURE_WORDING[name] for name in ("error_max_turns", "error_max_budget_usd")}
+# HTTP statuses that may succeed on retry; other 4xx statuses reject the request.
+TRANSIENT_STATUSES = frozenset({408, 409, 425, 429})
 
 
-def classify_failure(diagnostic: str, model: str | None = None) -> AgentError:
+def claude_failure(envelope: object) -> tuple[str, str] | None:
+    """(category, message) from a Claude result envelope's structured fields, if they decide."""
+    if not isinstance(envelope, dict):
+        return None
+    subtype = envelope.get("subtype")
+    if isinstance(subtype, str) and subtype in CLAUDE_SUBTYPES:
+        return CLAUDE_SUBTYPES[subtype]
+    status = envelope.get("api_error_status")
+    if envelope.get("is_error") is not True or type(status) is not int:
+        return None
+    if status in (401, 403):
+        return "authentication", f"Agent API rejected its authentication (HTTP {status})"
+    if status == 404:
+        # Recorded for an unknown model (claude-2.1.296 result-unrecognized-model.json).
+        return "model", MODEL_UNAVAILABLE
+    if status in TRANSIENT_STATUSES or 500 <= status < 600:
+        return "transient", f"Agent API failed (HTTP {status}); see the attempt diagnostics"
+    if 400 <= status < 500:
+        return "request", f"Agent API rejected the request (HTTP {status})"
+    return None
+
+
+def classify_failure(diagnostic: str, model: str | None = None, *,
+                     structured: tuple[str, str] | None = None) -> AgentError:
     """Use diagnostic text for classification only; never echo it into prompts.
 
-    The configured model name, not CLI output, may appear in the message.
+    A structured (category, message) decision, when the CLI provided one, takes
+    precedence over wording. The configured model name, not CLI output, may
+    appear in the message.
     """
     text = diagnostic.lower()
-    permanent = {
-        "authentication failed": "Authentication failed; sign in to the agent CLI",
-        "not logged in": "Agent CLI is not logged in",
-        "invalid api key": "Agent authentication is invalid",
-        "unauthorized": "Agent authentication is unauthorized",
-        "authentication required": "Agent CLI authentication is required",
-        "no authentication": "Agent CLI authentication is required",
-        "unknown model": MODEL_UNAVAILABLE,
-        "model is not supported": MODEL_UNAVAILABLE,
-        # Claude Code reports an unknown or inaccessible model this way.
-        "unrecognized_model": MODEL_UNAVAILABLE,
-        "issue with the selected model": MODEL_UNAVAILABLE,
-        # Copilot CLI: 'Model "<name>" from --model flag is not available.'
-        "from --model flag is not available": MODEL_UNAVAILABLE,
-        "unknown option": "Installed CLI does not support a requested option",
-        "unexpected argument": "Installed CLI does not support a requested argument",
-        "error loading config": "Agent configuration is incompatible with inspection policy",
-        "invalid configuration": "Agent configuration is incompatible with inspection policy",
-        "requirements.toml": "Managed Codex configuration is incompatible with inspection policy",
-        "not inside a trusted directory": "Codex requires a Git repository or --skip-git-repo-check",
-        "error_max_turns": "Claude exhausted its internal turn limit",
-        "error_max_budget_usd": "Claude exhausted its per-call budget",
-    }
-    for fragment, message in permanent.items():
-        if fragment in text:
-            if message == MODEL_UNAVAILABLE and model:
-                message = f"{message}: {model}"
-            return AgentError(message, retryable=False)
-    return AgentError("Agent CLI failed; see the attempt diagnostics", retry_after=retry_delay(text))
+    decision = structured or next(
+        (value for fragment, value in FAILURE_WORDING.items() if fragment in text), None)
+    if decision is None:
+        decision = ("transient", "Agent CLI failed; see the attempt diagnostics")
+    category, message = decision
+    if category == "model" and model:
+        message = f"{message}: {model}"
+    retry_after = retry_delay(text) if category == "transient" else None
+    return AgentError(message, category=category, retry_after=retry_after)
+
+
+def codex_usage_error(code: int, events: Path) -> bool:
+    """Codex's argument parser exits 2 before emitting any event (codex-cli 0.172.0)."""
+    if code != 2:
+        return False
+    try:
+        return not any(isinstance(event, dict) for event in
+                       (_json_line(line) for line in read_tail(events).splitlines()))
+    except OSError:
+        return False
+
+
+def _json_line(line: str) -> object:
+    try:
+        return json.loads(line)
+    except (ValueError, RecursionError):
+        return None
 
 
 RETRY_AFTER = re.compile(
@@ -556,9 +636,9 @@ class CLIAdapter:
             raise AgentTimeout("Agent CLI timed out") from exc
         except LimitExceeded as exc:
             # Retrying would likely repeat the runaway output; stop the run instead.
-            raise AgentError(str(exc), retryable=False) from exc
+            raise AgentError(str(exc), category="limit") from exc
         except OSError as exc:
-            raise AgentError("Cannot start or capture the agent CLI", retryable=False) from exc
+            raise AgentError("Cannot start or capture the agent CLI", category="local") from exc
         finally:
             if backend == "copilot":
                 copilot.discard_runtime(directory)
@@ -567,9 +647,12 @@ class CLIAdapter:
             # Only structured error fields are read from stdout, which otherwise
             # carries model text (Copilot's stdout is never read).
             diagnostic = read_tail(stderr)
+            structured = None
             if backend == "native" and spec.kind == "codex":
                 diagnostic += "\n" + codex_error_text(stdout)
-            raise classify_failure(diagnostic, spec.model)
+                if codex_usage_error(code, stdout):
+                    structured = ("option", OPTION_REJECTED)
+            raise classify_failure(diagnostic, spec.model, structured=structured)
         if backend == "copilot":
             return validate_payload(copilot_reply(stdout))
         if spec.kind == "codex":
@@ -593,10 +676,10 @@ class CLIAdapter:
                 raise AgentTimeout("Agent CLI timed out") from exc
             except LimitExceeded as exc:
                 metadata["process_status"] = "resource_limit"
-                raise AgentError(str(exc), retryable=False) from exc
+                raise AgentError(str(exc), category="limit") from exc
             except OSError as exc:
                 metadata["process_status"] = "capture_error"
-                raise AgentError("Cannot start or capture the agent CLI", retryable=False) from exc
+                raise AgentError("Cannot start or capture the agent CLI", category="local") from exc
             finally:
                 # Also inspect partial logs after timeout, SIGTERM, or Ctrl-C.
                 # Parsing failure must never replace the original interruption.
@@ -609,11 +692,14 @@ class CLIAdapter:
                 diagnostic = read_tail(stderr) + "\n" + (
                     claude_error_text(envelope) if envelope is not None
                     else claude_stream_error_text(stdout))
-                raise classify_failure(diagnostic, spec.model)
+                results = [envelope] if envelope is not None else claude_tail_results(stdout)
+                raise classify_failure(diagnostic, spec.model,
+                                       structured=claude_failure(results[-1] if results else None))
             if stream_error:
                 raise stream_error
             if metadata["completion"] != "success":
-                raise classify_failure(claude_error_text(envelope), spec.model)
+                raise classify_failure(claude_error_text(envelope), spec.model,
+                                       structured=claude_failure(envelope))
             result = validate_payload(envelope.get("structured_output"))
             metadata["payload_validated"] = True
             return result
@@ -625,4 +711,4 @@ class CLIAdapter:
                 self.store.json(f"{stdout.parent.name}/claude-stream.json", metadata)
             except Exception as exc:
                 if not failing:
-                    raise AgentError("Cannot write Claude stream metadata", retryable=False) from exc
+                    raise AgentError("Cannot write Claude stream metadata", category="local") from exc

@@ -15,8 +15,8 @@ from unittest.mock import patch
 
 from test_duo import Fixture
 from duo import copilot
-from duo.adapters import (CLIAdapter, claude_error_text, classify_failure, codex_error_text,
-                          copilot_reply, read_json)
+from duo.adapters import (CLIAdapter, claude_error_text, claude_failure, classify_failure,
+                          codex_error_text, copilot_reply, read_json)
 from duo.models import SECRET_PATTERNS, AgentError, validate_review
 from duo.policy import TESTED_VERSIONS, verify_claude_remote, verify_controls, verify_version
 
@@ -174,6 +174,15 @@ sys.exit({code})
         error = classify_failure(claude_error_text(envelope), 'opus-5.5')
         self.assertFalse(error.retryable)
         self.assertIn('opus-5.5', str(error))
+        # The structured status alone gives the same answer (plan §6 step 4).
+        self.assertEqual(claude_failure(envelope),
+                         ('model', 'Requested model is unavailable in the selected CLI'))
+        structured = classify_failure('', 'opus-5.5', structured=claude_failure(envelope))
+        self.assertEqual((structured.category, str(structured)), ('model', str(error)))
+        # The recorded max-turns stream ends with its structured subtype.
+        events = [json.loads(line) for line in
+                  (FIXTURES / "claude-2.1.330" / "events-maxturns.jsonl").read_text().splitlines()]
+        self.assertEqual(claude_failure(events[-1])[0], 'limit')
 
     def test_copilot_event_streams(self):
         # GPT models mark the answer phase "final_answer"; Claude models omit phase.

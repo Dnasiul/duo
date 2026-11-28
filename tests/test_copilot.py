@@ -241,7 +241,7 @@ else:
                 phase='commentary', toolRequests=[{'name': 'view'}])), 'last assistant message'),
             'later message whose toolRequests field was renamed': (after_final(revise, {
                 'type': 'assistant.message', 'data': {'content': decoy, 'toolCalls': []}}),
-                'last assistant message'),
+                'unrecorded format'),
             'later second final answer': (after_final(revise, message(phase='final_answer')),
                                           'more than one final answer'),
             'later second answer without phase': (after_final(approve, message()),
@@ -253,7 +253,7 @@ else:
             # Chain (b): no genuine final answer, then terminal success.
             'commentary with renamed toolRequests, answer removed': (
                 [{**e, 'data': renamed} if i == commentary else e
-                 for i, e in enumerate(drop_final(revise))], 'no final answer'),
+                 for i, e in enumerate(drop_final(revise))], 'unrecorded format'),
             # Claude models send no phase, so only toolRequests marks a tool call.
             'Claude tool call with renamed toolRequests, answer removed': (
                 drop_final(approve)[:final(approve)] + [
@@ -261,7 +261,7 @@ else:
                         'content': decoy, 'toolCalls': [{'name': 'view'}], 'turnId': '0'}},
                     {'type': 'tool.execution_start', 'data': {}},
                     {'type': 'tool.execution_complete', 'data': {}},
-                ] + drop_final(approve)[final(approve):], 'no final answer'),
+                ] + drop_final(approve)[final(approve):], 'unrecorded format'),
             'commentary with renamed phase, answer removed': (
                 [{**e, 'data': unphased} if i == commentary else e
                  for i, e in enumerate(drop_final(revise))], 'continued working'),
@@ -274,11 +274,37 @@ else:
                                                      'unsuccessful terminal result'),
             'no result event': ([e for e in revise if e.get('type') != 'result'],
                                 'missing a successful terminal result'),
+            # Plan §6 step 4: fields and values outside the recorded format.
+            'unrecorded phase value': (
+                [edit(e, phase='analysis') if i == commentary else e
+                 for i, e in enumerate(revise)], 'unrecorded format'),
+            'message data is not an object': (after_final(revise, {
+                'type': 'assistant.message', 'data': decoy}), 'unrecorded format'),
+            'content is not a string': (
+                [edit(e, content={'text': decoy}) if i == commentary else e
+                 for i, e in enumerate(revise)], 'unrecorded format'),
+            'renamed message event type': (
+                [{**e, 'type': 'assistant.reply'} if e.get('type') == 'assistant.message' else e
+                 for e in revise], 'no assistant message'),
+            'only tool-calling messages': (
+                [e for i, e in enumerate(revise) if i != final(revise)
+                 and e.get('type') != 'tool.execution_start'
+                 and e.get('type') != 'tool.execution_complete'], 'no final answer'),
         }
+        # The CLI's format, not the model's reply, failed: one retry, not --max-attempts.
+        stream = {'later message whose toolRequests field was renamed',
+                  'commentary with renamed toolRequests, answer removed',
+                  'Claude tool call with renamed toolRequests, answer removed',
+                  'result before the answer', 'unsuccessful result after the answer',
+                  'no result event', 'unrecorded phase value', 'message data is not an object',
+                  'content is not a string', 'renamed message event type'}
         for name, (events, message_text) in cases.items():
             with self.subTest(name=name):
-                with self.assertRaisesRegex(AgentError, message_text):
+                with self.assertRaisesRegex(AgentError, message_text) as caught:
                     copilot_reply(self.write_events('mutated.jsonl', events))
+                self.assertEqual(caught.exception.category,
+                                 'stream' if name in stream else 'reply')
+                self.assertEqual(caught.exception.attempt_limit, 2 if name in stream else None)
         # The unmodified recordings are accepted.
         for name, events in (('revise', revise), ('approve', approve)):
             with self.subTest(name=name):

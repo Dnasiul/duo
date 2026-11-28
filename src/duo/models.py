@@ -73,18 +73,64 @@ SCHEMA = {
 }
 
 
-class AgentError(Exception):
-    """An error safe to report to the user and include in retry feedback."""
+# Why an attempt failed, and how many attempts in one turn that may use.
+# Classifiers choose the category, from structured CLI fields where they exist
+# and from wording otherwise; retry decisions come only from this table.
+# None means up to --max-attempts; 1 means the run stops without retrying.
+FAILURE_ATTEMPTS: dict[str, int | None] = {
+    "reply": None,       # the reply broke Duo's contract; retried with feedback
+    "transient": None,   # the CLI failed in a way that may not recur
+    "timeout": None,
+    # The CLI's output was not in a recorded format. One retry covers a damaged
+    # stream; a repeat most likely means the CLI changed, and every further
+    # attempt would be another full model call.
+    "stream": 2,
+    "authentication": 1,
+    "model": 1,
+    "option": 1,         # the CLI rejected a command-line option or argument
+    "configuration": 1,
+    "request": 1,        # the model API rejected the request itself
+    "limit": 1,          # a Duo or CLI resource limit
+    "local": 1,          # the CLI could not be started or its output kept
+    "permanent": 1,
+}
+STREAM_HINT = "the installed CLI's output format may have changed"
 
-    def __init__(self, message: str, *, retryable: bool = True,
-                 retry_after: float | None = None):
+
+class AgentError(Exception):
+    """An error safe to report to the user and include in retry feedback.
+
+    `category` is a FAILURE_ATTEMPTS key. `retryable=False` without a category
+    is the generic permanent failure.
+    """
+
+    def __init__(self, message: str, *, category: str | None = None,
+                 retryable: bool | None = None, retry_after: float | None = None):
         super().__init__(message)
-        self.retryable = retryable
+        if category is None:
+            category = "permanent" if retryable is False else "reply"
+        elif retryable is not None:
+            raise TypeError("pass category or retryable, not both")
+        if category not in FAILURE_ATTEMPTS:
+            raise ValueError(f"unknown failure category: {category}")
+        self.category = category
         self.retry_after = retry_after
+
+    @property
+    def attempt_limit(self) -> int | None:
+        return FAILURE_ATTEMPTS[self.category]
+
+    @property
+    def retryable(self) -> bool:
+        return self.attempt_limit != 1
 
 
 class AgentTimeout(AgentError):
     """The CLI exceeded its time allowance (the per-call timeout or the run's remainder)."""
+
+    def __init__(self, message: str, **kwargs):
+        kwargs.setdefault("category", "timeout")
+        super().__init__(message, **kwargs)
 
 
 # Longest server-requested retry delay Duo waits for; longer requests end the run.

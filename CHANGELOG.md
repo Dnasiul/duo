@@ -22,6 +22,17 @@
   either platform, open or update the issue; it closes only when every CLI is
   compatible on both platforms.
 
+- Retry decisions come from one table of failure categories (plan §6, step
+  4), recorded as `category` in `attempt_failed` events, instead of from each
+  error's wording. Claude's result `subtype` and `api_error_status` (401/403
+  authentication, 404 model, 429 and 5xx transient, other 4xx a rejected
+  request) and Codex's usage-error exit (2, before any event) decide before
+  the wording does. Output not in a recorded format — a Copilot stream without
+  its terminal `result` event, an assistant message with unrecorded fields or
+  phase, or a malformed Claude stream — is retried once instead of up to
+  `--max-attempts`, then stops the run with a hint that the CLI's format may
+  have changed. Retry-after delays apply only to failures that may not recur.
+
 ### Fixed
 
 - Copilot replies are accepted only under a final-answer contract (plan §6,

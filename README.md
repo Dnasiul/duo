@@ -376,6 +376,19 @@ cut short by the deadline. Duo waits for a CLI's requested retry delay
 (`Retry-After`, "try again in 20s", "500ms", "2 minutes") up to 300 seconds; a
 longer request ends the run with an error instead of stalling it.
 
+Each failed attempt gets a category, recorded in the `attempt_failed` event,
+and the category alone decides whether Duo retries. An invalid reply, a timeout,
+or a CLI failure that may not recur is retried up to `--max-attempts`, with the
+error fed back to the reviewer. Authentication, model, option, configuration,
+rejected-request, and resource-limit failures stop the run at once. Output that
+is not in a format
+Duo has recorded from the CLI, such as a Copilot event stream without its
+terminal `result` event, is retried once; a second such failure in the same turn
+stops the run, because every further attempt would be another full model call.
+Where a CLI reports a failure in structured fields (Claude's result `subtype`
+and `api_error_status`, Codex's usage-error exit code), those fields decide
+before the error's wording.
+
 The summary reports the stopping condition and the latest accepted review
 separately. JSON includes `message` and `latest_review` (reviewer, decision,
 reason, plan hash, and timestamp), with `latest_review: null` before any accepted

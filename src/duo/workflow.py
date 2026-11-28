@@ -4,7 +4,7 @@ from copy import deepcopy
 import time
 from typing import Callable
 
-from .models import (MAX_RETRY_AFTER, AgentError, AgentTimeout, Config, RunError, State, Turn,
+from .models import (MAX_RETRY_AFTER, STREAM_HINT, AgentError, AgentTimeout, Config, RunError, State, Turn,
                      validate_review)
 from .prompts import build_prompt, check_prompt_budget, revision_diff
 from .storage import ContextFile, PlanFile, RunStore, UserClarification, content_hash, timestamp, fsync_directory
@@ -157,6 +157,7 @@ class Reviewer:
             state.update(status="error", error="Review turn attempt limit exhausted by interrupted/failed attempts")
             return
         result = None
+        failures: dict[str, int] = {}  # by category, this turn (not across a resume)
         for attempt in range(offset + 1, self.config.max_attempts + 1):
             remaining = self.deadline - self.clock()
             if remaining <= 0:
@@ -197,7 +198,9 @@ class Reviewer:
                 self.plan_file.check()
                 self.store.event({"event": "attempt_failed" if called else "prompt_rejected",
                                   "agent": agent,
-                                  "attempt": attempt, "error": str(exc)})
+                                  "attempt": attempt, "error": str(exc),
+                                  "category": exc.category})
+                failures[exc.category] = failures.get(exc.category, 0) + 1
                 remaining = self.deadline - self.clock()
                 if remaining <= 0 and capped and isinstance(exc, AgentTimeout):
                     state.update(status="limit_reached", error="Run time limit reached")
@@ -206,6 +209,11 @@ class Reviewer:
                 # not the budget, even when no time is left to retry.
                 if not exc.retryable or attempt == self.config.max_attempts:
                     state.update(status="error", error=f"{agent}: {exc}")
+                    return
+                if exc.attempt_limit is not None and failures[exc.category] >= exc.attempt_limit:
+                    hint = f"; {STREAM_HINT}" if exc.category == "stream" else ""
+                    state.update(status="error", error=(
+                        f"{agent}: {exc} ({failures[exc.category]} attempts failed this way{hint})"))
                     return
                 if remaining <= 0:
                     state.update(status="error", error=f"{agent}: {exc} (no time left to retry)")

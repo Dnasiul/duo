@@ -62,9 +62,11 @@ class ClaudeStreamTests(Fixture):
     def test_malformed_and_truncated_events_fail_closed(self):
         for damaged in ('not-json\n', '{"type":"assistant"', '[]\n', 'null\n', '{}\n', '\xff'):
             for raw in (damaged + stream(terminal()), stream(terminal()) + damaged):
-                with self.subTest(raw=raw), self.assertRaises(AgentError):
+                with self.subTest(raw=raw), self.assertRaises(AgentError) as caught:
                     self.adapter(raw)('claude', 'Review', 5)
                 self.assertEqual(self.captured(raw)['completion'], 'invalid')
+                # Not the model's reply: retried once, not --max-attempts (plan §6 step 4).
+                self.assertEqual(caught.exception.category, 'stream')
 
     def test_invalid_utf8_is_retained(self):
         adapter = self.adapter('', suffix="sys.stdout.buffer.write(b'\\xff'); sys.stdout.flush()")
@@ -79,9 +81,10 @@ class ClaudeStreamTests(Fixture):
                  (stream(terminal(), terminal()), 'ambiguous'),
                  (stream(terminal(), PARTIAL), 'invalid')]
         for raw, completion in cases:
-            with self.subTest(completion=completion), self.assertRaises(AgentError):
+            with self.subTest(completion=completion), self.assertRaises(AgentError) as caught:
                 self.adapter(raw)('claude', 'Review', 5)
             self.assertEqual(self.captured(raw)['completion'], completion)
+            self.assertEqual(caught.exception.category, 'stream')
 
     def test_nonzero_exit_never_accepts_successful_payload(self):
         raw = stream(PARTIAL, terminal())
@@ -99,19 +102,23 @@ class ClaudeStreamTests(Fixture):
             with self.subTest(code=code), self.assertRaisesRegex(AgentError, 'internal turn limit') as caught:
                 self.adapter(raw, code=code)('claude', 'Review', 5)
             self.assertFalse(caught.exception.retryable)
+            self.assertEqual(caught.exception.category, 'limit')
             meta = self.captured(raw)
             self.assertEqual(meta['completion'], 'unsuccessful')
             self.assertTrue(meta['usage_available'])
             self.assertFalse(meta['payload_validated'])
 
     def test_envelope_and_payload_schema_checks(self):
-        for changes in ({'is_error': 0}, {'subtype': None}, {'structured_output': None},
-                        {'structured_output': response('invented')},
-                        {'structured_output': {**response('approve'), 'extra': True}}):
+        for changes, category in (({'is_error': 0}, 'stream'), ({'subtype': None}, 'stream'),
+                                  ({'structured_output': None}, 'reply'),
+                                  ({'structured_output': response('invented')}, 'reply'),
+                                  ({'structured_output': {**response('approve'), 'extra': True}},
+                                   'reply')):
             raw = stream(terminal(**changes))
-            with self.subTest(changes=changes), self.assertRaises(AgentError):
+            with self.subTest(changes=changes), self.assertRaises(AgentError) as caught:
                 self.adapter(raw)('claude', 'Review', 5)
             self.assertFalse(self.captured(raw)['payload_validated'])
+            self.assertEqual(caught.exception.category, category)
 
     def test_only_error_metadata_is_classified(self):
         narration = {'type': 'assistant', 'message': {'content': [

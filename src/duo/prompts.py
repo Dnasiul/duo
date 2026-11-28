@@ -196,7 +196,7 @@ def check_prompt_budget(prompt: str, maximum: int, backend: str,
         raise AgentError(f"Prompt exceeds --max-prompt-bytes: {total} bytes > {maximum}; "
                          f"largest sections (UTF-8 bytes): {detail}. "
                          "Rerun with a larger budget; the last accepted document is preserved.",
-                         retryable=False)
+                         category="limit")
 
 
 def plan_diff(before: str, after: str) -> str:

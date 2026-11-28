@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from duo.adapters import CLIAdapter, classify_failure, run_process
+from duo.adapters import CLIAdapter, claude_failure, classify_failure, run_process
 from duo.cli import main
 from duo.models import (MAX_TEXT_BYTES, SECRET_PATTERNS, AgentError, Config, RunError,
                         new_secret, validate_review)
@@ -198,6 +198,46 @@ class WorkflowTests(Fixture):
         adapter.side_effect = late
         self.assertEqual(node(state)["status"], "limit_reached")
         self.assertFalse((self.repo / "plan.md").exists())
+
+    def test_retry_policy_comes_only_from_the_failure_category(self):
+        from duo.models import FAILURE_ATTEMPTS
+        for category, limit in FAILURE_ATTEMPTS.items():
+            with self.subTest(category=category):
+                error = AgentError("x", category=category)
+                self.assertEqual((error.attempt_limit, error.retryable), (limit, limit != 1))
+        self.assertEqual(AgentError("x").category, "reply")
+        self.assertEqual(AgentError("x", retryable=False).category, "permanent")
+        with self.assertRaises(TypeError):
+            AgentError("x", category="reply", retryable=True)
+        with self.assertRaises(ValueError):
+            AgentError("x", category="wording")
+
+    def test_unrecognized_cli_output_is_retried_once(self):
+        # Plan §6 step 4: a format failure repeats with every attempt, and each
+        # attempt is a full model call, so it is retried once, not --max-attempts.
+        stream = AgentError("Copilot stream is missing a successful terminal result event",
+                            category="stream")
+        node, state, adapter = self.node([stream, stream, response("revise", "Plan")],
+                                         max_attempts=5)
+        result = node(state)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(adapter.call_count, 2)
+        self.assertEqual(result["error"], "codex: Copilot stream is missing a successful terminal "
+                         "result event (2 attempts failed this way; the installed CLI's output "
+                         "format may have changed)")
+        events = [json.loads(line) for line in (self.store.path / "events.jsonl").read_text().splitlines()]
+        self.assertEqual([e["category"] for e in events if e["event"] == "attempt_failed"],
+                         ["stream", "stream"])
+        # Other failures between them count separately; one damaged stream recovers.
+        reply = AgentError("Agent returned missing or invalid JSON")
+        node, state, adapter = self.node([stream, reply, response("revise", "Plan")],
+                                         max_attempts=5)
+        self.assertEqual(node(state)["turns"], 1)
+        self.assertEqual(adapter.call_count, 3)
+        # Reply failures keep the full --max-attempts.
+        node, state, adapter = self.node([reply] * 5, max_attempts=5)
+        self.assertEqual(node(state)["status"], "error")
+        self.assertEqual(adapter.call_count, 5)
 
     def test_retry_after_respected(self):
         node, state, _ = self.node([AgentError("Rate limit", retry_after=12), response("revise", "Plan")])
@@ -813,6 +853,68 @@ print(json.dumps({'type':'result','is_error':False,'subtype':'success','structur
         adapter = CLIAdapter(replace(self.config, codex_bin=binary), self.store)
         with self.assertRaisesRegex(AgentError, "timed out"):
             adapter("codex", "Review", 0.1)
+
+    def test_structured_claude_fields_decide_before_wording(self):
+        cases = [
+            ({"subtype": "error_max_turns", "is_error": True}, "limit"),
+            ({"subtype": "error_max_budget_usd", "is_error": True}, "limit"),
+            ({"subtype": "success", "is_error": True, "api_error_status": 401}, "authentication"),
+            ({"subtype": "success", "is_error": True, "api_error_status": 403}, "authentication"),
+            ({"subtype": "success", "is_error": True, "api_error_status": 404}, "model"),
+            ({"subtype": "success", "is_error": True, "api_error_status": 400}, "request"),
+            ({"subtype": "success", "is_error": True, "api_error_status": 413}, "request"),
+            ({"subtype": "success", "is_error": True, "api_error_status": 429}, "transient"),
+            ({"subtype": "success", "is_error": True, "api_error_status": 500}, "transient"),
+            ({"subtype": "success", "is_error": True, "api_error_status": 529}, "transient"),
+        ]
+        for envelope, category in cases:
+            with self.subTest(envelope=envelope):
+                # Wording that would say otherwise does not override the field.
+                error = classify_failure("unauthorized; unknown option; retry after 7s",
+                                         "m", structured=claude_failure(envelope))
+                self.assertEqual(error.category, category)
+                self.assertNotIn("unauthorized", str(error))
+                self.assertEqual(error.retry_after, 7 if category == "transient" else None)
+        # Fields that do not decide leave the wording fallback in place.
+        for envelope in (None, [], {}, {"subtype": "success", "is_error": False,
+                                        "api_error_status": 401},
+                         {"is_error": True, "api_error_status": True},
+                         {"is_error": True, "api_error_status": "401"},
+                         {"is_error": True, "api_error_status": 302},
+                         {"subtype": ["error_max_turns"], "is_error": True}):
+            with self.subTest(envelope=envelope):
+                self.assertIsNone(claude_failure(envelope))
+        self.assertEqual(classify_failure("Error: invalid api key").category, "authentication")
+        self.assertEqual(classify_failure("Server error").category, "transient")
+        self.assertIsNone(classify_failure("unknown option --x; retry in 5s").retry_after)
+
+    def test_codex_usage_error_is_permanent_whatever_its_wording(self):
+        # codex-cli 0.172.0 rejects an unknown argument with exit 2 and no events.
+        for body, category in (
+                ("import sys\nprint('error: argument rejected', file=sys.stderr)\nsys.exit(2)\n",
+                 "option"),
+                # Events mean Codex started the turn; exit 2 alone is not a usage error.
+                ("import sys\nprint('{\"type\": \"thread.started\"}')\nsys.exit(2)\n",
+                 "transient"),
+                ("import sys\nprint('error: argument rejected', file=sys.stderr)\nsys.exit(1)\n",
+                 "transient")):
+            binary = self.executable("codex-usage", body)
+            adapter = CLIAdapter(replace(self.config, codex_bin=binary), self.store)
+            with self.subTest(body=body), self.assertRaises(AgentError) as caught:
+                adapter("codex", "Review", 5)
+            self.assertEqual(caught.exception.category, category)
+
+    def test_claude_failure_without_a_valid_stream_uses_its_last_result(self):
+        # A damaged earlier event invalidates the stream; the result's fields still decide.
+        binary = self.executable("claude-damaged", "import json\n"
+                                 "print('{\"type\": \"assistant\", \"message\":')\n"
+                                 "print(json.dumps({'type':'result','is_error': True, 'subtype': 'success', "
+                                 "'api_error_status': 401, 'result': 'retry in 5s'}))\n"
+                                 "raise SystemExit(1)\n")
+        adapter = CLIAdapter(replace(self.config, claude_bin=binary), self.store)
+        with self.assertRaises(AgentError) as caught:
+            adapter("claude", "Review", 5)
+        self.assertEqual(caught.exception.category, "authentication")
 
     def test_rate_limit_delay(self):
         self.assertEqual(classify_failure("Rate limited. Retry-after: 20").retry_after, 20)
