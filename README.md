@@ -332,7 +332,7 @@ duo \
   --repo /absolute/path/to/project \
   --task "Plan and validate a molecular dynamics simulation" \
   --codex-backend copilot --codex-model gpt-5.3-codex \
-  --claude-backend copilot --claude-model claude-opus-5.5 \
+  --claude-backend copilot --claude-model claude-sonnet-5.5 \
   --codex-effort high --claude-effort high \
   --show-conversation
 ```
@@ -344,7 +344,7 @@ duo \
   --repo /absolute/path/to/project \
   --task-file task.txt --criteria-file criteria.txt \
   --codex-model gpt-6-astra \
-  --claude-backend copilot --claude-model claude-opus-5.5 \
+  --claude-backend copilot --claude-model claude-sonnet-5.5 \
   --show-conversation
 ```
 
@@ -354,8 +354,9 @@ Model IDs and availability come from the chosen backend and your account; use
 Copilot's interactive `/model` command to inspect its catalog. Its IDs can differ
 from native CLI IDs (for example, `claude-opus-5.5` versus `claude-opus-5-5`).
 `claude-sonnet-5.5`, `gpt-6-luna`, and `gpt-5.3-codex` have recent live runs
-through Copilot; `claude-opus-5.5`, used in the examples below, needs a plan that
-offers it (see [Compatibility](#compatibility)). When
+through Copilot, so the examples above use them; other models, such as
+`claude-opus-5.5`, need a plan that offers them (see
+[Compatibility](#compatibility)). When
 Copilot reports a model as unavailable, Duo stops after the first attempt and
 names the model instead of retrying.
 GitHub documents explicit model selection in the

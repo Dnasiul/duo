@@ -94,7 +94,9 @@
   which Copilot has refused for the recorded account since 2026-10-21, and
   omitted `gpt-6-luna` and `gpt-5.3-codex` (plan §5, step 1). It and the
   STATUS model list now separate the models offered at the last probe
-  (2026-11-23), earlier successes, and refusals.
+  (2026-11-23), earlier successes, and refusals, and the Copilot examples use
+  `claude-sonnet-5.5` instead of `claude-opus-5.5`, which that account is not
+  offered.
 
 ## 0.8.3 (2026-11-26)
 

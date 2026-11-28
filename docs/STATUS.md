@@ -351,8 +351,8 @@ executed shell. Two runs, each a completed authenticated turn:
 | `/bin/zsh` | `/opt/homebrew/bin/bash -c` (non-login) | absent | absent | absent (zsh did not run) |
 
 `/bin/zsh` reached the reviewer environment, but Codex still ran the
-account's login shell (from the directory service, not `SHELL`), so zsh was
-not exercised: zsh login-profile exclusion and `.zshenv` remain untested on
+account's login shell, not the shell `SHELL` named, so zsh was not
+exercised: zsh login-profile exclusion and `.zshenv` remain untested on
 macOS. Unlike the Linux probe, the `.bashrc` sentinel stayed absent under
 non-login Homebrew bash 5.3.20 on macOS; that result is credited to this bash
 and this Codex version only. Testing zsh needs an account whose login shell is
