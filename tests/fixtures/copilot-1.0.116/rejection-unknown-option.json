@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "copilot",
+    "--no-auto-update",
+    "--duo-fixture-unknown-option"
+  ],
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "error: unexpected argument '--duo-fixture-unknown-option' found\n\nUsage: copilot --no-auto-update\n\nFor more information, try '--help'.\n"
+}

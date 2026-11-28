@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "codex",
+    "exec",
+    "--duo-fixture-unknown-option"
+  ],
+  "exit_code": 2,
+  "stdout": "",
+  "stderr": "error: unexpected argument '--duo-fixture-unknown-option' found\n\n  tip: to pass '--duo-fixture-unknown-option' as a value, use '-- --duo-fixture-unknown-option'\n\nUsage: codex exec [OPTIONS] [PROMPT]\n       codex exec [OPTIONS] <COMMAND> [ARGS]\n\nFor more information, try '--help'.\n"
+}

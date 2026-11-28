@@ -246,3 +246,144 @@ class RecordFixtureTests(unittest.TestCase):
                 path.write_text(raw)
                 with self.assertRaises(json.JSONDecodeError):
                     self.recorder.jsonl(path, self.recorder.claude_events())
+
+
+class SanitizerTests(unittest.TestCase):
+    """Identifiers are replaced by key, not only by wording (plan §6 step 5)."""
+
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location("record_fixtures", SCRIPT)
+        self.recorder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.recorder)
+        # Nothing here may depend on who runs the tests or where.
+        for patcher in (patch.object(self.recorder.getpass, "getuser", return_value="\0none"),
+                        patch.object(self.recorder.Path, "home", return_value=Path("/home/user")),
+                        patch.dict(os.environ, {"DUO_FIXTURE_ACCOUNT": ""})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_copilot_sanitizer_replaces_identifiers_and_keeps_the_answer(self):
+        convert = self.recorder.copilot_events()
+        answer = json.dumps({"decision": "approve", "plan": "x" * 500})
+        request = convert({"type": "assistant.message", "id": "00000000-0000-0000-0000-000000000000",
+                           "data": {"content": "", "phase": "commentary", "toolRequests": [
+                               {"toolCallId": "call_private1", "name": "view"}]}})
+        result = convert({"type": "tool.execution_complete",
+                          "data": {"toolCallId": "call_private1", "success": True}})
+        final = convert({"type": "assistant.message", "data": {
+            "content": answer, "toolRequests": [], "messageId": "private-message",
+            "previousResponseId": "opaque/base64+value"}})
+        usage = convert({"type": "session.shutdown", "data": {"modelMetrics": {"gpt-5.4": {
+            "model_call_id": "msg_private", "request_id": "CF0A:19D2:10CD:1650",
+            "modelId": "gpt-5.4", "provider": {"id": "copilot", "label": "GitHub Copilot"}}}}})
+        call = request["data"]["toolRequests"][0]["toolCallId"]
+        self.assertRegex(call, r"^fixture-id-\d+$")
+        self.assertEqual(result["data"]["toolCallId"], call)
+        self.assertEqual(request["id"], "00000000-0000-0000-0000-000000000000")
+        self.assertEqual(final["data"]["content"], answer)
+        metrics = usage["data"]["modelMetrics"]["gpt-5.4"]
+        self.assertEqual(metrics["modelId"], "gpt-5.4")
+        self.assertEqual(metrics["provider"]["label"], "GitHub Copilot")
+        text = json.dumps([request, result, final, usage])
+        for private in ("call_private1", "private-message", "opaque/base64", "msg_private",
+                        "CF0A", '"copilot"'):
+            self.assertNotIn(private, text)
+
+    def test_text_scrub_replaces_request_identifiers(self):
+        cases = {"Error: Authentication failed (Request ID: 9A1B:22C3:FF)":
+                     "Error: Authentication failed (Request ID: 0000:0000)",
+                 'failed: {"request_id": "req_011CabcdefGHIJKLMNOPQR"}':
+                     'failed: {"request_id": "0000:0000"}',
+                 "x-request-id=abc123 retrying": "x-request-id=0000:0000 retrying",
+                 "upstream CF0A:19D245:10CD91F:1650669:6ACC474C failed":
+                     "upstream 0000:0000 failed",
+                 "message msg_011CfwZbBr7GBEEkF2dirxZB, call call_uF2soK6o6Cy1FlpAnZs6pWWr":
+                     "message msg_fixture, call call_fixture",
+                 # Short words and times are not identifiers.
+                 "call_finished at 02:34:52 (msg_lifecycle)": "call_finished at 02:34:52 (msg_lifecycle)"}
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(self.recorder.scrub(raw), expected)
+
+    def test_committed_fixtures_are_fixed_points_of_the_recorder(self):
+        """Re-sanitizing changes nothing, so every fixture meets today's recorder."""
+        recorder = self.recorder
+        for path in sorted(recorder.FIXTURES.glob("*-*/*")):
+            cli = path.parent.name.split("-")[0]
+            raw = path.read_text()
+            if path.suffix == ".jsonl":
+                convert = {"copilot": recorder.copilot_events,
+                           "claude": recorder.claude_events}.get(cli)
+                again = recorder.jsonl(path, convert() if convert else recorder.trim)
+            elif path.name.startswith(("response-", "metadata-")):
+                again = json.dumps(recorder.trim(json.loads(raw), keep=True), indent=2,
+                                   ensure_ascii=False) + "\n"
+            elif path.name.startswith("rejection-"):
+                record = json.loads(raw)
+                again = json.dumps({**record, "stdout": recorder.scrub(record["stdout"]),
+                                    "stderr": recorder.scrub(record["stderr"])}, indent=2) + "\n"
+            elif path.suffix == ".txt":
+                again = recorder.scrub(raw)
+            else:
+                continue  # config.json and mcp-list.json are reviewed probe output
+            with self.subTest(path=path.relative_to(recorder.FIXTURES)):
+                self.assertEqual(again, raw)
+
+
+class RejectionRecordingTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location("record_fixtures", SCRIPT)
+        self.recorder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.recorder)
+        patcher = patch.dict(os.environ, {**RUNTIME, **AUTH["codex"], **AUTH["claude"],
+                                          **DROPPED}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = patch.object(self.recorder, "write")
+        self.write = patcher.start()
+        self.addCleanup(patcher.stop)
+        self.calls = []
+        self.code = 2
+        patcher = patch.object(self.recorder.subprocess, "run", side_effect=self.capture)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def capture(self, argv, *, env, **kwargs):
+        self.assertIsInstance(env, dict)
+        self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+        cli = argv[0]
+        self.calls.append((list(argv), set(env)))
+        if "--version" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout=VERSIONS[cli], stderr="")
+        return subprocess.CompletedProcess(
+            argv, self.code, stdout="", stderr=f"error: unknown option at /home/user/x {cli}\n")
+
+    def args(self, *clis):
+        return argparse.Namespace(cli=list(clis), codex_bin="codex", claude_bin="claude",
+                                  copilot_bin="copilot")
+
+    def test_rejection_is_recorded_without_a_prompt(self):
+        option = self.recorder.UNKNOWN_OPTION
+        expected = {"codex": ["codex", "exec", option], "claude": ["claude", "-p", option],
+                    "copilot": ["copilot", "--no-auto-update", option]}
+        for cli in expected:
+            with self.subTest(cli=cli):
+                self.calls.clear()
+                self.write.reset_mock()
+                self.recorder.record_rejections(self.args(cli))
+                argv, names = self.calls[-1]
+                self.assertEqual(argv, expected[cli])
+                self.assertEqual(self.calls[0][1], names)
+                if cli != "copilot":
+                    self.assertEqual(names, set(reviewer_environment(cli)))
+                (target, name, text), = [call.args for call in self.write.call_args_list]
+                self.assertEqual((target.name, name), (f"{cli}-1.2.3", "rejection-unknown-option.json"))
+                self.assertEqual(json.loads(text), {"argv": expected[cli], "exit_code": 2,
+                                                    "stdout": "",
+                                                    "stderr": f"error: unknown option at /home/user/x {cli}\n"})
+
+    def test_an_accepted_option_records_nothing(self):
+        self.code = 0
+        with self.assertRaisesRegex(SystemExit, "accepted"):
+            self.recorder.record_rejections(self.args("codex"))
+        self.write.assert_not_called()

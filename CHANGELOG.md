@@ -54,6 +54,17 @@
   `--allow-untested-cli`. The drift check and `scripts/record_fixtures.py` use
   the same parser, so the recorder no longer writes fixtures for a misread
   version.
+- The fixture recorder (`scripts/record_fixtures.py`) replaces identifiers by
+  key, not only by wording (plan §6, step 5): in Claude and Copilot streams
+  every value under a key ending in `Id` or `_id` becomes a per-stream
+  placeholder that keeps correlations, and free text is scrubbed for request
+  IDs and provider identifier shapes. Previously Copilot streams kept such
+  values; the two recorded Copilot 1.0.95 streams still held a GitHub request
+  ID and provider message, response and tool-call IDs, and have been
+  re-sanitized. Tests now reject unreplaced identifiers in any recording and
+  require every committed fixture to be unchanged by the current recorder.
+  A new `record_fixtures.py rejection` command records each CLI's
+  unknown-option rejection, which is now replayed as a one-attempt failure.
 
 ## 0.8.3 (2026-11-26)
 

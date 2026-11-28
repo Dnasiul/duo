@@ -17,17 +17,31 @@ so hand-written fakes cannot drift from real formats unnoticed.
 | `codex-0.169.1` | the same probes (`exec --help` adds `--trust`); JSON event stream and response of a live approval on Linux |
 | `codex-0.170.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on Linux |
 | `codex-0.171.0` | the same probes (`exec --help` adds `--remote` and `--remote-auth-token-env`); JSON event stream and response of a live approval on Linux |
-| `codex-0.172.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on Linux |
+| `codex-0.172.0` | the same probes (`exec --help` unchanged); JSON event stream and response of a live approval on Linux; unknown-option rejection (2026-11-28, Linux) |
 | `claude-2.1.296` | version, `--help`, `doctor`; success envelope; unrecognized-model envelope (`is_error: true` with `subtype: "success"`) and stderr |
+| `claude-2.1.332` | unknown-option rejection only (2026-11-28, Linux); no probes were recorded for this version |
 | `claude-2.1.330` | Linux stream discovery: Read/Glob/Grep with and without web, WebSearch/WebFetch with web, explicit denial versus missing-file error, success and turn-limit terminals; fresh restricted probes and timed-out adapter streams (2026-11-23, `claude-opus-5-5`) |
 | `copilot-1.0.95` | version, `--help`, isolated `config --list --json`; event streams from GPT (`phase: "final_answer"`) and Claude (no `phase`) models; model-unavailable and authentication-failure stderr |
 | `copilot-1.0.105` | version, `--help` (`--sync-session` in place of `--no-remote` and `--no-remote-export`, from 1.0.103), isolated `config --list --json` |
-| `copilot-1.0.116` | version, `--help` (options now sorted; adds opt-in `--decision`, `--choice`, and `--sandbox`; removes `--host-environment`, `--host-compute-id`, and `--plain-diff`, none passed by Duo), unchanged isolated `config --list --json`; recorded 2026-11-27 on Linux with the restricted recorder |
+| `copilot-1.0.116` | version, `--help` (options now sorted; adds opt-in `--decision`, `--choice`, and `--sandbox`; removes `--host-environment`, `--host-compute-id`, and `--plain-diff`, none passed by Duo), unchanged isolated `config --list --json`; recorded 2026-11-27 on Linux with the restricted recorder; unknown-option rejection (2026-11-28, Linux) |
 
 Response fixtures come from disposable runs with synthetic tasks. The recorder
-replaces home paths, the user and account names, session and request IDs, and
-drops encrypted or reasoning payloads and long tool output; the parsed answer
-stays whole.
+replaces home paths, the user and account names, and UUIDs; in Claude and
+Copilot streams, every value under a key ending in `Id` or `_id` (except
+`modelId`, `providerId` and `turnId`) becomes a per-stream `fixture-id-N`, so
+request, message, response and tool-call IDs are removed while correlations
+survive. Free text is also scrubbed for `request id` values and GitHub,
+Anthropic and OpenAI identifier shapes. Encrypted or reasoning payloads and long
+tool output are dropped; the parsed answer stays whole. The two
+`copilot-1.0.95` streams kept such identifiers until 2026-11-28, when they were
+re-sanitized with the current recorder. `tests/test_fixtures.py` checks every
+recording for unreplaced identifiers, and `tests/test_record_fixtures.py` fails
+if re-sanitizing any committed fixture would change it.
+
+`rejection-unknown-option.json` records how a CLI's argument parser refuses an
+option it does not define: the argv (Duo's invocation prefix plus
+`--duo-fixture-unknown-option`, with no prompt and an empty stdin), the exit
+code, and both streams. Each rejection happened before any model call.
 
 The historical fixtures above, except `claude-2.1.330`, were captured before the recorder's restricted
 native-probe environment fix. Native probes inherited the full parent
@@ -72,6 +86,12 @@ repository) by attempt directory:
 
 ```sh
 python scripts/record_fixtures.py attempt copilot ~/.local/state/duo/runs/run-…/attempt-… gpt-revise
+```
+
+Record each installed CLI's unknown-option rejection (no model is called):
+
+```sh
+python scripts/record_fixtures.py rejection
 ```
 
 Review every file before committing. The fixture tests reject credential

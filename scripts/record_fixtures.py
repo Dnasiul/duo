@@ -5,6 +5,8 @@
            environments, which can retain permitted authentication variables.
   attempt: copy one audited Duo attempt (stdout/stderr/response) from a
            disposable run with synthetic content.
+  rejection: record how each installed CLI rejects an unknown option; the
+           argument parser refuses it before any model call.
 
 Output goes to tests/fixtures/<cli>-<version>/. Paths, user names, session and
 request IDs, encrypted or reasoning payloads, and long tool output are removed.
@@ -39,7 +41,22 @@ DROP = {"reasoningOpaque", "encryptedContent", "reasoningText", "reasoningBlocks
         "detailedContent", "toolTelemetry", "restrictedProperties", "thinking", "signature",
         "credential_expires_at"}
 UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
-REQUEST_ID = re.compile(r"Request ID: [0-9A-F:]+")
+# Request and message identifiers in free text. Wording-independent protection
+# for JSON comes from identifier keys (below); these cover stderr and prose.
+TEXT_IDENTIFIERS = (
+    (re.compile(r"(?i)(request[ _-]?id[\"']?\s*[:=]\s*[\"']?)[^\s\"',)]+"), r"\g<1>0000:0000"),
+    # GitHub request IDs, e.g. CF0A:19D245:10CD91F:1650669:6ACC474C.
+    (re.compile(r"\b[0-9A-F]{4,8}(?::[0-9A-F]{4,16}){3,5}\b"), "0000:0000"),
+    # Anthropic and OpenAI message, request, response, and tool-call IDs.
+    (re.compile(r"\b(msg|req|toolu|srvtoolu|resp|call|chatcmpl)([_-])[A-Za-z0-9]{16,}\b"),
+     r"\1\2fixture"),
+)
+# Keys ending in Id/_id hold identifiers except these, which name a model,
+# provider, or turn number.
+DESCRIPTIVE_KEYS = {"modelId", "providerId", "turnId"}
+# Already replaced (zeroed UUIDs and request IDs, or a stream's fixture-id-N).
+PLACEHOLDER = re.compile(r"[0:-]+|fixture-id-\d+")
+UNKNOWN_OPTION = "--duo-fixture-unknown-option"
 
 
 def scrub(text: str) -> str:
@@ -48,7 +65,25 @@ def scrub(text: str) -> str:
     for name in {getpass.getuser(), os.environ.get("DUO_FIXTURE_ACCOUNT", "")} - {""}:
         text = re.sub(re.escape(name), "user", text, flags=re.I)
     text = UUID.sub("00000000-0000-0000-0000-000000000000", text)
-    return REQUEST_ID.sub("Request ID: 0000:0000", text)
+    for pattern, replacement in TEXT_IDENTIFIERS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def identifier_key(key: str) -> bool:
+    return key not in DESCRIPTIVE_KEYS and (
+        key in ("id", "uuid") or key.endswith(("_id", "Id", "ID")))
+
+
+def identifiers():
+    """A per-stream mapping that keeps correlations without original values."""
+    seen = {}
+
+    def identifier(value: str) -> str:
+        if PLACEHOLDER.fullmatch(value):
+            return value  # re-sanitizing a fixture leaves its placeholders alone
+        return seen.setdefault(value, f"fixture-id-{len(seen) + 1}")
+    return identifier
 
 
 def trim(value, keep=False):
@@ -63,24 +98,35 @@ def trim(value, keep=False):
     return value
 
 
-def copilot_event(event: dict) -> dict:
-    data = event.get("data") if isinstance(event.get("data"), dict) else {}
-    final = (event.get("type") == "assistant.message" and not data.get("toolRequests")
-             and data.get("phase") in (None, "final_answer"))
-    if final:
-        # The answer Duo parses stays whole; only its metadata is trimmed.
-        return {**trim({k: v for k, v in event.items() if k != "data"}),
-                "data": {**trim({k: v for k, v in data.items() if k != "content"}),
-                         "content": trim(data.get("content", ""), keep=True)}}
-    return trim(event)
+def copilot_events():
+    """A per-stream sanitizer: request, call, and response IDs become fixture IDs."""
+    identifier = identifiers()
+
+    def clean(value, key=""):
+        if isinstance(value, dict):
+            return {k: clean(v, k) for k, v in value.items() if k not in DROP}
+        if isinstance(value, list):
+            return [clean(v) for v in value]
+        if isinstance(value, str) and identifier_key(key):
+            return identifier(value)
+        return trim(value)
+
+    def convert(event: dict) -> dict:
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        final = (event.get("type") == "assistant.message" and not data.get("toolRequests")
+                 and data.get("phase") in (None, "final_answer"))
+        if final:
+            # The answer Duo parses stays whole; only its metadata is trimmed.
+            return {**clean({k: v for k, v in event.items() if k != "data"}),
+                    "data": {**clean({k: v for k, v in data.items() if k != "content"}),
+                             "content": trim(data.get("content", ""), keep=True)}}
+        return clean(event)
+    return convert
 
 
 def claude_events():
     """A per-stream sanitizer: preserve tool correlation without original IDs."""
-    identifiers = {}
-
-    def identifier(value):
-        return identifiers.setdefault(value, f"fixture-id-{len(identifiers) + 1}")
+    identifier = identifiers()
 
     def convert(event):
         if event.get("type") == "rate_limit_event":
@@ -94,9 +140,7 @@ def claude_events():
                         for k, v in value.items() if keep or k not in DROP}
             if isinstance(value, list):
                 return [clean(v, keep=keep) for v in value]
-            if isinstance(value, str) and (key in ("id", "uuid", "session_id", "tool_use_id",
-                                                   "parent_tool_use_id", "request_id")
-                                           or key.endswith("_id")):
+            if isinstance(value, str) and identifier_key(key):
                 return identifier(value)
             return trim(value, keep=keep)
         return clean(event)
@@ -192,7 +236,7 @@ def record_attempt(args) -> None:
     stdout, stderr = attempt / "stdout.log", attempt / "stderr.log"
     if agent == "copilot":
         if stdout.stat().st_size:
-            write(target, f"events-{args.name}.jsonl", jsonl(stdout, copilot_event))
+            write(target, f"events-{args.name}.jsonl", jsonl(stdout, copilot_events()))
     elif agent == "codex":
         write(target, f"events-{args.name}.jsonl", jsonl(stdout, trim))
         if (attempt / "response.json").exists():
@@ -212,6 +256,38 @@ def record_attempt(args) -> None:
         write(target, f"stderr-{args.name}.txt", scrub(stderr.read_text()))
 
 
+def record_rejections(args) -> None:
+    """How each CLI's argument parser refuses an option it does not define.
+
+    Each argv is the start of Duo's own invocation plus UNKNOWN_OPTION, with no
+    prompt argument and an empty stdin, so even a CLI that accepted the option
+    would have nothing to send to a model. The exit code and both streams are kept.
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        scratch = Path(scratch)
+        for agent in args.cli:
+            binary = getattr(args, f"{agent}_bin")
+            if agent == "copilot":
+                (scratch / "copilot").mkdir()
+                env = copilot.environment(scratch / "copilot")
+                base = prefix = [binary, "--no-auto-update"]
+            else:
+                env = reviewer_environment(agent)
+                base = [binary]
+                prefix = [binary, "exec"] if agent == "codex" else [binary, "-p"]
+            version = subprocess.run([*base, "--version"], capture_output=True, text=True,
+                                     timeout=60, env=env, stdin=subprocess.DEVNULL)
+            target = FIXTURES / f"{agent}-{version_of(agent, version.stdout)}"
+            argv = [*prefix, UNKNOWN_OPTION]
+            result = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=env,
+                                    stdin=subprocess.DEVNULL)
+            if result.returncode == 0:
+                raise SystemExit(f"{agent} accepted {UNKNOWN_OPTION}; nothing recorded")
+            record = {"argv": [agent, *argv[1:]], "exit_code": result.returncode,
+                      "stdout": scrub(result.stdout), "stderr": scrub(result.stderr)}
+            write(target, "rejection-unknown-option.json", json.dumps(record, indent=2) + "\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -227,6 +303,13 @@ def main() -> None:
     attempt.add_argument("attempt", type=Path, help="Audit attempt directory")
     attempt.add_argument("name", help="Fixture name, e.g. success or model-unavailable")
     attempt.set_defaults(func=record_attempt)
+    rejection = sub.add_parser("rejection", help="Record each CLI's unknown-option rejection")
+    rejection.add_argument("--cli", nargs="+", choices=["codex", "claude", "copilot"],
+                           default=["codex", "claude", "copilot"])
+    rejection.add_argument("--codex-bin", default="codex")
+    rejection.add_argument("--claude-bin", default="claude")
+    rejection.add_argument("--copilot-bin", default="copilot")
+    rejection.set_defaults(func=record_rejections)
     args = parser.parse_args()
     args.func(args)
 

@@ -21,6 +21,20 @@ from duo.models import SECRET_PATTERNS, AgentError, validate_review
 from duo.policy import TESTED_VERSIONS, verify_claude_remote, verify_controls, verify_version
 
 FIXTURES = Path(__file__).parent / "fixtures"
+# Recorded CLI output; verdicts/ holds hand-written verdict examples.
+RECORDINGS = sorted(path for path in FIXTURES.glob("*-*/*") if path.is_file())
+# Independent of record_fixtures.py, so a sanitizer regression cannot hide here.
+# Keys ending in Id/_id hold identifiers wherever they appear, except these
+# descriptive ones; their values must be placeholders the recorder writes.
+DESCRIPTIVE_KEYS = {"modelId", "providerId", "turnId"}
+PLACEHOLDER = re.compile(r"[0:-]+|fixture-id-\d+|item_\d+|F\d+")
+# Identifier shapes in free text: GitHub request IDs, Anthropic and OpenAI
+# message/request/call IDs, and any "request id" value other than a placeholder.
+TEXT_IDENTIFIERS = {
+    "GitHub request ID": re.compile(r"\b[0-9A-F]{4,8}(?::[0-9A-F]{4,16}){3,5}\b"),
+    "provider ID": re.compile(r"\b(?:msg|req|toolu|srvtoolu|resp|call|chatcmpl)[_-][A-Za-z0-9]{16,}"),
+    "request ID text": re.compile(r"(?i)request[ _-]?id[\"']?\s*[:=]\s*[\"']?(?![0:-]+\b|fixture-id-)\w"),
+}
 
 
 def fixture_dir(agent: str) -> Path:
@@ -124,6 +138,43 @@ class RecordedProbeTests(unittest.TestCase):
                 self.assertIsNone(re.search(r"/(?:Users|home)/(?!user\b)[a-z]", content))
                 self.assertNotIn('"rate_limit_info"', content)
 
+    def test_recorded_identifiers_are_placeholders(self):
+        """Request, message, call and session IDs never reach a committed fixture."""
+        def identifiers(value, key=""):
+            if isinstance(value, dict):
+                for name, item in value.items():
+                    yield from identifiers(item, name)
+            elif isinstance(value, list):
+                for item in value:
+                    yield from identifiers(item, key)
+            elif (isinstance(value, str) and key not in DESCRIPTIVE_KEYS
+                  and (key in ("id", "uuid") or key.endswith(("_id", "Id", "ID")))):
+                yield key, value
+
+        for path in RECORDINGS:
+            content = path.read_text()
+            with self.subTest(path=path.relative_to(FIXTURES)):
+                for kind, pattern in TEXT_IDENTIFIERS.items():
+                    self.assertIsNone(pattern.search(content), kind)
+                if path.suffix not in (".json", ".jsonl"):
+                    continue
+                documents = ([json.loads(line) for line in content.splitlines() if line.strip()]
+                             if path.suffix == ".jsonl" else [json.loads(content)])
+                for document in documents:
+                    for key, value in identifiers(document):
+                        self.assertRegex(value, f"^(?:{PLACEHOLDER.pattern})$", key)
+
+    def test_identifier_check_rejects_the_formats_it_guards(self):
+        # The values the check exists for; each must be caught as recorded.
+        for text in ('"request_id": "CF0A:19D245:10CD91F:1650669:6ACC474C"',
+                     '"model_call_id": "msg_011CfwZbBr7GBEEkF2dirxZB"',
+                     '"toolCallId": "call_uF2soK6o6Cy1FlpAnZs6pWWr"',
+                     "Error: Authentication failed (Request ID: 9A1B:22C3)"):
+            with self.subTest(text=text):
+                self.assertTrue(any(p.search(text) for p in TEXT_IDENTIFIERS.values()))
+        self.assertIsNone(PLACEHOLDER.fullmatch("7qDLHZBtK/cWZ9b81KxICWql"))
+        self.assertIsNone(TEXT_IDENTIFIERS["request ID text"].search("(Request ID: 0000:0000)"))
+
 
 class RecordedResponseTests(Fixture):
     """Replay recorded stdout/stderr through the real adapter."""
@@ -217,6 +268,81 @@ sys.exit({code})
                 adapter("codex", "Review", 5)
             self.assertFalse(caught.exception.retryable)
             self.assertIn(message, str(caught.exception))
+
+    def copilot_adapter(self, binary, model="gpt-5.4"):
+        config = replace(self.config, codex_backend="copilot", copilot_bin=binary, codex_model=model)
+        adapter = CLIAdapter(config, self.store)
+        adapter.policy_verified = True
+        return adapter
+
+    def failure(self, agent, stderr, code, *, model="gpt-5.4"):
+        """The AgentError the adapter raises for one recorded or mutated failure."""
+        target = self.root / f"stderr-{agent}-{len(list(self.root.glob('stderr-*')))}.txt"
+        target.write_text(stderr)
+        binary = self.replay(f"{agent}-failure", stderr=str(target), code=code)
+        if agent == "copilot":
+            adapter, role = self.copilot_adapter(binary, model), "codex"
+        else:
+            adapter = CLIAdapter(replace(self.config, **{f"{agent}_bin": binary}), self.store)
+            role = agent
+        with patch("duo.copilot.check_sources"), \
+                patch.dict("os.environ", {"COPILOT_GITHUB_TOKEN": "duo-test-token"}), \
+                self.assertRaises(AgentError) as caught:
+            adapter(role, "Review", 5)
+        return caught.exception
+
+    def test_recorded_unknown_option_rejections_are_not_retried(self):
+        recordings = sorted(FIXTURES.glob("*/rejection-unknown-option.json"))
+        self.assertEqual({path.parent.name.split("-")[0] for path in recordings},
+                         {"codex", "claude", "copilot"})
+        for path in recordings:
+            agent = path.parent.name.split("-")[0]
+            record = json.loads(path.read_text())
+            with self.subTest(fixture=path.parent.name):
+                # Each parser refused the option without output on stdout.
+                self.assertNotEqual(record["exit_code"], 0)
+                self.assertEqual(record["stdout"], "")
+                error = self.failure(agent, record["stderr"], record["exit_code"])
+                self.assertEqual(error.category, "option")
+                self.assertEqual(error.attempt_limit, 1)
+                self.assertFalse(error.retryable)
+
+    def test_recorded_failures_with_shifted_or_unknown_wording(self):
+        """Wording decides only where no structured field does (plan §6 step 5)."""
+        model = self.path("copilot", "stderr-model-unavailable.txt")
+        auth = self.path("copilot", "stderr-auth-failed.txt")
+        claude_model = str(FIXTURES / "claude-2.1.296" / "stderr-unrecognized-model.txt")
+        codex = json.loads((FIXTURES / "codex-0.172.0" / "rejection-unknown-option.json").read_text())
+        claude = json.loads((FIXTURES / "claude-2.1.332" / "rejection-unknown-option.json").read_text())
+        recorded = {"copilot model": ("copilot", Path(model).read_text(), 1, "model"),
+                    "copilot auth": ("copilot", Path(auth).read_text(), 1, "authentication"),
+                    "claude model": ("claude", Path(claude_model).read_text(), 1, "model"),
+                    "claude option": ("claude", claude["stderr"], claude["exit_code"], "option")}
+        shifts = {"warning first": lambda text: "Warning: update available\n" + text,
+                  "upper case": str.upper,
+                  "trailing detail": lambda text: text.rstrip() + " (code 7)\n"}
+        for name, (agent, text, code, category) in recorded.items():
+            for shift, mutate in shifts.items():
+                with self.subTest(recording=name, shift=shift):
+                    self.assertEqual(self.failure(agent, mutate(text), code).category, category)
+        # Unknown wording falls back to a retried transient failure: the residual
+        # risk, bounded by --max-attempts, that the inventory records for site 6.
+        reworded = {"copilot model": ("copilot", 'Error: "gpt-5-4" cannot be used here.\n'),
+                    "copilot auth": ("copilot", "Error: token rejected (sign in again)\n"),
+                    "claude option": ("claude", "error: --duo-fixture-unknown-option is not recognised\n")}
+        for name, (agent, text) in reworded.items():
+            with self.subTest(recording=name, shift="reworded"):
+                error = self.failure(agent, text, 1)
+                self.assertEqual((error.category, error.attempt_limit), ("transient", None))
+                self.assertEqual(str(error), "Agent CLI failed; see the attempt diagnostics")
+        # Structured fields decide whatever the wording: Codex's usage-error exit
+        # with no events, and Claude's recorded HTTP status.
+        error = self.failure("codex", "error: that flag means nothing to me\n", codex["exit_code"])
+        self.assertEqual(error.category, "option")
+        self.assertEqual(self.failure("codex", codex["stderr"], 1).category, "option")
+        envelope = read_json(Path(self.path("claude", "result-unrecognized-model.json")))
+        self.assertEqual(claude_failure({**envelope, "result": "Something else went wrong"})[0],
+                         "model")
 
     def test_claude_recorded_streams(self):
         directory = FIXTURES / 'claude-2.1.330'

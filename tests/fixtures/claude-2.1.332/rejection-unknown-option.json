@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "claude",
+    "-p",
+    "--duo-fixture-unknown-option"
+  ],
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "error: unknown option '--duo-fixture-unknown-option'\n"
+}
