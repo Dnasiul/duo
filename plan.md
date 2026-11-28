@@ -135,7 +135,7 @@ Relevant files: `scripts/smoke_inspection.py`, `scripts/record_fixtures.py`, `sc
 
 For every row: identify the commit, installed artifact, OS/architecture, exact CLI versions, models, backend pair, mode, web setting, and budget; use synthetic repositories, canaries, and disposable configuration; classify each operation as requested, accessed, denied, not attempted, or unknown; record outcomes in STATUS and correct SECURITY/README claims. A declined action or unavailable model leaves the gap open. Do not generalize one version/platform result to a whole range.
 
-Add an evidence-export option to the smoke tool. Before temporary-directory cleanup, save the sanitized invocation, relevant tool events, and exit status or error for each attempt, including failures. Record a denial only when the evidence identifies the attempted operation and its tool or OS denial. If the canary is absent and the available events cannot establish whether the operation ran, report the outcome as unknown. Test both cases and verify that the exported evidence survives cleanup.
+Done on `main`, unreleased: `smoke_inspection.py --evidence-dir` (tests in `tests/test_smoke_inspection.py`). Add an evidence-export option to the smoke tool. Before temporary-directory cleanup, save the sanitized invocation, relevant tool events, and exit status or error for each attempt, including failures. Record a denial only when the evidence identifies the attempted operation and its tool or OS denial. If the canary is absent and the available events cannot establish whether the operation ran, report the outcome as unknown. Test both cases and verify that the exported evidence survives cleanup.
 
 | Open verification | Specific evidence required |
 | --- | --- |

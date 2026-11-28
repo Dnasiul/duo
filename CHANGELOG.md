@@ -33,6 +33,17 @@
   `--max-attempts`, then stops the run with a hint that the CLI's format may
   have changed. Retry-after delays apply only to failures that may not recur.
 
+### Added
+
+- `scripts/smoke_inspection.py --evidence-dir DIR` saves sanitized evidence
+  before the temporary files are removed, also when a check fails (plan §8):
+  each attempt's argv and working directory, its tool events, its exit status
+  or error, and an outcome for every outside file. Outcomes now come from the
+  recorded evidence: accessed, denied (only when a tool or OS denial of a
+  request naming the file is recorded), requested, not attempted, or unknown
+  (an incomplete stream, or a broader request that could have reached the
+  file). Confinement output previously reported only "READ" or "not read".
+
 ### Fixed
 
 - Copilot replies are accepted only under a final-answer contract (plan §6,

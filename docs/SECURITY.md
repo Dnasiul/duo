@@ -282,7 +282,12 @@ Until an isolation profile exists, for repositories you are less sure of:
   calls that ask each reviewer to read three files outside the repository and
   reports, per file, whether its random phrase reached the response or audit files.
   `--search-confinement` adds two model calls that do the same with the search
-  tools, reporting file names and contents separately.
+  tools, reporting file names and contents separately. Each file is classified
+  as accessed, denied, requested, not attempted, or unknown; a denial needs a
+  recorded tool or OS denial of a request naming the file, and a model's refusal
+  is never one. `--evidence-dir DIR` keeps sanitized per-attempt evidence
+  (invocation, tool events, exit status or error, outcomes) after the temporary
+  files are removed, including for failed attempts.
 - Every run's `reviewer-policy.json` distinguishes supplied restrictions from
   advertised options and selected metadata checked by preflight; it does not
   certify per-run behavioral enforcement.
