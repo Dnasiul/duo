@@ -111,6 +111,31 @@ sys.stdout.write(outputs[key])
             with self.subTest(agent=agent):
                 self.assertEqual(self.check(agent, fail=True)["status"], "probe-failure")
 
+    def test_unrecognized_version_output_is_a_probe_failure(self):
+        # Each CLI's own anchored version line; a foreign format or a second
+        # version (an update notice) refuses rather than selecting a baseline.
+        def banner(outputs):
+            outputs["version"] = "Update available: 9.9.9\n" + outputs["version"]
+
+        def notice(outputs):
+            outputs["version"] += "A newer release, 9.9.9, is available\n"
+
+        def foreign(outputs):
+            outputs["version"] = "v22.1.0\n"
+        for agent in ("codex", "claude", "copilot"):
+            for edit in (banner, notice, foreign):
+                with self.subTest(agent=agent, edit=edit.__name__):
+                    result = self.check(agent, edit=edit)
+                    self.assertEqual(result["status"], "probe-failure", result)
+                    self.assertIn("Cannot parse the", result["error"])
+
+    def test_baseline_versions_must_be_bare(self):
+        for text in ("0.162.1", "10.20.30"):
+            self.assertEqual(self.drift.version_tuple(text), tuple(map(int, text.split("."))))
+        for text in ("codex-cli 0.162.1", "0.162.1 ", "0.162", "0.162.1.2", "v0.162.1", 162, None):
+            with self.subTest(text=text), self.assertRaisesRegex(self.drift.RunError, "Cannot parse"):
+                self.drift.version_tuple(text)
+
     def test_claude_requires_stream_options_and_format_value(self):
         for option in ('--output-format', '--verbose', '--json-schema', 'stream-json'):
             with self.subTest(option=option):

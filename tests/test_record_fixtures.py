@@ -36,6 +36,9 @@ DROPPED = {
     "NODE_OPTIONS": "--require /synthetic/inject.js",
 }
 
+VERSIONS = {"codex": "codex-cli 1.2.3\n", "claude": "1.2.3 (Claude Code)\n",
+            "copilot": "GitHub Copilot CLI 1.2.3.\nRun 'copilot update' to check for updates.\n"}
+
 
 class RecordFixtureTests(unittest.TestCase):
     def setUp(self):
@@ -82,7 +85,8 @@ class RecordFixtureTests(unittest.TestCase):
                 self.assertEqual(list(home.iterdir()), [])
             elif "CODEX_HOME" in os.environ:
                 self.assertEqual(env["CODEX_HOME"], os.environ["CODEX_HOME"])
-        return subprocess.CompletedProcess(argv, 0, stdout="synthetic-cli 1.2.3\n", stderr="")
+        stdout = VERSIONS[cli] if probe == "--version" else "synthetic output\n"
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
 
     def assert_native_environments(self):
         for cli, probe, names in self.captures:
@@ -96,6 +100,23 @@ class RecordFixtureTests(unittest.TestCase):
                 self.assertFalse(set(DROPPED) & names)
                 other = "claude" if cli == "codex" else "codex"
                 self.assertFalse(set(AUTH[other]) & names)
+
+    def test_fixture_directory_uses_the_anchored_version_parser(self):
+        for cli in ("codex", "claude", "copilot"):
+            with self.subTest(cli=cli):
+                self.write.reset_mock()
+                self.recorder.record_probes(self.args(cli))
+                targets = {call.args[0] for call in self.write.call_args_list}
+                self.assertEqual(targets, {self.recorder.FIXTURES / f"{cli}-1.2.3"})
+        # Output that is not the CLI's own version line stops before any write.
+        for stdout in ("Update available: 9.9.9\ncodex-cli 1.2.3\n", "codex-cli 1.2.3\nnew: 1.3.0\n",
+                       "1.2.3 (Claude Code)\n", "synthetic-cli 1.2.3\n"):
+            with self.subTest(stdout=stdout):
+                self.write.reset_mock()
+                with patch.dict(VERSIONS, {"codex": stdout}), \
+                        self.assertRaisesRegex(SystemExit, "Cannot parse the codex version"):
+                    self.recorder.record_probes(self.args("codex"))
+                self.write.assert_not_called()
 
     def test_every_native_probe_gets_its_reviewer_environment(self):
         probes = {"codex": ["--version", "--help", "features", "mcp"],
@@ -204,7 +225,7 @@ class RecordFixtureTests(unittest.TestCase):
                     run = Path(scratch)
                     attempt = run / 'attempt-001'
                     attempt.mkdir()
-                    (run / 'versions.json').write_text('{"claude":"2.1.330"}')
+                    (run / 'versions.json').write_text('{"claude":"2.1.330 (Claude Code)"}')
                     (attempt / 'stdout.log').write_bytes(b'{"type":"system","subtype":"init"}\n' + tail)
                     if existing is not None:
                         (attempt / 'claude-stream.json').write_text(json.dumps(existing))

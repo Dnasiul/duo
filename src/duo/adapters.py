@@ -422,8 +422,10 @@ class CLIAdapter:
                 raise RunError(f"Cannot run {agent} --version") from exc
             if proc.returncode:
                 raise RunError(f"{agent} --version failed")
+            # The whole output is checked; only its start is recorded.
+            status = verify_version(agent, proc.stdout, self.config.allow_untested_cli)
             versions[agent] = proc.stdout.strip()[:200]
-            if verify_version(agent, versions[agent], self.config.allow_untested_cli) == "untested":
+            if status == "untested":
                 untested.append(agent)
         if not self.config.skip_git_repo_check:
             try:

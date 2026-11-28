@@ -71,7 +71,7 @@ Acceptance: README and STATUS model lists match recorded evidence; Copilot diver
 
 ## 6. Dependence on message wording — partly shipped in 0.8.1
 
-Status: steps 1–2 done on `main`, unreleased. Step 1 has offline replay and mutation tests; a live Copilot run is pending the quota reset. Step 2's workflow changes have not yet run on a schedule. Steps 3–5 open.
+Status: steps 1–3 done on `main`, unreleased. Step 1 has offline replay and mutation tests; a live Copilot run is pending the quota reset. Step 2's workflow passed a manual run on 2026-11-27 but has not yet run on a schedule. Step 3 anchored version parsing; Codex 0.172.0 `features list` still has no structured output, so feature parsing stays on the text contract. Steps 4–5 open.
 
 Version 0.8.1 added the inventory (`docs/PARSING_INVENTORY.md`) and guards for ambiguous version output, ambiguous Codex feature listings, and Copilot streams missing a successful `result` event. Step 1 replaced the Copilot parser's last-qualifying-message rule with a final-answer contract; site 9 is now RETRY/COST CHANGE, and the new `toolRequests` dependency joins step 4.
 

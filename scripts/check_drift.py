@@ -47,8 +47,8 @@ from duo import copilot  # noqa: E402
 from duo.models import Config, RunError  # noqa: E402
 from duo.policy import (CLAUDE_REQUIRED_FLAGS, CLAUDE_SETTINGS, CODEX_DISABLED,  # noqa: E402
                         CODEX_FEATURE_STAGES, CODEX_REQUIRED_FLAGS, TESTED_VERSIONS,
-                        check_claude_managed_files, reviewer_environment, verify_controls,
-                        verify_version)
+                        check_claude_managed_files, parse_version, reviewer_environment,
+                        verify_controls, verify_version)
 
 # The fixture files each CLI is compared with.
 COMPARED = {"codex": ("exec-help.txt", "features.txt"), "claude": ("help.txt",),
@@ -140,10 +140,10 @@ REVIEW = {"removed": "removed", "removed, still mentioned in prose": "removed",
 
 
 def version_tuple(text: str) -> tuple[int, ...]:
-    found = {tuple(map(int, m)) for m in re.findall(r"\b(\d+)\.(\d+)\.(\d+)\b", text)}
-    if len(found) != 1:
+    """A bare X.Y.Z, as in baseline entries and --review; CLI output uses parse_version."""
+    if not isinstance(text, str) or not (match := re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", text)):
         raise RunError(f"Cannot parse a version from {text!r}")
-    return found.pop()
+    return tuple(map(int, match.groups()))
 
 
 def digest(path: Path) -> str:
@@ -255,7 +255,7 @@ def check(agent: str, binary: str, scratch: Path, manifest: Path | None = None) 
             else:
                 live["help.txt"] = outputs["--help"]
         name, texts, problems = baseline(load_baselines(manifest or MANIFEST), agent,
-                                         version_tuple(result["version"]))
+                                         parse_version(agent, result["version"]))
     except RunError as exc:
         result["error"] = str(exc)
         return result

@@ -33,6 +33,16 @@
   answer, and a Claude-model tool call whose `toolRequests` field was renamed
   could be accepted as a review. Both recorded Copilot 1.0.95 streams still
   yield their recorded answers. Not yet exercised live (Copilot quota).
+- Version checks parse each CLI's own version line (plan §6, sites 3a, 3b
+  and 12): the first line of `--version` output must be exactly
+  `codex-cli X.Y.Z`, `X.Y.Z (Claude Code)`, or `GitHub Copilot CLI X.Y.Z`, and
+  no other version may appear in the output. Previously any single `X.Y.Z` was
+  accepted, so output naming another program's version could pass the range
+  check, and native output was checked only in its first 200 characters.
+  Pre-release and build-tagged versions now refuse as unparseable, even with
+  `--allow-untested-cli`. The drift check and `scripts/record_fixtures.py` use
+  the same parser, so the recorder no longer writes fixtures for a misread
+  version.
 
 ## 0.8.3 (2026-11-26)
 

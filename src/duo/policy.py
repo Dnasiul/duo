@@ -123,15 +123,35 @@ def tested_range(agent: str) -> str:
     return f"{'.'.join(map(str, low))} to before {'.'.join(map(str, high))}"
 
 
+# Each CLI's own --version line; the first line of output must match it in full.
+VERSION_LINES = {
+    "codex": re.compile(r"codex-cli (\d+)\.(\d+)\.(\d+)"),
+    "claude": re.compile(r"(\d+)\.(\d+)\.(\d+) \(Claude Code\)"),
+    "copilot": re.compile(r"GitHub Copilot CLI (\d+)\.(\d+)\.(\d+)\.?"),
+}
+
+
+def parse_version(agent: str, text: str) -> tuple[int, int, int]:
+    """Parse AGENT's --version output, or refuse.
+
+    The first non-empty line must be the CLI's own version line, and no other
+    line may name a different version (an update notice, for example).
+    """
+    lines = [line.strip() for line in text.strip().splitlines()]
+    match = VERSION_LINES[agent].fullmatch(lines[0]) if lines else None
+    if not match:
+        raise RunError(f"Cannot parse the {agent} version; unrecognized version output "
+                       f"(tested: {tested_range(agent)})")
+    version = tuple(map(int, match.groups()))
+    others = {tuple(map(int, m)) for m in re.findall(r"\b(\d+)\.(\d+)\.(\d+)\b", text)}
+    if others - {version}:
+        raise RunError(f"Cannot parse the {agent} version; ambiguous version output")
+    return version
+
+
 def verify_version(agent: str, version: str, allow_untested: bool = False) -> str:
     """Return "tested", or "untested" when explicitly allowed; otherwise refuse."""
-    matches = re.findall(r"\b(\d+)\.(\d+)\.(\d+)\b", version)
-    if not matches:
-        raise RunError(f"Cannot parse the {agent} version; tested: {tested_range(agent)}")
-    parsed = {tuple(map(int, match)) for match in matches}
-    if len(parsed) != 1:
-        raise RunError(f"Cannot parse the {agent} version; ambiguous version output")
-    actual = parsed.pop()
+    actual = parse_version(agent, version)
     low, high = TESTED_VERSIONS[agent]
     if low <= actual < high:
         return "tested"

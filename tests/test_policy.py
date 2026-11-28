@@ -12,8 +12,8 @@ from unittest.mock import Mock, patch
 from duo.adapters import CLIAdapter, classify_failure
 from duo.models import Config, ReviewerSpec, RunError
 from duo.policy import (CLAUDE_SETTINGS, CODEX_DISABLED, check_claude_managed_files,
-                        claude_options, codex_options, verify_claude_remote,
-                        verify_controls, verify_version)
+                        claude_options, codex_options, parse_version,
+                        verify_claude_remote, verify_controls, verify_version)
 from duo.storage import RunStore
 
 HELP = ('--sandbox --ephemeral --json --output-schema --ignore-rules --ignore-user-config --strict-config '
@@ -58,9 +58,11 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(agent=agent, version=version):
                 self.assertEqual(verify_version(agent, version), 'tested')
         # Codex 0.x minor releases may break compatibility; each needs evidence.
-        for agent, version in [('codex', '0.173.0'), ('codex', '0.162.0'), ('codex', '1.0.0'),
-                               ('claude', '2.2.0'), ('claude', '2.1.295'), ('claude', '3.0.0'),
-                               ('copilot', '1.1.0'), ('copilot', '1.0.94'), ('copilot', '2.0.0')]:
+        for agent, version in [('codex', 'codex-cli 0.173.0'), ('codex', 'codex-cli 0.162.0'),
+                               ('codex', 'codex-cli 1.0.0'), ('claude', '2.2.0 (Claude Code)'),
+                               ('claude', '2.1.295 (Claude Code)'), ('claude', '3.0.0 (Claude Code)'),
+                               ('copilot', 'GitHub Copilot CLI 1.1.0.'), ('copilot', 'GitHub Copilot CLI 1.0.94.'),
+                               ('copilot', 'GitHub Copilot CLI 2.0.0.')]:
             with self.subTest(agent=agent, version=version):
                 with self.assertRaisesRegex(RunError, 'outside the tested range.*--allow-untested-cli'):
                     verify_version(agent, version)
@@ -71,11 +73,15 @@ class PolicyTests(unittest.TestCase):
                 verify_version('claude', 'unrecognized', allow)
 
     def test_version_parser_rejects_ambiguous_distinct_versions(self):
-        text = ('Update available: 1.0.120\n'
-                'GitHub Copilot CLI 1.0.95.\n')
+        text = ('GitHub Copilot CLI 1.0.95.\n'
+                'Update available: 1.0.120\n')
         with self.assertRaisesRegex(RunError, 'Cannot parse.*ambiguous'):
             verify_version('copilot', text)
+        # Codex and Claude output is checked whole, not just its first line.
         with self.assertRaisesRegex(RunError, 'Cannot parse.*ambiguous'):
+            verify_version('codex', 'codex-cli 0.172.0\n' + 'x' * 300 + ' 0.180.0\n')
+        # A version line that is not first is not the CLI's version line.
+        with self.assertRaisesRegex(RunError, 'Cannot parse.*unrecognized'):
             verify_version('copilot', '\n'.join(reversed(text.splitlines())))
 
     def test_version_parser_accepts_single_distinct_triple_with_prose(self):
@@ -87,6 +93,37 @@ class PolicyTests(unittest.TestCase):
             'copilot',
             'GitHub Copilot CLI 1.0.95.\nLatest installed: 1.0.95\n'),
             'tested')
+
+    def test_version_parser_requires_each_clis_own_format(self):
+        recorded = {'codex': 'codex-cli 0.172.0\n', 'claude': '2.1.332 (Claude Code)\n',
+                    'copilot': "GitHub Copilot CLI 1.0.116.\nRun 'copilot update' to check for updates.\n"}
+        expected = {'codex': (0, 172, 0), 'claude': (2, 1, 332), 'copilot': (1, 0, 116)}
+        for agent, text in recorded.items():
+            with self.subTest(agent=agent):
+                self.assertEqual(parse_version(agent, text), expected[agent])
+                self.assertEqual(parse_version(agent, '\n  ' + text), expected[agent])
+        refused = [
+            # Another CLI's format, or a bare or foreign version.
+            ('codex', '2.1.332 (Claude Code)'), ('claude', 'codex-cli 0.172.0'),
+            ('copilot', 'codex-cli 0.172.0'), ('codex', '0.172.0'), ('claude', '2.1.332'),
+            ('copilot', '1.0.116'), ('claude', 'Claude Code 2.1.332'),
+            ('codex', 'node v22.1.0'),
+            # Prefixes, suffixes and pre-release or build tags.
+            ('codex', 'warning: codex-cli 0.172.0'), ('codex', 'codex-cli 0.172.0 (beta)'),
+            ('codex', 'codex-cli 0.173.0-alpha.1'), ('claude', '2.1.332 (Claude Code) extra'),
+            ('copilot', 'GitHub Copilot CLI 1.0.116+build.'), ('copilot', 'GitHub Copilot CLI 1.0.116..'),
+            ('codex', 'codex-cli 0.172'), ('codex', 'codex-cli 0.172.0.1'),
+            # A banner before the version line.
+            ('codex', 'Update available!\ncodex-cli 0.172.0'),
+            ('codex', ''), ('codex', '\n\n'),
+        ]
+        for agent, text in refused:
+            with self.subTest(agent=agent, text=text):
+                with self.assertRaisesRegex(RunError, 'Cannot parse'):
+                    parse_version(agent, text)
+                for allow in (False, True):
+                    with self.assertRaisesRegex(RunError, 'Cannot parse'):
+                        verify_version(agent, text, allow)
 
     def test_codex_options_disable_login_shell_in_both_web_modes(self):
         for options in (codex_options(), codex_options(allow_web=True)):

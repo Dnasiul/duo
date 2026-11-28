@@ -27,8 +27,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from duo import copilot  # noqa: E402
-from duo.policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options,
-                        codex_options, reviewer_environment)  # noqa: E402
+from duo.models import RunError  # noqa: E402
+from duo.policy import (CLAUDE_SETTINGS, check_claude_managed_files, claude_options,  # noqa: E402
+                        codex_options, parse_version, reviewer_environment)
 
 FIXTURES = ROOT / "tests" / "fixtures"
 LIMIT = 300  # characters kept from strings that Duo does not parse
@@ -126,11 +127,12 @@ def write(directory: Path, name: str, text: str) -> None:
     print(directory.relative_to(ROOT) / name)
 
 
-def version_of(text: str) -> str:
-    match = re.search(r"\d+\.\d+\.\d+", text)
-    if not match:
-        raise SystemExit(f"Cannot parse version from {text!r}")
-    return match.group(0)
+def version_of(agent: str, text: str) -> str:
+    """The fixture directory's version: Duo's own anchored parser, or stop."""
+    try:
+        return ".".join(map(str, parse_version(agent, text)))
+    except RunError as exc:
+        raise SystemExit(f"{exc}: {text[:200]!r}") from exc
 
 
 def record_probes(args) -> None:
@@ -148,7 +150,7 @@ def record_probes(args) -> None:
         if "codex" in args.cli:
             env = reviewer_environment("codex")
             version = run([args.codex_bin, "--version"], env)
-            target = FIXTURES / f"codex-{version_of(version)}"
+            target = FIXTURES / f"codex-{version_of('codex', version)}"
             write(target, "version.txt", version)
             write(target, "exec-help.txt", run([args.codex_bin, "exec", "--help"], env))
             write(target, "features.txt", run([args.codex_bin, *codex_options(), "features", "list"], env))
@@ -163,7 +165,7 @@ def record_probes(args) -> None:
             settings.write_text(json.dumps(CLAUDE_SETTINGS))
             env = reviewer_environment("claude")
             version = run([args.claude_bin, "--version"], env)
-            target = FIXTURES / f"claude-{version_of(version)}"
+            target = FIXTURES / f"claude-{version_of('claude', version)}"
             write(target, "version.txt", version)
             write(target, "help.txt", run([args.claude_bin, "--help"], env))
             check_claude_managed_files()
@@ -175,7 +177,7 @@ def record_probes(args) -> None:
             env = copilot.environment(scratch / "copilot")
             base = [args.copilot_bin, "--no-auto-update"]
             version = run([*base, "--version"], env)
-            target = FIXTURES / f"copilot-{version_of(version)}"
+            target = FIXTURES / f"copilot-{version_of('copilot', version)}"
             write(target, "version.txt", version)
             write(target, "help.txt", run([*base, "--help"], env))
             write(target, "config.json", run([*base, "config", "--list", "--json"], env))
@@ -186,7 +188,7 @@ def record_attempt(args) -> None:
     run_dir = attempt.parent
     agent = args.cli
     versions = json.loads((run_dir / "versions.json").read_text())
-    target = FIXTURES / f"{agent}-{version_of(versions[agent])}"
+    target = FIXTURES / f"{agent}-{version_of(agent, versions[agent])}"
     stdout, stderr = attempt / "stdout.log", attempt / "stderr.log"
     if agent == "copilot":
         if stdout.stat().st_size:
