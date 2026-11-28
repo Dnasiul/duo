@@ -100,7 +100,7 @@ allowlisted with explicit additions, and the credential check is best-effort.
 | Operating system | macOS on Apple silicon (live runs and CI); Ubuntu 22.04 on x86-64 (live runs); Ubuntu (CI) | Other Linux distributions: CI only; Windows is unsupported |
 | Python | 3.11, 3.12, 3.13, 3.14 (CI on both systems) | Older versions are unsupported |
 | Dependencies | `constraints.txt` | Newest versions within `pyproject.toml` ranges (CI checks them, untested for release) |
-| Codex CLI | 0.162.1 to 0.172.x (0.164.0 to 0.166.0 and 0.168.0 to 0.172.0 live on Linux; 0.167.0 live on macOS) | 0.164.x to 0.166.x and 0.168.x to 0.172.x live on macOS, 0.167.x live on Linux, and 0.168.x to 0.172.x with Copilot pairs pending; other versions only with `--allow-untested-cli` |
+| Codex CLI | 0.162.1 to 0.172.x (0.164.0 to 0.166.0 and 0.168.0 to 0.172.0 live on Linux and macOS, native pairs; 0.167.0 live on macOS) | 0.167.x live on Linux and 0.168.x to 0.172.x with Copilot pairs pending; other versions only with `--allow-untested-cli` |
 | Claude Code | 2.1.x from 2.1.296 | Other versions, only with `--allow-untested-cli` |
 | Copilot CLI | 1.0.x from 1.0.95 (1.0.105 live on Linux) | Other versions, only with `--allow-untested-cli` |
 | Backends | All four native/Copilot combinations (live runs on Linux and macOS) | — |

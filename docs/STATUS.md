@@ -11,6 +11,7 @@ releases are listed under "Done". `plan.md` is the improvement plan after 0.8.3
 
 | Area | Where |
 | --- | --- |
+| macOS native verification (2026-11-28, plan §8): Codex 0.164.0–0.166.0 and 0.168.0–0.172.0 on macOS 27.2.1 arm64 with version probes, deterministic write denial, inspection and confinement smoke, and a bounded native-pair run each; login-shell probe on 0.172.0 with Homebrew bash (zsh not exercised); context files, Claude stream records, verdicts, `--resume`, a native panel, and `--allow-web` in plan mode. No Copilot calls | "macOS native verification" below |
 | Isolation feasibility gate (2026-11-25, plan §4 step 1 only): Linux bubblewrap battery passed; native Codex with writable `~/.codex` and native Claude completed an authenticated Duo run to agreement; read-only Codex state failed with `EROFS`; Copilot preflight/battery passed but matched confined/unconfined requests hit HTTP 402 `quota_exceeded`; macOS unevaluated. No opt-in profile implemented | [Gate record, boundary/verdict matrix, exact failures, macOS protocol and revised effort estimate](ISOLATION_GATE.md) |
 | Reviewer panels (0.8.0, plan §13): optional roster-defined N-reviewer panels, unanimity on one subject, diversity classification/warnings, verdict schema 1.2 + panel gate rule/hash checks, checkpoint schema 2 + roster hash validation | `src/duo/models.py`, `src/duo/workflow.py`, `src/duo/cli.py`, `src/duo/diversity.py`, `src/duo/verdicts.py`, `src/duo/checkpoints.py`, `examples/check_verdict.py`, `tests/test_panels.py` |
 | Persistent checkpoints (0.7.0, plan §12): explicit recovery, durable attempt reservations and publication intents, fresh approval epochs, protected cleanup | `src/duo/checkpoints.py`, `src/duo/workflow.py`, `src/duo/cli.py`, `src/duo/cleanup.py`, `tests/test_resume.py`; "Persistent checkpoints" below |
@@ -65,13 +66,15 @@ releases are listed under "Done". `plan.md` is the improvement plan after 0.8.3
    Linux, natively and through Copilot, and natively on macOS (below); not yet
    through Copilot on macOS or with mixed backend pairs.
 2. **`--allow-web`** (released in 0.4.0 as experimental): ran live on Linux with native and
-   Copilot pairs in report mode (below); not yet on macOS, with mixed pairs, or in
-   other modes.
+   Copilot pairs in report mode (below), and on macOS with the native pair in
+   plan mode on 2026-11-28 ("macOS native verification"); not yet with mixed
+   pairs, through Copilot on macOS, or in description and review modes.
 3. **Codex CLI 0.164.x to 0.166.x**: validated on Linux on 2026-10-28 and
-   2026-11-02 (below); live macOS verification remains pending. 0.167.x was
-   validated on macOS on 2026-11-10 (below); live Linux verification pending.
-   0.168.x to 0.172.x were validated on Linux on 2026-11-26 with native pairs
-   only (below) and released in 0.8.3; Copilot pairs and macOS remain pending.
+   2026-11-02 (below), and on macOS with native pairs on 2026-11-28 (below).
+   0.167.x was validated on macOS on 2026-11-10 (below); live Linux
+   verification pending. 0.168.x to 0.172.x were validated on Linux on
+   2026-11-26 and on macOS on 2026-11-28, both with native pairs only (below),
+   and released in 0.8.3; Copilot pairs remain pending.
 4. **Copilot CLI 1.0.103+** (`--sync-session`): validated on Linux with 1.0.105
    on 2026-10-28 (below) and with 1.0.114 on 2026-11-23 (below); live macOS
    verification remains pending.
@@ -90,14 +93,18 @@ releases are listed under "Done". `plan.md` is the improvement plan after 0.8.3
    the historical DNS failures alone do not establish it. Managed deployments
    remain unsupported.
 7. **F4: native Claude tool audit** (plan §2): shipped in 0.5.0; see the
-   stream evidence below; macOS evidence remains pending. Document snapshots archive the reviewed
+   stream evidence below; macOS stream records were verified on 2026-11-28
+   ("macOS native verification"). Document snapshots archive the reviewed
    document only; emitted tool logs do not guarantee complete file/page archives.
 8. **Codex login-shell environment reintroduction** (plan §7.2): resolved.
    The Linux live sentinel probe completed on 2026-11-25, and
    `allow_login_shell=false` is adopted for native Codex invocations (see
    "Codex login-shell environment reintroduction" below). Residuals pass to
-   section 4: the non-login shell still sources `.bashrc`; macOS is untested
-   (see (a)–(c) below).
+   section 4: the non-login shell still sources `.bashrc` on Linux; macOS was
+   probed on 2026-11-28 with Codex 0.172.0 and Homebrew bash only (login
+   sentinels and `.bashrc` absent; see "macOS native verification"); zsh
+   remains untested because Codex runs the account's login shell (see (a)–(c)
+   below).
 9. **Isolation profile** (plan §4): the Linux feasibility gate is recorded in
    [ISOLATION_GATE.md](ISOLATION_GATE.md); step 2 is not implemented. The tested
    native boundary needs writable Codex state and shared host/guest temporary
@@ -305,6 +312,68 @@ The deterministic Codex write-denial results below remain historical evidence:
 Linux x86-64 0.164.0, 0.165.0, 0.166.0; macOS 27.2 arm64 0.167.0. The separate
 0.164.0 model-directed write attempt remains inconclusive. Open items 5–7 retain
 the missing confinement, authenticated-policy/network, and audit evidence.
+
+## macOS native verification (plan §8, 2026-11-28)
+
+2026-11-28, macOS 27.2.1 (build 26B131) arm64, commit `8874f84` (Duo 0.8.3
+plus unreleased work), installed editable into Python 3.11.17 with
+`constraints.txt`; offline suite 519 tests, OK. CLIs: codex-cli 0.164.0,
+0.165.0, 0.166.0, 0.168.0, 0.169.1, 0.170.0, 0.171.0 (scratch npm installs, one
+prefix each) and 0.172.0 (the default install and a scratch install), Claude
+Code 2.1.332, Node 26.11.1. `check_drift.py --cli codex claude`: Codex 0.172.0
+and Claude Code 2.1.332 compatible, no changes from their baselines. Native
+pairs only: no Copilot calls were made (the monthly quota is exhausted). The
+account's login shell and `SHELL` are Homebrew bash 5.3.20
+(`/opt/homebrew/bin/bash`). Models `gpt-6-astra` and `claude-sonnet-5-5`,
+default effort, unless stated. 95 model calls in total, one at a time.
+
+| Check | Result |
+| --- | --- |
+| `exec --help`, all eight versions | identical to `tests/fixtures/codex-<version>/exec-help.txt` |
+| Codex read-only sandbox, deterministic probe (`codex --no-daemon sandbox` with `codex_options()` and the reviewer environment, `/bin/sh -c`), all eight versions | reads inside and outside the repository succeeded; `touch` inside the repository, outside it, and in the home directory failed with "Operation not permitted" (exit 1) and created no files; every version accepted `--no-daemon` |
+| Startup inspection smoke, native pair, all eight versions | both read the repository; no hook or MCP sentinel ran |
+| File confinement, all eight versions | Codex read the three outside canaries (accessed, reported in the response; documented); Claude's `Read` was denied for all three |
+| Search confinement, all eight versions | Codex made no search request (not attempted; it reported having no search tools), which is not enforcement evidence; Claude's `Glob` and `Grep` were denied for the temporary and home directories. For the repository symlink target, Claude's request was recorded without access or denial with 0.164.0–0.166.0 and 0.170.0–0.172.0, and denied (`Grep` with 0.168.0, `Glob` with 0.169.1); Claude Code was 2.1.332 throughout, so this varies with Claude's requests, not with Codex |
+| Live native Codex + native Claude (`calc.py` task, `--max-turns 4 --max-attempts 2`), each version | agreed in 3 turns and 3 attempts, 40–47 seconds each; no warnings; `calc.py` unchanged and only `plan.md` created; Codex ran read-only commands (`rg --files`, `cat`, `ls`, `pwd`) through `/opt/homebrew/bin/bash -c` |
+
+The smoke runs saved evidence with `--evidence-dir` (six attempts per
+version, no retries, no errors).
+
+**Login shell (plan §7.2, §4 step 4), Codex 0.172.0.** Run with the zsh
+variant of `smoke_inspection.py --login-shell` (unreleased; this commit's
+working tree), which plants `.bash_profile`, `.bashrc`, `.zprofile`, and
+`.zshenv` sentinels in a disposable `HOME` and accepts bash or zsh as the
+executed shell. Two runs, each a completed authenticated turn:
+
+| `SHELL` given to Duo | Executed command | Login sentinels (`.bash_profile`, `.zprofile`) | `.bashrc` | `.zshenv` |
+| --- | --- | --- | --- | --- |
+| `/opt/homebrew/bin/bash` (the account's) | `/opt/homebrew/bin/bash -c` (non-login) | absent | absent | absent (zsh did not run) |
+| `/bin/zsh` | `/opt/homebrew/bin/bash -c` (non-login) | absent | absent | absent (zsh did not run) |
+
+`/bin/zsh` reached the reviewer environment, but Codex still ran the
+account's login shell (from the directory service, not `SHELL`), so zsh was
+not exercised: zsh login-profile exclusion and `.zshenv` remain untested on
+macOS. Unlike the Linux probe, the `.bashrc` sentinel stayed absent under
+non-login Homebrew bash 5.3.20 on macOS; that result is credited to this bash
+and this Codex version only. Testing zsh needs an account whose login shell is
+zsh (an owner decision).
+
+**Features shipped in 0.5.0–0.8.2, default Codex 0.172.0:**
+
+| Feature | Run | Result |
+| --- | --- | --- |
+| `--context-file` (0.5.0) | `run-vzma71bb` | agreed in 3 turns / 3 attempts; `context.json` recorded order, label, source, 86 bytes, and a SHA-256 equal to both the source and `context-001.bin`; the plan adopted the context's test-file name and negative-number cases |
+| Native Claude stream record (0.5.0) | all 14 Claude attempts of this section's Duo runs | 13 `claude-stream.json` records with `payload_validated: true`, `completion: success`; the interrupted attempt recorded `process_status: interrupted`, `completion: missing`, `payload_validated: false`; tools used: `Read`, `Glob`, `WebFetch`, no permission denials |
+| Verdicts (0.6.0) | every run below | `examples/check_verdict.py` passed (exit 0) on the context, web, and resumed runs with `--task-file` and `--criteria-file`, and on the panel with `--rule unanimous-roster-approve-same-subject --roster-sha256`; the panel verdict with the default pair rule failed (exit 2) as designed |
+| `--resume` after SIGINT (0.7.0) | `run-koks5axd` | SIGINT to Duo during turn 2 (Claude, attempt 1; reviewers run in their own session, so this is what Ctrl-C delivers) ended the run with exit 130 and a resumable message; `duo --resume` invalidated approvals (epoch 1), retried turn 2 as attempt 2, and agreed in 3 turns / 4 attempts; verdict schema 1.1 |
+| Resume of a terminal run | `run-50bnxldb` | refused before any model call (exit 1, "Cannot resume terminal run (agreed)"). This run was meant to be interrupted: the first harness sent SIGINT to a background job of a non-interactive script, which ignores it, so the run finished |
+| Native panel (0.8.0) | `run-sn06gc8v` | `lead:codex:native:gpt-6-astra:high`, `opus:claude:native:claude-opus-5-5:high`, `scout:codex:native:gpt-6-astra:medium`, `--start lead`: agreed in 4 turns / 4 attempts; both diversity warnings (identical model, gpt-family concentration); checkpoint schema 2, verdict schema 1.2. A first invocation without `--start` was refused before any call ("Starting agent must be one of the configured reviewer ids") |
+| `--allow-web`, plan mode (0.4.0) | `run-l29py4ku` | agreed in 3 turns / 3 attempts after the web warning; both Codex attempts emitted `web_search` events (`open_page` on `docs.python.org/3/library/unittest.html`) whose completed item carries one result (domain and a line-count snippet, no page text); Claude's `WebFetch` of the same page returned a 1,428-character summary; Claude's terminal `server_tool_use` counters stayed zero, as on Linux |
+
+Every run's `checkpoint.json` passed `duo.checkpoints.load`, and every
+`report.html` contained no script. Evidence is outside the repository, under
+`~/duo-mac/evidence/` (write probes, smoke and login-shell evidence) with run
+directories under `~/duo-mac/runs/` and `~/duo-mac/features/`.
 
 ## Codex 0.168.0 to 0.172.0 compatibility validation
 

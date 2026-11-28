@@ -43,6 +43,12 @@
   shell ran. `ZDOTDIR` is removed from the probe's environment. Previously any
   shell other than bash made the check inconclusive. Sentinel names now carry
   their file (`DUO_SMOKE_BASH_PROFILE_…`, `DUO_SMOKE_ZPROFILE_…`).
+- macOS native verification (2026-11-28, docs only; `docs/STATUS.md`): Codex
+  0.164.0–0.166.0 and 0.168.0–0.172.0 with native pairs, the login-shell
+  control on 0.172.0 with Homebrew bash, and the 0.5.0–0.8.2 features
+  (context files, Claude stream records, verdicts, `--resume`, a native panel,
+  `--allow-web` in plan mode). zsh was not exercised: Codex runs the account's
+  login shell, which is bash on the test Mac. No Copilot calls.
 - `scripts/smoke_inspection.py --evidence-dir DIR` saves sanitized evidence
   before the temporary files are removed, also when a check fails (plan §8):
   each attempt's argv and working directory, its tool events, its exit status
