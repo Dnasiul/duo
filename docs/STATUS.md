@@ -952,7 +952,11 @@ Each costs a few model calls. Keep runs bounded and in scratch repositories.
   missing LangGraph fail the check. CI already used the correct `tests/` working
   directory; this discovery fix does not imply historical CI ran zero tests.
 - Live model IDs used so far: native `gpt-6-astra`, `claude-opus-5-5`,
-  `claude-sonnet-5-5`; Copilot `gpt-5.4`, `claude-sonnet-5.5` (dotted names).
+  `claude-sonnet-5-5`; Copilot (dotted names) `claude-sonnet-5.5`,
+  `gpt-6-luna`, `gpt-5.3-codex`, and, before 2026-10-21, `gpt-5.4`. On the
+  owner's Copilot Pro account Copilot refused `gpt-5.4`, `gpt-6-astra`, and
+  `claude-opus-5.5` on 2026-10-21, and the 2026-11-23 availability probe offered
+  only `claude-sonnet-5.5`, `gpt-6-luna`, and `gpt-5.3-codex`.
 
 ## Answering blocked runs
 

@@ -61,6 +61,8 @@ Acceptance: each supported combination has retained enforcement and authenticati
 
 Shipped: prefix-based classification for every roster, including the default pair, with identical, same-family, and unknown-family warnings in summaries and `reviewer-policy.json`. Done on Linux: the account's offered models were probed on 2026-11-23, and a two-family Copilot pair (`gpt-6-luna` + `claude-sonnet-5.5`) agreed in 5 turns (`run-0lh3gb8y`).
 
+Status: step 1 done on `main`, unreleased: the README compatibility row and the STATUS model list now separate the models offered at the 2026-11-23 probe, `gpt-5.4`'s earlier successes, and the 2026-10-21 refusals. Steps 2 and 3 open.
+
 Effort: small. Relevant files: `README.md`, `docs/STATUS.md`, `src/duo/diversity.py`, `tests/fixtures/`.
 
 1. Correct the README's "Models used in live runs" row: it still lists Copilot `gpt-5.4` without noting the later refusal, and omits `gpt-6-luna` and `gpt-5.3-codex`. Separate historical successes, current refusals, and current availability.

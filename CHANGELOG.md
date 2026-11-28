@@ -65,6 +65,11 @@
   require every committed fixture to be unchanged by the current recorder.
   A new `record_fixtures.py rejection` command records each CLI's
   unknown-option rejection, which is now replayed as a one-attempt failure.
+- The README's "Models used in live runs" row still listed Copilot `gpt-5.4`,
+  which Copilot has refused for the recorded account since 2026-10-21, and
+  omitted `gpt-6-luna` and `gpt-5.3-codex` (plan §5, step 1). It and the
+  STATUS model list now separate the models offered at the last probe
+  (2026-11-23), earlier successes, and refusals.
 
 ## 0.8.3 (2026-11-26)
 

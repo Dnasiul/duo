@@ -105,8 +105,21 @@ allowlisted with explicit additions, and the credential check is best-effort.
 | Copilot CLI | 1.0.x from 1.0.95 (1.0.105 live on Linux) | Other versions, only with `--allow-untested-cli` |
 | Backends | All four native/Copilot combinations (live runs on Linux and macOS) | — |
 | Document modes | `report`, `description`, `review` (live runs on Linux, native and through Copilot; on macOS, native) | Copilot on macOS and mixed backend pairs: fake-CLI tests only |
-| Models used in live runs | Native: `gpt-6-astra`, `claude-opus-5-5`, `claude-sonnet-5-5`; Copilot: `gpt-5.4`, `claude-sonnet-5.5` | Any other model your account offers; unknown names stop the run without retrying |
+| Models used in live runs | Native: `gpt-6-astra`, `claude-opus-5-5`, `claude-sonnet-5-5`. Copilot, offered when last probed (2026-11-23): `claude-sonnet-5.5`, `gpt-6-luna`, `gpt-5.3-codex`; earlier, `gpt-5.4`, refused since 2026-10-21 (see below) | Any other model your account offers; unknown or refused names stop the run without retrying |
 | Authentication | Codex and Claude Code: their own CLI login. Copilot: a token in `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`; a fine-grained token needs the "Copilot Requests" permission | Copilot's saved interactive login is not used |
+
+Copilot model availability depends on your plan, and Duo's records come from one
+account (Copilot Pro when probed). `gpt-5.4` and `claude-sonnet-5.5` succeeded in
+earlier live runs on Linux and macOS (2026-10-13). On 2026-10-21 Copilot refused
+`gpt-5.4`, `gpt-6-astra`, and `claude-opus-5.5` for that account ("Model ... from
+--model flag is not available"), and Duo stopped after one attempt without
+retrying. Probed on 2026-11-23 (Copilot CLI 1.0.114), the account was offered
+`claude-sonnet-5.5`, `gpt-6-luna`, and `gpt-5.3-codex`, and not `gpt-5.4`,
+`gpt-6-astra`, `claude-opus-5.5`, or `claude-fable-5-1`. From that date,
+`gpt-6-luna` with `claude-sonnet-5.5` agreed in `run-0lh3gb8y` and
+`run-ue2o3av6`, and `gpt-5.3-codex` reviewed in a panel run (`run-eqyn9pdi`), all
+on Linux. Availability has not been probed since, and no Copilot run on macOS has
+used the models offered now.
 
 These live results predate the section 11 response contract: acceptance of the new
 required `findings` and `finding_updates` shape by native Codex, native Claude, and
@@ -339,8 +352,10 @@ The reverse combination works too: `--codex-backend copilot` with the default
 native Claude backend. Use `--copilot-bin` to select a specific Copilot executable.
 Model IDs and availability come from the chosen backend and your account; use
 Copilot's interactive `/model` command to inspect its catalog. Its IDs can differ
-from native CLI IDs (for example, `claude-opus-5.5` versus `claude-opus-5-5`);
-`gpt-5.4` and `claude-sonnet-5.5` have been verified through Copilot. When
+from native CLI IDs (for example, `claude-opus-5.5` versus `claude-opus-5-5`).
+`claude-sonnet-5.5`, `gpt-6-luna`, and `gpt-5.3-codex` have recent live runs
+through Copilot; `claude-opus-5.5`, used in the examples below, needs a plan that
+offers it (see [Compatibility](#compatibility)). When
 Copilot reports a model as unavailable, Duo stops after the first attempt and
 names the model instead of retrying.
 GitHub documents explicit model selection in the
