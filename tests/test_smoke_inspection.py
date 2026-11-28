@@ -1,6 +1,8 @@
 """Smoke reporting distinguishes explicit denials from ordinary tool failures."""
 import importlib.util
 import json
+import shlex
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -324,3 +326,111 @@ class SmokeConfinementEvidenceTests(unittest.TestCase):
         outcomes = {record['agent']: record['outcomes'] for record in evidence.records}
         self.assertEqual(outcomes['claude']['home directory'], 'denied (tool: Read)')
         self.assertEqual(outcomes['codex']['home directory'], 'not attempted')
+
+
+class SmokeLoginShellTests(unittest.TestCase):
+    """--login-shell plants bash and zsh startup files and credits only the shell that ran."""
+
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('smoke_inspection', ROOT / 'scripts/smoke_inspection.py')
+        self.smoke = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.smoke)
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.home = Path(scratch.name)
+        self.rows = self.smoke.plant_login_files(self.home, 'abc')
+
+    def name(self, file, token=False):
+        stem = file.lstrip('.').upper()
+        return f'DUO_SMOKE_{stem}_TOKEN_abc' if token else f'DUO_SMOKE_{stem}_abc'
+
+    def stream(self, shell, options, present, *, exit_code=0, completed=True):
+        command = shlex.join([shell, *options, self.smoke.LOGIN_SHELL_COMMAND])
+        output = ''.join(f'{name}=x\n' for name in present)
+        events = [{'type': 'item.completed', 'item': {
+            'id': 'item_1', 'type': 'command_execution', 'command': command,
+            'aggregated_output': output, 'exit_code': exit_code}}]
+        if completed:
+            events.append({'type': 'turn.completed'})
+        return ''.join(json.dumps(event) + '\n' for event in events)
+
+    def test_bash_and_zsh_startup_files_are_planted(self):
+        files = {path.name: path.read_text() for path in self.home.iterdir()}
+        self.assertEqual(set(files), {'.bash_profile', '.bashrc', '.zprofile', '.zshenv'})
+        for file in ('.bash_profile', '.zprofile'):  # login files carry a credential-like name too
+            self.assertIn(f'export {self.name(file)}={file}\n', files[file])
+            self.assertIn(f'export {self.name(file, token=True)}={file}\n', files[file])
+        for file in ('.bashrc', '.zshenv'):
+            self.assertEqual(files[file], f'export {self.name(file)}={file}\n')
+        roles = {(shell, file): role for shell, file, role, _ in self.rows}
+        self.assertEqual(roles, {('bash', '.bash_profile'): 'login', ('bash', '.bashrc'): 'non-login',
+                                 ('zsh', '.zprofile'): 'login', ('zsh', '.zshenv'): 'every shell'})
+        for *_, name in self.rows:  # the probe's grep must see every sentinel
+            self.assertTrue(name.startswith('DUO_SMOKE'))
+
+    def test_non_login_zsh_passes_and_reports_zshenv_as_informational(self):
+        stdout = self.stream('/bin/zsh', ['-c'], [self.name('.zshenv')])
+        lines = self.smoke.login_shell_outcome(stdout, 0, self.rows)
+        self.assertIn('codex login-shell: executed shell: zsh', lines)
+        self.assertIn(f'codex login-shell: {self.name(".zprofile")} [.zprofile]: absent', lines)
+        self.assertIn(f'codex login-shell: {self.name(".zshenv")} [.zshenv]: present '
+                      '(informational; every zsh reads .zshenv)', lines)
+        self.assertIn(f'codex login-shell: {self.name(".bash_profile")} [.bash_profile]: '
+                      'absent (bash did not run)', lines)
+        self.assertTrue(any('(non-login (-c))' in line for line in lines))
+
+    def test_bash_from_another_path_is_recognized(self):
+        stdout = self.stream('/opt/homebrew/bin/bash', ['-c'], [self.name('.bashrc')])
+        lines = self.smoke.login_shell_outcome(stdout, 0, self.rows)
+        self.assertIn('codex login-shell: executed shell: bash', lines)
+        self.assertIn(f'codex login-shell: {self.name(".zshenv")} [.zshenv]: absent (zsh did not run)',
+                      lines)
+
+    def test_a_login_profile_sentinel_fails_for_either_shell(self):
+        for shell, file in (('/bin/zsh', '.zprofile'), ('/bin/bash', '.bash_profile')):
+            with self.subTest(file=file):
+                stdout = self.stream(shell, ['-lc'], [self.name(file, token=True)])
+                with self.assertRaisesRegex(RuntimeError, rf'reached command environment: .*\({file}\)'):
+                    self.smoke.login_shell_outcome(stdout, 0, self.rows)
+
+    def test_other_shells_and_incomplete_turns_are_inconclusive(self):
+        stdout = self.stream('/bin/sh', ['-c'], [])
+        with self.assertRaisesRegex(RuntimeError, 'inconclusive; executed shell sh has no planted files'):
+            self.smoke.login_shell_outcome(stdout, 0, self.rows)
+        stdout = self.stream('/bin/zsh', ['-c'], [], exit_code=1)
+        with self.assertRaisesRegex(RuntimeError, 'inconclusive; requested command did not complete'):
+            self.smoke.login_shell_outcome(stdout, 0, self.rows)
+        stdout = self.stream('/bin/zsh', ['-c'], [], completed=False)
+        with self.assertRaisesRegex(RuntimeError, 'turn did not complete successfully'):
+            self.smoke.login_shell_outcome(stdout, 0, self.rows)
+
+    def test_probe_uses_the_planted_home_without_zdotdir(self):
+        import argparse
+        import io
+        import os
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        from duo.models import Config
+
+        seen = {}
+
+        def run(argv, *, input, capture_output, text, cwd, env, timeout):
+            home = Path(env['HOME'])
+            seen.update(argv=argv, env=env, files=sorted(path.name for path in home.iterdir()))
+            zshenv = (home / '.zshenv').read_text().split('=', 1)[0].removeprefix('export ')
+            stdout = self.stream('/bin/zsh', ['-c'], [zshenv])
+            return subprocess.CompletedProcess(argv, 0, stdout, '')
+
+        with tempfile.TemporaryDirectory() as repo:
+            config = Config(Path(repo), 'gpt-x', 'claude-x')
+            evidence = self.smoke.Evidence(None, Path(repo), argparse.Namespace())
+            output = io.StringIO()
+            with patch.dict(os.environ, {'ZDOTDIR': '/elsewhere', 'CODEX_HOME': repo}), \
+                    patch.object(self.smoke.subprocess, 'run', run), redirect_stdout(output):
+                self.smoke.login_shell(config, evidence)
+        self.assertEqual(seen['files'], ['.bash_profile', '.bashrc', '.zprofile', '.zshenv'])
+        self.assertNotIn('ZDOTDIR', seen['env'])
+        self.assertIn(('-c', 'allow_login_shell=false'), zip(seen['argv'], seen['argv'][1:]))
+        self.assertIn('codex login-shell: executed shell: zsh', output.getvalue())
+        record, = evidence.records
+        self.assertEqual((record['probe'], record['status']), ('login-shell', {'exit_code': 0}))

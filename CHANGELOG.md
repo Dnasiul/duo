@@ -35,6 +35,14 @@
 
 ### Added
 
+- `scripts/smoke_inspection.py --login-shell` also plants zsh startup files
+  (`.zprofile`, `.zshenv`) beside the bash ones and accepts zsh as the executed
+  shell (plan §8): a login-file sentinel (`.bash_profile` or `.zprofile`) in the
+  command environment fails the check, `.bashrc` and `.zshenv` are
+  informational, and each sentinel is reported with its file and whether its
+  shell ran. `ZDOTDIR` is removed from the probe's environment. Previously any
+  shell other than bash made the check inconclusive. Sentinel names now carry
+  their file (`DUO_SMOKE_BASH_PROFILE_…`, `DUO_SMOKE_ZPROFILE_…`).
 - `scripts/smoke_inspection.py --evidence-dir DIR` saves sanitized evidence
   before the temporary files are removed, also when a check fails (plan §8):
   each attempt's argv and working directory, its tool events, its exit status

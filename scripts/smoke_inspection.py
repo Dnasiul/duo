@@ -11,8 +11,9 @@ appears in the response or in that call's audit files. --search-confinement does
 the same for the search tools (two more model calls): each outside directory holds
 a file whose name and content carry separate random phrases, so listing and
 content search are reported apart. --login-shell adds one authenticated model
-call (native Codex only) to check that disposable login-profile sentinels stay
-out of the command environment; the .bashrc sentinel is informational only.
+call (native Codex only) to check that disposable login-profile sentinels
+(.bash_profile, .zprofile) stay out of the command environment; the executed shell
+must be bash or zsh, and the .bashrc and .zshenv sentinels are informational only.
 
 --evidence-dir DIR saves sanitized evidence before temporary files are removed,
 also when a check fails: each attempt's invocation, its tool events, its exit
@@ -161,18 +162,38 @@ def review(adapter: CLIAdapter, config: Config, store: RunStore, evidence: 'Evid
     return result, records
 
 
+# Startup files planted for --login-shell, by shell: (file, role). A login file's
+# sentinels must stay out of the command environment; the others are informational.
+LOGIN_SHELL_FILES = {
+    'bash': (('.bash_profile', 'login'), ('.bashrc', 'non-login')),
+    'zsh': (('.zprofile', 'login'), ('.zshenv', 'every shell')),
+}
+LOGIN_SHELL_COMMAND = "env | grep '^DUO_SMOKE' | sort"
+
+
+def plant_login_files(home: Path, suffix: str) -> list[tuple[str, str, str, str]]:
+    """Write bash and zsh startup files; return (shell, file, role, variable) rows."""
+    rows = []
+    for shell, files in LOGIN_SHELL_FILES.items():
+        for file, role in files:
+            stem = file.lstrip('.').upper()
+            names = [f'DUO_SMOKE_{stem}_{suffix}']
+            if role == 'login':  # a name that looks like a credential, as in the probe
+                names.append(f'DUO_SMOKE_{stem}_TOKEN_{suffix}')
+            (home / file).write_text(''.join(f'export {name}={file}\n' for name in names))
+            rows += [(shell, file, role, name) for name in names]
+    return rows
+
+
 def login_shell(config: Config, evidence: 'Evidence') -> None:
     """Check plan §7.2 using Duo's policy functions and native exec argv shape."""
     codex_home = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')).resolve()
-    suffix = secrets.token_hex(8)
-    profile = (f'DUO_SMOKE_PROFILE_{suffix}', f'DUO_SMOKE_PROFILE_TOKEN_{suffix}')
-    nonlogin = f'DUO_SMOKE_NONLOGIN_{suffix}'
     with tempfile.TemporaryDirectory(prefix='duo-login-shell-smoke-') as directory:
         home = Path(directory)
-        (home / '.bash_profile').write_text(''.join(f'export {name}=profile\n' for name in profile))
-        (home / '.bashrc').write_text(f'export {nonlogin}=bashrc\n')
+        rows = plant_login_files(home, secrets.token_hex(8))
         env = reviewer_environment('codex', config.pass_env)
         env.update(HOME=str(home), CODEX_HOME=str(codex_home))
+        env.pop('ZDOTDIR', None)  # zsh would read its files from there instead of HOME
         # As in the investigation probe, omit the review schema for a verbatim reply.
         argv = [config.codex_bin, '--no-daemon', 'exec', '--sandbox', 'read-only',
                 '--ignore-user-config', '--ignore-rules', '--strict-config',
@@ -183,9 +204,8 @@ def login_shell(config: Config, evidence: 'Evidence') -> None:
         if config.skip_git_repo_check:
             argv.append('--skip-git-repo-check')
         argv.append('-')
-        requested_command = "env | grep '^DUO_SMOKE' | sort"
         prompt = ("Run exactly this shell command and no other command: "
-                  f"{requested_command}\n"
+                  f"{LOGIN_SHELL_COMMAND}\n"
                   "Then reply with the command's output verbatim.")
         try:
             proc = subprocess.run(argv, input=prompt, capture_output=True, text=True,
@@ -195,10 +215,17 @@ def login_shell(config: Config, evidence: 'Evidence') -> None:
             raise RuntimeError('codex login-shell: invocation did not complete') from None
         evidence.command('login-shell', argv, config.repo, sorted(env),
                          returncode=proc.returncode, stdout=proc.stdout)
+    for line in login_shell_outcome(proc.stdout, proc.returncode, rows):
+        print(line)
+
+
+def login_shell_outcome(stdout: str, returncode: int,
+                        rows: list[tuple[str, str, str, str]]) -> list[str]:
+    """Report lines for one login-shell probe; raise when it fails or is inconclusive."""
     present = set()
     completed = failed = False
     completed_commands = []
-    for line in proc.stdout.splitlines():
+    for line in stdout.splitlines():
         try:
             event = json.loads(line)
         except ValueError:
@@ -214,6 +241,7 @@ def login_shell(config: Config, evidence: 'Evidence') -> None:
                            if output_line.startswith('DUO_SMOKE'))
             if event.get('type') == 'item.completed' and item.get('exit_code') == 0:
                 completed_commands.append(item.get('command') or '')
+    lines = []
     requested_shells = []
     for command in completed_commands:
         try:
@@ -226,21 +254,35 @@ def login_shell(config: Config, evidence: 'Evidence') -> None:
                          for option in options)
         form = ('login (-l/-lc/--login)' if login_form
                 else 'non-login (-c)' if '-c' in options else 'unknown form')
-        print(f'codex login-shell: command: {command} ({form})')
-        if shell_argv and requested_command in shell_argv[-1]:
+        lines.append(f'codex login-shell: command: {command} ({form})')
+        if shell_argv and LOGIN_SHELL_COMMAND in shell_argv[-1]:
             requested_shells.append(Path(shell_argv[0]).name)
-    if any(name in present for name in profile):
-        raise RuntimeError('codex login-shell: login-profile sentinel reached command environment')
-    if proc.returncode or failed or not completed:
+    leaked = [f'{name} ({file})' for _, file, role, name in rows
+              if role == 'login' and name in present]
+    if leaked:
+        raise RuntimeError('codex login-shell: login-profile sentinel reached command environment: '
+                           + ', '.join(leaked))
+    if returncode or failed or not completed:
         raise RuntimeError('codex login-shell: turn did not complete successfully')
     if not requested_shells:
         raise RuntimeError('codex login-shell: inconclusive; requested command did not complete successfully')
-    if any(shell != 'bash' for shell in requested_shells):
-        raise RuntimeError('codex login-shell: inconclusive; executed shell is not bash; planted files are for bash')
-    for name in (*profile, nonlogin):
+    unknown = sorted(set(requested_shells) - set(LOGIN_SHELL_FILES))
+    if unknown:
+        raise RuntimeError(f'codex login-shell: inconclusive; executed shell {", ".join(unknown)} '
+                           f'has no planted files (only {", ".join(LOGIN_SHELL_FILES)})')
+    executed = sorted(set(requested_shells))
+    lines.append(f'codex login-shell: executed shell: {", ".join(executed)}')
+    for shell, file, role, name in rows:
         state = 'present' if name in present else 'absent'
-        note = ' (informational; .bashrc presence expected)' if name == nonlogin else ''
-        print(f'codex login-shell: {name}: {state}{note}')
+        if shell not in executed:
+            note = f' ({shell} did not run)'
+        elif role == 'login':
+            note = ''
+        else:
+            reader = 'every' if role == 'every shell' else f'a {role}'
+            note = f' (informational; {reader} {shell} reads {file})'
+        lines.append(f'codex login-shell: {name} [{file}]: {state}{note}')
+    return lines
 
 
 def confinement(adapter: CLIAdapter, config: Config, store: RunStore, root: Path,
